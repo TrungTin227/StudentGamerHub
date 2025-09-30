@@ -1,0 +1,99 @@
+﻿using FluentValidation;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using System.Reflection;
+
+namespace Services.Common.DependencyInjection
+{
+    public static class DependencyInjection
+    {
+        public static IServiceCollection AddApplicationServices(
+            this IServiceCollection services,
+            IConfiguration? configuration = null)
+        {
+            var asm = typeof(DependencyInjection).Assembly;
+
+            // 1) Core
+            services.AddMemoryCache();
+            services.AddHttpClient();
+
+            // 2) Options
+            if (configuration is not null)
+            {
+                services.AddOptions<JwtSettings>()
+                        .Bind(configuration.GetSection(JwtSettings.SectionName))
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+
+                services.AddOptions<AuthLinkOptions>()
+                        .Bind(configuration.GetSection("AuthLinks"))
+                        .Validate(o => !string.IsNullOrWhiteSpace(o.PublicBaseUrl), "AuthLinks:PublicBaseUrl is required")
+                        .ValidateOnStart();
+                services.AddOptions<GoogleAuthOptions>()
+                        .Bind(configuration.GetSection(GoogleAuthOptions.SectionName))
+                        .Validate(o => !string.IsNullOrWhiteSpace(o.ClientId), "GoogleAuth:ClientId is required")
+                        .ValidateOnStart();
+                // KHÔNG đăng ký singleton .Value để giữ hot-reload
+            }
+
+            // 3) Utils
+            services.AddSingleton<ITimeZoneService, TimeZoneService>();
+            services.AddScoped<IAuthEmailFactory, AuthEmailFactory>();
+
+            // 4) Validators / AutoMapper
+            services.AddValidatorsFromAssemblies(
+                new[]
+                {
+                        asm,                                     // Services assembly
+                        typeof(LoginRequestValidator).Assembly   // DTOs.Auth.Validation assembly
+                },
+                includeInternalTypes: true
+            );
+            // services.AddAutoMapper(asm);
+
+            // 5) Convention registrations
+            RegisterCrudServices(services, asm);
+            RegisterServiceInterfacesByConvention(services, asm);
+
+            return services;
+        }
+
+        private static void RegisterCrudServices(IServiceCollection services, Assembly asm)
+        {
+            var crudOpenGeneric = typeof(ICrudService<,,,>);
+            var impls = asm.GetTypes().Where(t => t.IsClass && !t.IsAbstract);
+
+            foreach (var impl in impls)
+            {
+                var crudIfaces = impl.GetInterfaces()
+                    .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == crudOpenGeneric);
+
+                foreach (var i in crudIfaces)
+                    services.AddScoped(i, impl);
+            }
+        }
+
+        private static void RegisterServiceInterfacesByConvention(IServiceCollection services, Assembly asm)
+        {
+            var impls = asm.GetTypes()
+                .Where(t => t.IsClass && !t.IsAbstract && t.Name.EndsWith("Service", StringComparison.Ordinal));
+
+            foreach (var impl in impls)
+            {
+                var interfaces = impl.GetInterfaces()
+                    .Where(i => i.Name.EndsWith("Service", StringComparison.Ordinal));
+
+                var lifetime =
+                    typeof(ISingletonService).IsAssignableFrom(impl) ? ServiceLifetime.Singleton :
+                    typeof(ITransientService).IsAssignableFrom(impl) ? ServiceLifetime.Transient :
+                    ServiceLifetime.Scoped;
+
+                foreach (var itf in interfaces)
+                {
+                    if (!services.Any(d => d.ServiceType == itf))
+                        services.Add(new ServiceDescriptor(itf, impl, lifetime));
+                }
+            }
+        }
+    }
+}
