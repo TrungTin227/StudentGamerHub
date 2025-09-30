@@ -146,13 +146,13 @@ public sealed class AuthController : ControllerBase
         return this.ToActionResult(await _users.GetByIdAsync(id, ct));
     }
 
-    // PUT /api/auth/me — cập nhật hồ sơ chính mình
+    // PUT /api/auth/me — cập nhật hồ sơ chính mình (chỉ các trường được phép)
     [Authorize]
     [HttpPut("me")]
-    public async Task<ActionResult> UpdateMe([FromBody] UpdateUserRequest req, CancellationToken ct)
+    public async Task<ActionResult> UpdateMe([FromBody] UpdateUserSelfRequest req, CancellationToken ct)
     {
         var id = GetUserIdOrThrow();
-        return this.ToActionResult(await _users.UpdateAsync(id, req, ct));
+        return this.ToActionResult(await _users.UpdateSelfAsync(id, req, ct));
     }
 
     // POST /api/auth/me/password:change — đổi mật khẩu chính mình

@@ -21,6 +21,7 @@ public sealed class UsersService : IUserService
     private readonly IValidator<CreateUserAdminRequest> _createVal;
     private readonly IValidator<RegisterRequest> _registerVal;
     private readonly IValidator<UpdateUserRequest> _updateVal;
+    private readonly IValidator<UpdateUserSelfRequest> _updateSelfVal;
     private readonly IValidator<SetLockoutRequest> _lockoutVal;
     private readonly IValidator<ReplaceRolesRequest> _replaceRolesVal;
     private readonly IValidator<ModifyRolesRequest> _modifyRolesVal;
@@ -45,6 +46,7 @@ public sealed class UsersService : IUserService
         IValidator<CreateUserAdminRequest> createVal,
         IValidator<RegisterRequest> registerVal,
         IValidator<UpdateUserRequest> updateVal,
+        IValidator<UpdateUserSelfRequest> updateSelfVal,
         IValidator<SetLockoutRequest> lockoutVal,
         IValidator<ReplaceRolesRequest> replaceRolesVal,
         IValidator<ModifyRolesRequest> modifyRolesVal,
@@ -69,6 +71,7 @@ public sealed class UsersService : IUserService
         _createVal = createVal;
         _registerVal = registerVal;
         _updateVal = updateVal;
+        _updateSelfVal = updateSelfVal;
         _lockoutVal = lockoutVal;
         _replaceRolesVal = replaceRolesVal;
         _modifyRolesVal = modifyRolesVal;
@@ -252,10 +255,47 @@ public sealed class UsersService : IUserService
                 if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
 
                 user.FullName = req.FullName?.Trim();
+                user.Gender = req.Gender ?? user.Gender;
+                user.University = req.University?.Trim();
+                user.Level = req.Level ?? user.Level;
                 user.PhoneNumber = req.PhoneNumber?.Trim();
+                user.AvatarUrl = req.AvatarUrl?.Trim();
+                user.CoverUrl = req.CoverUrl?.Trim();
+                user.EmailConfirmed = req.EmailConfirmed ?? user.EmailConfirmed;
 
                 var update = await _users.UpdateAsync(user);
-                return update.ToResult("Update user failed");
+                if (!update.Succeeded) return update.ToResult("Update user failed");
+
+                // Handle role replacement if provided
+                if (req.ReplaceRoles is not null)
+                {
+                    var replaceRequest = new ReplaceRolesRequest { Roles = req.ReplaceRoles };
+                    var roleResult = await ReplaceRolesAsync(id, replaceRequest, ct);
+                    if (!roleResult.IsSuccess) return roleResult;
+                }
+
+                return Result.Success();
+            });
+    }
+
+    public async Task<Result> UpdateSelfAsync(Guid id, UpdateUserSelfRequest req, CancellationToken ct = default)
+    {
+        return await _updateSelfVal.ValidateToResultAsync(req, ct)
+            .BindAsync(async _ =>
+            {
+                var user = await _users.FindByIdAsync(id.ToString());
+                if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
+
+                // Only update allowed fields for self-service
+                user.FullName = req.FullName?.Trim();
+                user.Gender = req.Gender ?? user.Gender;
+                user.University = req.University?.Trim();
+                user.PhoneNumber = req.PhoneNumber?.Trim();
+                user.AvatarUrl = req.AvatarUrl?.Trim();
+                user.CoverUrl = req.CoverUrl?.Trim();
+
+                var update = await _users.UpdateAsync(user);
+                return update.ToResult("Update user profile failed");
             });
     }
 

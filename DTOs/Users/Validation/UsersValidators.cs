@@ -102,6 +102,27 @@ namespace DTOs.Users.Validation
         }
     }
 
+    public sealed class UpdateUserSelfRequestValidator : AbstractValidator<UpdateUserSelfRequest>
+    {
+        public UpdateUserSelfRequestValidator()
+        {
+            When(x => !string.IsNullOrWhiteSpace(x.FullName), () =>
+                RuleFor(x => x.FullName!).MaximumLength(256));
+
+            When(x => !string.IsNullOrWhiteSpace(x.University), () =>
+                RuleFor(x => x.University!).MaximumLength(256));
+
+            When(x => !string.IsNullOrWhiteSpace(x.PhoneNumber), () =>
+                RuleFor(x => x.PhoneNumber!).Must(ValidationHelpers.IsPhoneLike).MaximumLength(32));
+
+            When(x => !string.IsNullOrWhiteSpace(x.AvatarUrl), () =>
+                RuleFor(x => x.AvatarUrl!).Must(ValidationHelpers.BeValidUrl));
+
+            When(x => !string.IsNullOrWhiteSpace(x.CoverUrl), () =>
+                RuleFor(x => x.CoverUrl!).Must(ValidationHelpers.BeValidUrl));
+        }
+    }
+
     // ---------- Roles ----------
     public sealed class ReplaceRolesRequestValidator : AbstractValidator<ReplaceRolesRequest>
     {

@@ -41,6 +41,16 @@ namespace DTOs.Users.Requests
         string[]? ReplaceRoles
     );
 
+    // Cập nhật hồ sơ cá nhân (self-service) - loại bỏ các trường chỉ admin mới được sửa
+    public sealed record UpdateUserSelfRequest(
+        [MaxLength(256)] string? FullName,
+        Gender? Gender,
+        [MaxLength(256)] string? University,
+        [Phone] string? PhoneNumber,
+        string? AvatarUrl,
+        string? CoverUrl
+    );
+
     public sealed record ChangePasswordRequest([Required] string CurrentPassword,
                                                [Required, MinLength(6)] string NewPassword);
 

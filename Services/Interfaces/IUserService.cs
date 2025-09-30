@@ -9,6 +9,7 @@ public interface IUserService
     // ------------ WRITE ------------
     Task<Result<UserDetailDto>> CreateAsync(CreateUserAdminRequest req, CancellationToken ct = default);
     Task<Result> UpdateAsync(Guid id, UpdateUserRequest req, CancellationToken ct = default);
+    Task<Result> UpdateSelfAsync(Guid id, UpdateUserSelfRequest req, CancellationToken ct = default);
     Task<Result<UserDetailDto>> RegisterAsync(RegisterRequest req, CancellationToken ct = default);
 
 
