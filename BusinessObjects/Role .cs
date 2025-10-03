@@ -18,7 +18,5 @@ public sealed class Role : IdentityRole<Guid>, IAuditable, ISoftDelete
     public DateTime? DeletedAtUtc { get; set; }
     public Guid? DeletedBy { get; set; }
 
-    // Navs
-    public ICollection<RoleClaim> RoleClaims { get; set; } = new HashSet<RoleClaim>();
-    public ICollection<UserRole> UserRoles { get; set; } = new HashSet<UserRole>();
+    
 }

@@ -62,7 +62,7 @@ namespace Repositories.Implements
         {
             IQueryable<Role> q = _dbSet;
             if (asNoTracking) q = q.AsNoTracking();
-            return await q.Include(r => r.RoleClaims)
+            return await q
                           .FirstOrDefaultAsync(r => r.Id == id, ct);
         }
 
@@ -70,7 +70,7 @@ namespace Repositories.Implements
         {
             IQueryable<Role> q = _dbSet;
             if (asNoTracking) q = q.AsNoTracking();
-            return await q.Include(r => r.UserRoles)
+            return await q
                           .FirstOrDefaultAsync(r => r.Id == id, ct);
         }
 

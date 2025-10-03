@@ -5,5 +5,6 @@ global using BusinessObjects.Common.Results;
 global using DTOs.Roles.Filters;
 global using Repositories.Interfaces;
 global using Repositories.Persistence;
+global using Repositories.WorkSeeds.Extensions;
 global using Repositories.WorkSeeds.Implements;
 global using Repositories.WorkSeeds.Interfaces;
