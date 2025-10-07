@@ -1,4 +1,6 @@
-﻿var builder = WebApplication.CreateBuilder(args);
+using WebAPI.Hubs;
+
+var builder = WebApplication.CreateBuilder(args);
 
 builder.AddObservability();
 // Data Protection: bắt buộc khi dùng AddDefaultTokenProviders()
@@ -27,5 +29,7 @@ var app = builder.Build();
 // UseWebApi xử lý các vấn đề của khung sườn API (lỗi, OpenAPI, HTTPS, CORS, Auth, Controllers).
 app.UseOperationalPipeline(app.Environment);
 app.UseWebApi(app.Environment);
+
+app.MapHub<PresenceHub>("/ws/presence");
 
 app.Run();

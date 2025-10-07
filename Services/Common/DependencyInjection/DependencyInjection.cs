@@ -1,6 +1,7 @@
 ﻿using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Services.Presence;
 using System.Reflection;
 
 namespace Services.Common.DependencyInjection
@@ -32,6 +33,11 @@ namespace Services.Common.DependencyInjection
                 services.AddOptions<GoogleAuthOptions>()
                         .Bind(configuration.GetSection(GoogleAuthOptions.SectionName))
                         .Validate(o => !string.IsNullOrWhiteSpace(o.ClientId), "GoogleAuth:ClientId is required")
+                        .ValidateOnStart();
+                services.AddOptions<PresenceOptions>()
+                        .Bind(configuration.GetSection(PresenceOptions.SectionName))
+                        .Validate(o => o.TtlSeconds > 0, "Presence:TtlSeconds must be positive")
+                        .Validate(o => o.HeartbeatSeconds > 0, "Presence:HeartbeatSeconds must be positive")
                         .ValidateOnStart();
                 // KHÔNG đăng ký singleton .Value để giữ hot-reload
             }

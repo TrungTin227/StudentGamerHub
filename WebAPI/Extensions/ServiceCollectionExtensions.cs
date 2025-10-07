@@ -1,5 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
-
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using StackExchange.Redis;
 
 namespace WebApi.Extensions;
 
@@ -12,6 +13,24 @@ public static class ServiceCollectionExtensions
             {
                 o.JsonSerializerOptions.PropertyNamingPolicy = null;
             });
+
+        services.AddSignalR();
+
+        services.TryAddSingleton<IConnectionMultiplexer>(_ =>
+        {
+            var connectionString = configuration.GetValue<string>("Redis:ConnectionString")
+                                   ?? configuration["Redis__ConnectionString"];
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException("Redis:ConnectionString (Redis__ConnectionString) is required");
+            }
+
+            var options = ConfigurationOptions.Parse(connectionString);
+            options.AbortOnConnectFail = false;
+
+            return ConnectionMultiplexer.Connect(options);
+        });
 
         services.AddOpenApi(options =>
         {
