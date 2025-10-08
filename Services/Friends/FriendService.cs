@@ -218,8 +218,9 @@ public sealed class FriendService : IFriendService
     }
 
     public async Task<Result<CursorPageResult<FriendDto>>> ListAsync(
-        Guid requesterId, 
-        CursorRequest request, 
+        Guid requesterId,
+        FriendsFilter filter,
+        CursorRequest request,
         CancellationToken ct = default)
     {
         if (requesterId == Guid.Empty)
@@ -228,41 +229,29 @@ public sealed class FriendService : IFriendService
                 new Error(Error.Codes.Validation, "Requester id is required."));
         }
 
+        if (filter != FriendsFilter.All)
+        {
+            var filterName = filter.ToString().ToLowerInvariant();
+            return Result<CursorPageResult<FriendDto>>.Failure(
+                new Error(Error.Codes.Validation, $"Filter '{filterName}' is not supported."));
+        }
+
         try
         {
             var query = _friendLinks
                 .GetQueryable(asNoTracking: true)
-                .Where(link => link.Status == FriendStatus.Accepted && 
-                              (link.SenderId == requesterId || link.RecipientId == requesterId))
-                .Select(link => new
-                {
-                    link.Id,
-                    link.SenderId,
-                    link.RecipientId,
-                    link.RespondedAt,
-                    Sender = link.Sender!,
-                    Recipient = link.Recipient!
-                });
+                .Include(link => link.Sender)
+                .Include(link => link.Recipient)
+                .Where(link => link.Status == FriendStatus.Accepted &&
+                              (link.SenderId == requesterId || link.RecipientId == requesterId));
 
             var result = await query.ToCursorPageAsync(
-                request, 
-                x => x.Id, 
+                request,
+                link => link.Id,
                 ct).ConfigureAwait(false);
 
             var items = result.Items
-                .Select(item =>
-                {
-                    var friend = item.SenderId == requesterId ? item.Recipient : item.Sender;
-                    return new FriendDto(
-                        Id: item.Id,
-                        User: new UserBriefDto(
-                            Id: friend.Id,
-                            UserName: friend.UserName ?? string.Empty,
-                            AvatarUrl: friend.AvatarUrl
-                        ),
-                        BecameFriendsAtUtc: item.RespondedAt?.UtcDateTime
-                    );
-                })
+                .Select(link => link.ToFriendDtoFor(requesterId))
                 .ToList();
 
             var pagedResult = new CursorPageResult<FriendDto>(

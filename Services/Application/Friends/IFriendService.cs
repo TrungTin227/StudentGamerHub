@@ -24,6 +24,7 @@ public interface IFriendService
 
     Task<BusinessObjects.Common.Results.Result<BusinessObjects.Common.Pagination.CursorPageResult<DTOs.Friends.FriendDto>>> ListAsync(
         Guid requesterId,
+        FriendsFilter filter,
         BusinessObjects.Common.Pagination.CursorRequest request,
         CancellationToken ct = default);
 }
