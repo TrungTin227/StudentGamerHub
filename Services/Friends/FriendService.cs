@@ -1,4 +1,7 @@
 using Application.Friends;
+using BusinessObjects.Common.Pagination;
+using BusinessObjects.Common.Results;
+using DTOs.Friends;
 using Microsoft.EntityFrameworkCore;
 using Services.Common.Extensions;
 
@@ -125,6 +128,159 @@ public sealed class FriendService : IFriendService
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result.Success();
         }, ct: ct);
+    }
+
+    public Task<Result> DeclineAsync(Guid requesterId, Guid targetUserId, CancellationToken ct = default)
+    {
+        if (requesterId == Guid.Empty)
+        {
+            return Task.FromResult(Result.Failure(new Error(Error.Codes.Validation, "Requester id is required.")));
+        }
+
+        if (targetUserId == Guid.Empty)
+        {
+            return Task.FromResult(Result.Failure(new Error(Error.Codes.Validation, "Target user id is required.")));
+        }
+
+        return _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            innerCt.ThrowIfCancellationRequested();
+
+            var (pairMin, pairMax) = NormalizePair(requesterId, targetUserId);
+
+            var link = await _friendLinks
+                .GetQueryable(asNoTracking: false)
+                .FirstOrDefaultAsync(
+                    x => x.PairMinUserId == pairMin && x.PairMaxUserId == pairMax,
+                    innerCt)
+                .ConfigureAwait(false);
+
+            if (link is null || link.Status != FriendStatus.Pending)
+            {
+                return Result.Failure(new Error(Error.Codes.NotFound, "Không tìm thấy lời mời kết bạn."));
+            }
+
+            if (link.RecipientId != requesterId)
+            {
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Chỉ người nhận mới có thể từ chối lời mời."));
+            }
+
+            link.Status = FriendStatus.Declined;
+            link.RespondedAt = TimeExtensions.UtcNowOffset();
+            link.UpdatedAtUtc = TimeExtensions.UtcNow();
+            link.UpdatedBy = requesterId;
+
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct);
+    }
+
+    public Task<Result> CancelAsync(Guid requesterId, Guid targetUserId, CancellationToken ct = default)
+    {
+        if (requesterId == Guid.Empty)
+        {
+            return Task.FromResult(Result.Failure(new Error(Error.Codes.Validation, "Requester id is required.")));
+        }
+
+        if (targetUserId == Guid.Empty)
+        {
+            return Task.FromResult(Result.Failure(new Error(Error.Codes.Validation, "Target user id is required.")));
+        }
+
+        return _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            innerCt.ThrowIfCancellationRequested();
+
+            var (pairMin, pairMax) = NormalizePair(requesterId, targetUserId);
+
+            var link = await _friendLinks
+                .GetQueryable(asNoTracking: false)
+                .FirstOrDefaultAsync(
+                    x => x.PairMinUserId == pairMin && x.PairMaxUserId == pairMax,
+                    innerCt)
+                .ConfigureAwait(false);
+
+            if (link is null || link.Status != FriendStatus.Pending)
+            {
+                return Result.Failure(new Error(Error.Codes.NotFound, "Không tìm thấy lời mời kết bạn."));
+            }
+
+            if (link.SenderId != requesterId)
+            {
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Chỉ người gửi mới có thể hủy lời mời."));
+            }
+
+            await _friendLinks.DeleteAsync(link.Id, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            return Result.Success();
+        }, ct: ct);
+    }
+
+    public async Task<Result<CursorPageResult<FriendDto>>> ListAsync(
+        Guid requesterId, 
+        CursorRequest request, 
+        CancellationToken ct = default)
+    {
+        if (requesterId == Guid.Empty)
+        {
+            return Result<CursorPageResult<FriendDto>>.Failure(
+                new Error(Error.Codes.Validation, "Requester id is required."));
+        }
+
+        try
+        {
+            var query = _friendLinks
+                .GetQueryable(asNoTracking: true)
+                .Where(link => link.Status == FriendStatus.Accepted && 
+                              (link.SenderId == requesterId || link.RecipientId == requesterId))
+                .Select(link => new
+                {
+                    link.Id,
+                    link.SenderId,
+                    link.RecipientId,
+                    link.RespondedAt,
+                    Sender = link.Sender!,
+                    Recipient = link.Recipient!
+                });
+
+            var result = await query.ToCursorPageAsync(
+                request, 
+                x => x.Id, 
+                ct).ConfigureAwait(false);
+
+            var items = result.Items
+                .Select(item =>
+                {
+                    var friend = item.SenderId == requesterId ? item.Recipient : item.Sender;
+                    return new FriendDto(
+                        Id: item.Id,
+                        User: new UserBriefDto(
+                            Id: friend.Id,
+                            UserName: friend.UserName ?? string.Empty,
+                            AvatarUrl: friend.AvatarUrl
+                        ),
+                        BecameFriendsAtUtc: item.RespondedAt?.UtcDateTime
+                    );
+                })
+                .ToList();
+
+            var pagedResult = new CursorPageResult<FriendDto>(
+                Items: items,
+                NextCursor: result.NextCursor,
+                PrevCursor: result.PrevCursor,
+                Size: result.Size,
+                Sort: result.Sort,
+                Desc: result.Desc
+            );
+
+            return Result<CursorPageResult<FriendDto>>.Success(pagedResult);
+        }
+        catch (Exception ex)
+        {
+            return Result<CursorPageResult<FriendDto>>.Failure(
+                new Error(Error.Codes.Unexpected, $"Lỗi khi lấy danh sách bạn bè: {ex.Message}"));
+        }
     }
 
     private async Task<Result> HandleExistingInviteAsync(

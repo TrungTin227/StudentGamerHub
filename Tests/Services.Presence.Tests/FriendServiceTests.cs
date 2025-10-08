@@ -9,6 +9,7 @@ using Repositories.Persistence;
 using Repositories.WorkSeeds.Implements;
 using Repositories.WorkSeeds.Interfaces;
 using Services.Friends;
+using Xunit;
 
 namespace Services.Presence.Tests;
 

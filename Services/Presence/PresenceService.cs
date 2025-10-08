@@ -1,7 +1,7 @@
 using Application.Friends;
-using BusinessObjects.Common.Results;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
+using BusinessObjects.Common.Results;
 
 namespace Services.Presence;
 
@@ -16,14 +16,14 @@ public sealed class PresenceService : IPresenceService
         _options = options.Value;
     }
 
-    public Task<Result> HeartbeatAsync(Guid userId, CancellationToken ct = default)
+    public async Task<Result> HeartbeatAsync(Guid userId, CancellationToken ct = default)
     {
         if (userId == Guid.Empty)
         {
-            return Task.FromResult(Result.Failure(new Error(Error.Codes.Validation, "User id is required")));
+            return Result.Failure(new Error(Error.Codes.Validation, "User id is required"));
         }
 
-        return ResultExtensions
+        var result = await ResultExtensions
             .TryAsync(async () =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -40,7 +40,13 @@ public sealed class PresenceService : IPresenceService
 
                 return true;
             })
-            .ToResult();
+            .ConfigureAwait(false);
+
+        if (result.IsSuccess)
+        {
+            return Result.Success();
+        }
+        return Result.Failure(result.Error);
     }
 
     public Task<Result<bool>> IsOnlineAsync(Guid userId, CancellationToken ct = default)
@@ -91,7 +97,7 @@ public sealed class PresenceService : IPresenceService
                 tasks[id] = batch.KeyExistsAsync(key);
             }
 
-            await batch.ExecuteAsync().ConfigureAwait(false);
+            batch.Execute();
             await Task.WhenAll(tasks.Values).ConfigureAwait(false);
 
             var result = tasks.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Result);

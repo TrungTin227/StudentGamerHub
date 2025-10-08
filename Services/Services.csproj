@@ -12,6 +12,7 @@
 		<PackageReference Include="Microsoft.AspNetCore.Identity.UI" Version="9.0.9" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="9.0.9" />
 		<PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.9" />
+		<PackageReference Include="StackExchange.Redis" Version="2.9.25" />
 		<PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
 	</ItemGroup>
   <ItemGroup>

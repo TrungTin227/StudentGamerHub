@@ -1,10 +1,8 @@
-using Application.Friends;
-using BusinessObjects.Common.Results;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
-using Services.Presence;
 using StackExchange.Redis;
+using Xunit;
 
 namespace Services.Presence.Tests;
 
