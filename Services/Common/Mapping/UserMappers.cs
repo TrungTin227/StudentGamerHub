@@ -4,6 +4,44 @@ namespace Services.Common.Mapping
 {
     public static class UserMappers
     {
+        public static UserBriefDto ToUserBriefDto(this User user)
+        {
+            ArgumentNullException.ThrowIfNull(user);
+
+            return new UserBriefDto(
+                Id: user.Id,
+                UserName: user.UserName ?? string.Empty,
+                AvatarUrl: user.AvatarUrl
+            );
+        }
+
+        public static FriendDto ToFriendDtoFor(this FriendLink link, Guid requesterId)
+        {
+            ArgumentNullException.ThrowIfNull(link);
+
+            if (link.SenderId == requesterId)
+            {
+                ArgumentNullException.ThrowIfNull(link.Recipient);
+                return new FriendDto(
+                    Id: link.Id,
+                    User: link.Recipient.ToUserBriefDto(),
+                    BecameFriendsAtUtc: link.RespondedAt?.UtcDateTime
+                );
+            }
+
+            if (link.RecipientId == requesterId)
+            {
+                ArgumentNullException.ThrowIfNull(link.Sender);
+                return new FriendDto(
+                    Id: link.Id,
+                    User: link.Sender.ToUserBriefDto(),
+                    BecameFriendsAtUtc: link.RespondedAt?.UtcDateTime
+                );
+            }
+
+            throw new InvalidOperationException("Requester must be associated with the friend link.");
+        }
+
         /// <summary>
         /// Map entity -> UserListItemDto (UTC -> VN khi hiển thị).
         /// </summary>

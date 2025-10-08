@@ -1,6 +1,9 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
+using System.Threading.RateLimiting;
 
 namespace WebApi.Extensions;
 
@@ -15,6 +18,41 @@ public static class ServiceCollectionExtensions
             });
 
         services.AddSignalR();
+
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            options.AddPolicy("FriendInvite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 20,
+                    TokensPerPeriod = 20,
+                    ReplenishmentPeriod = TimeSpan.FromDays(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            options.AddPolicy("FriendAction", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 60,
+                    TokensPerPeriod = 60,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+        });
 
         services.TryAddSingleton<IConnectionMultiplexer>(_ =>
         {
@@ -35,6 +73,7 @@ public static class ServiceCollectionExtensions
         services.AddOpenApi(options =>
         {
             options.AddDocumentTransformer(new BearerSecuritySchemeTransformer());
+            options.AddDocumentTransformer(new FriendsExamplesDocumentTransformer());
         });
 
         services.AddProblemDetails();
