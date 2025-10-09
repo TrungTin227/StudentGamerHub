@@ -52,20 +52,46 @@ public static class ServiceCollectionExtensions
                     AutoReplenishment = true
                 });
             });
+
+            options.AddPolicy("DashboardRead", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 120,
+                    TokensPerPeriod = 120,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
         });
 
-        services.TryAddSingleton<IConnectionMultiplexer>(_ =>
+        services.TryAddSingleton<IConnectionMultiplexer>(sp =>
         {
+            var configuration = sp.GetRequiredService<IConfiguration>();
             var connectionString = configuration.GetValue<string>("Redis:ConnectionString")
                                    ?? configuration["Redis__ConnectionString"];
 
             if (string.IsNullOrWhiteSpace(connectionString))
             {
+                // Development fallback: return a null implementation
+                var env = sp.GetService<IHostEnvironment>();
+                if (env?.IsDevelopment() == true)
+                {
+                    throw new InvalidOperationException(
+                        "Redis:ConnectionString is not configured. " +
+                        "Please install Redis or configure connection string in appsettings.Development.json");
+                }
                 throw new InvalidOperationException("Redis:ConnectionString (Redis__ConnectionString) is required");
             }
 
             var options = ConfigurationOptions.Parse(connectionString);
             options.AbortOnConnectFail = false;
+            options.ConnectTimeout = 5000;
+            options.SyncTimeout = 5000;
 
             return ConnectionMultiplexer.Connect(options);
         });

@@ -2,6 +2,7 @@
 global using BusinessObjects.Common;
 global using BusinessObjects.Common.Pagination;
 global using BusinessObjects.Common.Results;
+global using DTOs.Dashboard;
 global using DTOs.Friends;
 global using DTOs.Auth;
 global using DTOs.Auth.Requests;
