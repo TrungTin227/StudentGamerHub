@@ -93,6 +93,9 @@ namespace Repositories.Persistence
 
                 e.HasIndex(u => u.NormalizedEmail)
                  .HasDatabaseName("ix_users_normalized_email");
+
+                // Teammates search index
+                e.HasIndex(u => u.University);
             });
 
             // ====== ROLE ======
@@ -159,6 +162,8 @@ namespace Repositories.Persistence
                  .OnDelete(DeleteBehavior.Cascade);
 
                 e.HasIndex(x => x.GameId);
+                // Teammates search indexes
+                e.HasIndex(x => x.Skill);
             });
 
             // ====== Communities ======

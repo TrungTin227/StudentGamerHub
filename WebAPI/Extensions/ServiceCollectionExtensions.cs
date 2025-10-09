@@ -67,6 +67,22 @@ public static class ServiceCollectionExtensions
                     AutoReplenishment = true
                 });
             });
+
+            // Teammates search rate limiting: 120 requests per minute per user
+            options.AddPolicy("TeammatesRead", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 120,
+                    TokensPerPeriod = 120,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
         });
 
         services.TryAddSingleton<IConnectionMultiplexer>(sp =>

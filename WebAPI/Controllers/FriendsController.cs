@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace WebApi.Controllers
 {
     [ApiController]
-    [Route("friends")]
+    [Route("api/[controller]")]
     [Produces("application/json")]
     [Authorize]
     public sealed class FriendsController : ControllerBase
