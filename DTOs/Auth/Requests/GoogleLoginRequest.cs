@@ -2,6 +2,6 @@
 
 namespace DTOs.Auth.Requests
 {
-    public sealed record GoogleLoginRequest([Required] string IdToken);
+    public sealed record GoogleLoginRequest([param: Required] string IdToken);
 
 }

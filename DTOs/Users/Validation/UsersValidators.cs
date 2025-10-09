@@ -1,14 +1,35 @@
-﻿using FluentValidation;
+﻿using System;
+using System.Linq;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using FluentValidation;
 
 namespace DTOs.Users.Validation
 {
     internal static class ValidationHelpers
     {
         internal static bool IsPhoneLike(string phone)
-            => Regex.IsMatch(phone, @"^[\+\d\-\s\(\)]{7,20}$");
+            => Regex.IsMatch(phone ?? string.Empty, @"^[\+\d\-\s\(\)]{7,20}$");
+
         internal static bool BeValidUrl(string url)
             => Uri.TryCreate(url, UriKind.Absolute, out _);
+
+        // Không dùng Distinct(StringComparer...), tránh false positive khi search
+        internal static bool NoCaseDuplicates(IEnumerable<string> values)
+        {
+            if (values is null) return true;
+            var seen = new HashSet<string>(); // default comparer, key đã chuẩn hoá
+            foreach (var v in values)
+            {
+                if (string.IsNullOrWhiteSpace(v)) continue;
+                var key = v.Trim().ToUpperInvariant();
+                if (!seen.Add(key)) return false;
+            }
+            return true;
+        }
+
+        internal static bool NoNullOrWhiteItems(IEnumerable<string> values)
+            => values is not null && values.All(s => !string.IsNullOrWhiteSpace(s));
     }
 
     // ---------- Create / Register / Update ----------
@@ -47,9 +68,8 @@ namespace DTOs.Users.Validation
             When(x => x.Roles is { Length: > 0 }, () =>
             {
                 RuleFor(x => x.Roles!)
-                    .Must(r => r.All(s => !string.IsNullOrWhiteSpace(s))).WithMessage("Roles chứa phần tử rỗng.")
-                    .Must(r => r.Distinct(StringComparer.OrdinalIgnoreCase).Count() == r.Length)
-                    .WithMessage("Roles bị trùng lặp (không phân biệt hoa thường).");
+                    .Must(ValidationHelpers.NoNullOrWhiteItems).WithMessage("Roles chứa phần tử rỗng.")
+                    .Must(ValidationHelpers.NoCaseDuplicates).WithMessage("Roles bị trùng lặp (không phân biệt hoa thường).");
             });
         }
     }
@@ -95,9 +115,8 @@ namespace DTOs.Users.Validation
             When(x => x.ReplaceRoles is { Length: > 0 }, () =>
             {
                 RuleFor(x => x.ReplaceRoles!)
-                    .Must(r => r.All(s => !string.IsNullOrWhiteSpace(s))).WithMessage("ReplaceRoles chứa phần tử rỗng.")
-                    .Must(r => r.Distinct(StringComparer.OrdinalIgnoreCase).Count() == r.Length)
-                    .WithMessage("ReplaceRoles bị trùng lặp (không phân biệt hoa thường).");
+                    .Must(ValidationHelpers.NoNullOrWhiteItems).WithMessage("ReplaceRoles chứa phần tử rỗng.")
+                    .Must(ValidationHelpers.NoCaseDuplicates).WithMessage("ReplaceRoles bị trùng lặp (không phân biệt hoa thường).");
             });
         }
     }
@@ -131,9 +150,8 @@ namespace DTOs.Users.Validation
             RuleFor(x => x.Roles)
                 .NotNull().WithMessage("Roles là bắt buộc.")
                 .Must(r => r!.Any()).WithMessage("Roles không được rỗng.")
-                .Must(r => r!.All(s => !string.IsNullOrWhiteSpace(s))).WithMessage("Roles chứa phần tử rỗng.")
-                .Must(r => r!.Distinct(StringComparer.OrdinalIgnoreCase).Count() == r!.Count())
-                .WithMessage("Roles bị trùng lặp (không phân biệt hoa thường).");
+                .Must(ValidationHelpers.NoNullOrWhiteItems!).WithMessage("Roles chứa phần tử rỗng.")
+                .Must(ValidationHelpers.NoCaseDuplicates!).WithMessage("Roles bị trùng lặp (không phân biệt hoa thường).");
         }
     }
 
@@ -153,16 +171,14 @@ namespace DTOs.Users.Validation
             {
                 RuleForEach(x => x.Add!).NotEmpty().WithMessage("Add chứa phần tử rỗng.");
                 RuleFor(x => x.Add!)
-                    .Must(r => r.Distinct(StringComparer.OrdinalIgnoreCase).Count() == r.Length)
-                    .WithMessage("Add có phần tử trùng lặp (không phân biệt hoa thường).");
+                    .Must(ValidationHelpers.NoCaseDuplicates).WithMessage("Add có phần tử trùng lặp (không phân biệt hoa thường).");
             });
 
             When(x => x.Remove is { Length: > 0 }, () =>
             {
                 RuleForEach(x => x.Remove!).NotEmpty().WithMessage("Remove chứa phần tử rỗng.");
                 RuleFor(x => x.Remove!)
-                    .Must(r => r.Distinct(StringComparer.OrdinalIgnoreCase).Count() == r.Length)
-                    .WithMessage("Remove có phần tử trùng lặp (không phân biệt hoa thường).");
+                    .Must(ValidationHelpers.NoCaseDuplicates).WithMessage("Remove có phần tử trùng lặp (không phân biệt hoa thường).");
             });
         }
     }
@@ -244,7 +260,7 @@ namespace DTOs.Users.Validation
                     .WithMessage("CreatedFromUtc phải ≤ CreatedToUtc."));
 
             When(x => x.Roles is { Length: > 0 }, () =>
-                RuleFor(x => x.Roles!).Must(r => r.All(s => !string.IsNullOrWhiteSpace(s)))
+                RuleFor(x => x.Roles!).Must(ValidationHelpers.NoNullOrWhiteItems)
                     .WithMessage("Roles filter chứa phần tử rỗng."));
 
             When(x => x.LevelMin.HasValue && x.LevelMax.HasValue, () =>

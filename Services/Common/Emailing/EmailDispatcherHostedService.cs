@@ -10,10 +10,24 @@ public sealed class EmailDispatcherHostedService(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var msg in queue.Reader.ReadAllAsync(stoppingToken))
+        try
         {
-            try { await sender.SendAsync(msg, stoppingToken); }
-            catch (Exception ex) { logger.LogError(ex, "Send email failed: {Subject}", msg.Subject); }
+            await foreach (var msg in queue.Reader.ReadAllAsync(stoppingToken))
+            {
+                try
+                {
+                    await sender.SendAsync(msg, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Send email failed: {Subject}", msg.Subject);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when application is shutting down
+            logger.LogInformation("Email dispatcher service is stopping gracefully.");
         }
     }
 }

@@ -3,12 +3,14 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Services.Common.Results;
 using System.Text.RegularExpressions;
+using static Services.Common.Extensions.StringAndUrlExtensions;
+
 namespace Services.Implementations;
 
 public sealed class UsersService : IUserService
 {
-    private readonly AppDbContext _db;                  
-    private readonly IUnitOfWork _uow;                 
+    private readonly AppDbContext _db;
+    private readonly IUnitOfWork _uow;
     private readonly UserManager<User> _users;
     private readonly RoleManager<Role> _roles;
     private readonly ITimeZoneService _timeZoneService;
@@ -88,7 +90,6 @@ public sealed class UsersService : IUserService
     public async Task<Result<PagedResult<UserListItemDto>>> SearchAsync(
         UserFilter filter, PageRequest page, CancellationToken ct = default)
     {
-        // NOTE: filter.CreatedFromUtc / CreatedToUtc là UTC thật
         return await _userFilterVal.ValidateToResultAsync(filter, ct)
             .BindAsync(async _ =>
             {
@@ -140,7 +141,7 @@ public sealed class UsersService : IUserService
         var user = await _users.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (user is null) return Result<UserDetailDto>.Failure(IdentityResultExtensions.NotFound("User"));
 
-        var dto = await user.ToDetailDtoAsync(_users, _timeZoneService, ct); // convert UTC -> VN ở mapper
+        var dto = await user.ToDetailDtoAsync(_users, _timeZoneService, ct);
         return Result<UserDetailDto>.Success(dto);
     }
 
@@ -148,50 +149,34 @@ public sealed class UsersService : IUserService
     public async Task<Result<UserDetailDto>> CreateAsync(CreateUserAdminRequest req, CancellationToken ct = default)
     {
         return await _createVal.ValidateToResultAsync(req, ct)
-     .BindAsync(_ => _uow.ExecuteTransactionAsync(async ctk =>
-     {
-         var user = new User
-         {
-             UserName = req.UserName?.Trim(),
-             Email = req.Email?.Trim(),
-             FullName = req.FullName?.Trim(),
-             PhoneNumber = req.PhoneNumber?.Trim(),
-             EmailConfirmed = req.EmailConfirmed
-         };
+            .BindAsync(_ => _uow.ExecuteTransactionAsync<UserDetailDto>(async ctk =>
+            {
+                var user = new User
+                {
+                    UserName = req.UserName?.Trim(),
+                    Email = req.Email?.Trim(),
+                    FullName = req.FullName?.Trim(),
+                    PhoneNumber = req.PhoneNumber?.Trim(),
+                    EmailConfirmed = req.EmailConfirmed
+                };
 
-         var create = await _users.CreateAsync(user, req.Password);
-         if (!create.Succeeded)
-             return create.ToResult<UserDetailDto>(null!, "Create user failed");
+                var create = await _users.CreateAsync(user, req.Password);
+                if (!create.Succeeded)
+                    return create.ToResult<UserDetailDto>(null!, "Create user failed");
 
-         var rolesToAssign = await ResolveRolesToAssignAsync(req.Roles, ctk);
-         var addRoles = await _users.AddToRolesAsync(user, rolesToAssign);
-         if (!addRoles.Succeeded)
-             return addRoles.ToResult<UserDetailDto>(null!, "Assign roles failed");
+                var rolesToAssign = await ResolveRolesToAssignAsync(req.Roles, ctk);
+                
+                // ✅ FIX: Add roles one by one instead of batch
+                var addRolesResult = await AddRolesToUserAsync(user, rolesToAssign);
+                if (!addRolesResult.IsSuccess)
+                    return Result<UserDetailDto>.Failure(addRolesResult.Error);
 
-         await _uow.SaveChangesAsync(ctk);
+                await _uow.SaveChangesAsync(ctk);
 
-         var dto = await user.ToDetailDtoAsync(_users, _timeZoneService, ctk);
-         return Result<UserDetailDto>.Success(dto);
-     }, ct: ct))
-     .TapAsync(async dto =>
-     {
-         if (!dto.EmailConfirmed &&
-             !string.IsNullOrWhiteSpace(dto.Email) &&
-             !string.IsNullOrWhiteSpace(_authLinks.PublicBaseUrl))
-         {
-             var user = await _users.FindByIdAsync(dto.Id.ToString());
-             if (user is not null)
-             {
-                 var token = await _users.GenerateEmailConfirmationTokenAsync(user);
-                 var url = BuildPublicLink(
-                     _authLinks.PublicBaseUrl,
-                     _authLinks.ConfirmEmailPath,
-                     new() { ["uid"] = user.Id.ToString(), ["token"] = token.Base64UrlEncodeUtf8() });
-
-                 await _emails.EnqueueAsync(_authEmails.BuildConfirmEmail(user, url), ct);
-             }
-         }
-     });
+                var dto = await user.ToDetailDtoAsync(_users, _timeZoneService, ctk);
+                return Result<UserDetailDto>.Success(dto);
+            }, ct: ct))
+            .TapAsync(dto => SendConfirmEmailIfNeededAsync(dto, ct));
     }
 
     public async Task<Result<UserDetailDto>> RegisterAsync(RegisterRequest req, CancellationToken ct = default)
@@ -217,40 +202,24 @@ public sealed class UsersService : IUserService
                     return create.ToResult<UserDetailDto>(null!, "Register failed");
 
                 var rolesToAssign = await EnsureDefaultRoleAsync(ctk);
-                var addRoles = await _users.AddToRolesAsync(user, rolesToAssign);
-                if (!addRoles.Succeeded)
-                    return addRoles.ToResult<UserDetailDto>(null!, "Assign roles failed");
+                
+                // ✅ FIX: Add roles one by one instead of batch
+                var addRolesResult = await AddRolesToUserAsync(user, rolesToAssign);
+                if (!addRolesResult.IsSuccess)
+                    return Result<UserDetailDto>.Failure(addRolesResult.Error);
 
                 await _uow.SaveChangesAsync(ctk);
 
-                var dto = await user.ToDetailDtoAsync(_users, _timeZoneService, ctk);
+                var dto = await user.ToDetailDtoAsync(_users, _timeZoneService, ct);
                 return Result<UserDetailDto>.Success(dto);
-            }, ct: ct)) // <-- dùng named argument 'ct'
-            .TapAsync(async dto =>
-            {
-                if (!dto.EmailConfirmed &&
-                    !string.IsNullOrWhiteSpace(dto.Email) &&
-                    !string.IsNullOrWhiteSpace(_authLinks.PublicBaseUrl))
-                {
-                    var user = await _users.FindByIdAsync(dto.Id.ToString());
-                    if (user is not null)
-                    {
-                        var token = await _users.GenerateEmailConfirmationTokenAsync(user);
-                        var url = BuildPublicLink(
-                            _authLinks.PublicBaseUrl,
-                            string.IsNullOrWhiteSpace(_authLinks.ConfirmEmailPath) ? "auth/confirm-email" : _authLinks.ConfirmEmailPath,
-                            new() { ["uid"] = user.Id.ToString(), ["token"] = token.Base64UrlEncodeUtf8() });
-
-                        await _emails.EnqueueAsync(_authEmails.BuildConfirmEmail(user, url), ct);
-                    }
-                }
-            });
+            }, ct: ct))
+            .TapAsync(dto => SendConfirmEmailIfNeededAsync(dto, ct));
     }
 
     public async Task<Result> UpdateAsync(Guid id, UpdateUserRequest req, CancellationToken ct = default)
     {
         return await _updateVal.ValidateToResultAsync(req, ct)
-            .BindAsync(async _ =>
+            .BindAsync(_ => _uow.ExecuteTransactionAsync<Result>(async ctk =>
             {
                 var user = await _users.FindByIdAsync(id.ToString());
                 if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
@@ -267,16 +236,15 @@ public sealed class UsersService : IUserService
                 var update = await _users.UpdateAsync(user);
                 if (!update.Succeeded) return update.ToResult("Update user failed");
 
-                // Handle role replacement if provided
                 if (req.ReplaceRoles is not null)
                 {
-                    var replaceRequest = new ReplaceRolesRequest { Roles = req.ReplaceRoles };
-                    var roleResult = await ReplaceRolesAsync(id, replaceRequest, ct);
-                    if (!roleResult.IsSuccess) return roleResult;
+                    var rr = await ReplaceRolesCoreAsync(user, req.ReplaceRoles, ctk);
+                    if (!rr.IsSuccess) return rr;
                 }
 
+                await _uow.SaveChangesAsync(ctk);
                 return Result.Success();
-            });
+            }, ct: ct));
     }
 
     public async Task<Result> UpdateSelfAsync(Guid id, UpdateUserSelfRequest req, CancellationToken ct = default)
@@ -320,7 +288,7 @@ public sealed class UsersService : IUserService
 
                 await _uow.SaveChangesAsync(ctk);
                 return Result.Success();
-            },ct: ct));
+            }, ct: ct));
     }
 
     // ---------- ROLES ----------
@@ -332,40 +300,12 @@ public sealed class UsersService : IUserService
                 var user = await _users.FindByIdAsync(id.ToString());
                 if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
 
-                var current = await _users.GetRolesAsync(user);
-
-                var desired = (req.Roles ?? Array.Empty<string>())
-                    .Where(r => !string.IsNullOrWhiteSpace(r))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-
-                var desiredNorm = new HashSet<string>(desired.Select(x => x.ToUpperInvariant()));
-                var validDesired = await _roles.Roles
-                    .Where(r => desiredNorm.Contains(r.NormalizedName!))
-                    .Select(r => r.Name!)
-                    .ToListAsync(ctk);
-
-                if (validDesired.Count == 0)
-                    validDesired = (await EnsureDefaultRoleAsync(ctk)).ToList();
-
-                var toRemove = current.Except(validDesired, StringComparer.OrdinalIgnoreCase).ToArray();
-                var toAdd = validDesired.Except(current, StringComparer.OrdinalIgnoreCase).ToArray();
-
-                if (toRemove.Length > 0)
-                {
-                    var r1 = await _users.RemoveFromRolesAsync(user, toRemove);
-                    if (!r1.Succeeded) return r1.ToResult("Remove roles failed");
-                }
-
-                if (toAdd.Length > 0)
-                {
-                    var r2 = await _users.AddToRolesAsync(user, toAdd);
-                    if (!r2.Succeeded) return r2.ToResult("Add roles failed");
-                }
+                var rr = await ReplaceRolesCoreAsync(user, req.Roles ?? Array.Empty<string>(), ctk);
+                if (!rr.IsSuccess) return rr;
 
                 await _uow.SaveChangesAsync(ctk);
                 return Result.Success();
-            },ct: ct));
+            }, ct: ct));
     }
 
     public async Task<Result> ModifyRolesAsync(Guid id, ModifyRolesRequest req, CancellationToken ct = default)
@@ -376,59 +316,98 @@ public sealed class UsersService : IUserService
                 var user = await _users.FindByIdAsync(id.ToString());
                 if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
 
+                var current = await _users.GetRolesAsync(user);
+
+                // ---- ADD ----
                 if (req.Add is { Length: > 0 })
                 {
-                    var desiredNorm = new HashSet<string>(
-                        req.Add.Where(s => !string.IsNullOrWhiteSpace(s))
-                               .Select(s => s.Trim().ToUpperInvariant()));
+                    var addSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var s in req.Add.Where(s => !string.IsNullOrWhiteSpace(s)))
+                        addSet.Add(s.Trim());
 
-                    var validAdd = await _roles.Roles
-                        .Where(r => desiredNorm.Contains(r.NormalizedName!))
+                    var addNorm = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var s in addSet)
+                        addNorm.Add(s.ToUpperInvariant());
+
+                    // ✅ Convert to List for EF Core compatibility
+                    var addNormList = addNorm.ToList();
+
+                    // ⚡ LOAD ALL ROLES
+                    var allRoles = await _db.Roles
+                        .AsNoTracking()
+                        .Select(r => new { r.Name, r.NormalizedName })
+                        .ToListAsync(ctk);
+
+                    // ✅ Filter in-memory
+                    var addNames = allRoles
+                        .Where(r => addNormList.Contains(r.NormalizedName!))
                         .Select(r => r.Name!)
-                        .ToArrayAsync(ctk);
+                        .ToArray();
 
-                    if (validAdd.Length > 0)
+                    var toAddSet = new HashSet<string>(addNames, StringComparer.OrdinalIgnoreCase);
+                    foreach (var c in current) toAddSet.Remove(c);
+                    var toAdd = toAddSet.ToArray();
+
+                    if (toAdd.Length > 0)
                     {
-                        var r1 = await _users.AddToRolesAsync(user, validAdd);
-                        if (!r1.Succeeded) return r1.ToResult("Add roles failed");
+                        var r1 = await AddRolesToUserAsync(user, toAdd);
+                        if (!r1.IsSuccess) return r1;
                     }
                 }
-
+                // ---- REMOVE ----
                 if (req.Remove is { Length: > 0 })
                 {
-                    var r2 = await _users.RemoveFromRolesAsync(user, req.Remove);
-                    if (!r2.Succeeded) return r2.ToResult("Remove roles failed");
+                    var removeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var s in req.Remove.Where(s => !string.IsNullOrWhiteSpace(s)))
+                        removeSet.Add(s.Trim());
+
+                    var toRemove = current.Where(r => removeSet.Contains(r)).ToArray();
+
+                    if (toRemove.Length > 0)
+                    {
+                        foreach (var roleName in toRemove)
+                        {
+                            var r2 = await _users.RemoveFromRoleAsync(user, roleName);
+                            if (!r2.Succeeded) return r2.ToResult($"Remove role '{roleName}' failed");
+                        }
+                    }
                 }
 
                 await _uow.SaveChangesAsync(ctk);
                 return Result.Success();
-            },ct: ct));
+            }, ct: ct));
     }
+
 
     // ---------- PASSWORD ----------
     public async Task<Result> ChangePasswordAsync(Guid id, ChangePasswordRequest req, CancellationToken ct = default)
     {
-        return await _changePwdVal.ValidateToResultAsync(req, ct)
-            .BindAsync(_ => _uow.ExecuteTransactionAsync(async ctk =>   // <-- KHÔNG dùng <Result>
-            {
-                var user = await _users.FindByIdAsync(id.ToString());
-                if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
+        var validated = await _changePwdVal.ValidateToResultAsync(req, ct);
+        if (!validated.IsSuccess) return Result.Failure(validated.Error);
 
-                var r = await _users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
-                if (!r.Succeeded) return r.ToResult("Change password failed");
+        User? userForEmail = null;
 
-                if (_tokens is not null)
-                    await _tokens.RevokeAllForUserAsync(user.Id, reason: "password changed", ct: ctk);
+        var result = await _uow.ExecuteTransactionAsync(async ctk =>
+        {
+            var user = await _users.FindByIdAsync(id.ToString());
+            if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
 
-                await _uow.SaveChangesAsync(ctk);
-                return Result.Success();
-            }, ct: ct)) // <-- named argument
-            .TapAsync(async () =>
-            {
-                var user = await _users.FindByIdAsync(id.ToString());
-                if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
-                    await _emails.EnqueueAsync(_authEmails.BuildPasswordChanged(user), ct);
-            });
+            var r = await _users.ChangePasswordAsync(user, req.CurrentPassword, req.NewPassword);
+            if (!r.Succeeded) return r.ToResult("Change password failed");
+
+            if (_tokens is not null)
+                await _tokens.RevokeAllForUserAsync(user.Id, reason: "password changed", ct: ctk);
+
+            await _uow.SaveChangesAsync(ctk);
+
+            userForEmail = user;
+            return Result.Success();
+        }, ct: ct);
+
+        if (result.IsSuccess && userForEmail is not null && !string.IsNullOrWhiteSpace(userForEmail.Email))
+            await _emails.EnqueueAsync(_authEmails.BuildPasswordChanged(userForEmail), ct);
+
+        return result;
     }
 
     public async Task<Result<string>> GenerateForgotPasswordTokenAsync(ForgotPasswordRequest req, CancellationToken ct = default)
@@ -446,28 +425,33 @@ public sealed class UsersService : IUserService
 
     public async Task<Result> ResetPasswordAsync(ResetPasswordRequest req, CancellationToken ct = default)
     {
-        return await _resetPwdVal.ValidateToResultAsync(req, ct)
-            .BindAsync(_ => _uow.ExecuteTransactionAsync(async ctk =>   // <-- KHÔNG dùng <Result>
-            {
-                var user = await _users.FindByIdAsync(req.UserId.ToString());
-                if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
+        var validated = await _resetPwdVal.ValidateToResultAsync(req, ct);
+        if (!validated.IsSuccess) return Result.Failure(validated.Error);
 
-                var token = req.Token.DecodeTokenIfNeeded();
-                var r = await _users.ResetPasswordAsync(user, token, req.NewPassword);
-                if (!r.Succeeded) return r.ToResult("Reset password failed");
+        User? userForEmail = null;
 
-                if (_tokens is not null)
-                    await _tokens.RevokeAllForUserAsync(user.Id, reason: "password reset", ct: ctk);
+        var result = await _uow.ExecuteTransactionAsync(async ctk =>
+        {
+            var user = await _users.FindByIdAsync(req.UserId.ToString());
+            if (user is null) return Result.Failure(IdentityResultExtensions.NotFound("User"));
 
-                await _uow.SaveChangesAsync(ctk);
-                return Result.Success();
-            }, ct: ct)) // <-- named argument
-            .TapAsync(async () =>
-            {
-                var user = await _users.FindByIdAsync(req.UserId.ToString());
-                if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
-                    await _emails.EnqueueAsync(_authEmails.BuildPasswordResetSucceeded(user), ct);
-            });
+            var token = req.Token.DecodeTokenIfNeeded();
+            var r = await _users.ResetPasswordAsync(user, token, req.NewPassword);
+            if (!r.Succeeded) return r.ToResult("Reset password failed");
+
+            if (_tokens is not null)
+                await _tokens.RevokeAllForUserAsync(user.Id, reason: "password reset", ct: ctk);
+
+            await _uow.SaveChangesAsync(ctk);
+
+            userForEmail = user;
+            return Result.Success();
+        }, ct: ct);
+
+        if (result.IsSuccess && userForEmail is not null && !string.IsNullOrWhiteSpace(userForEmail.Email))
+            await _emails.EnqueueAsync(_authEmails.BuildPasswordResetSucceeded(userForEmail), ct);
+
+        return result;
     }
 
     // ---------- EMAIL CONFIRM / CHANGE EMAIL ----------
@@ -615,45 +599,77 @@ public sealed class UsersService : IUserService
     private async Task<string[]> EnsureDefaultRoleAsync(CancellationToken ct)
     {
         const string fallback = "User";
-        if (!await _roles.RoleExistsAsync(fallback))
+        const string normalized = "USER";
+
+        // ✅ Query trực tiếp từ DbContext, KHÔNG dùng RoleManager
+        var exists = await _db.Roles
+            .AsNoTracking()
+            .AnyAsync(r => r.NormalizedName == normalized, ct);
+
+        if (!exists)
         {
-            var createRole = await _roles.CreateAsync(new Role
+            var role = new Role
             {
+                Id = Guid.NewGuid(),
                 Name = fallback,
-                NormalizedName = fallback.ToUpperInvariant()
-            });
-            if (!createRole.Succeeded && !await _roles.RoleExistsAsync(fallback))
-                throw new InvalidOperationException("Create fallback role 'User' failed.");
+                NormalizedName = normalized,
+                ConcurrencyStamp = Guid.NewGuid().ToString()
+            };
+
+            _db.Roles.Add(role);
+            await _db.SaveChangesAsync(ct);
         }
+
         return new[] { fallback };
     }
-
     private async Task<string[]> ResolveRolesToAssignAsync(string[]? roles, CancellationToken ct)
     {
-        if (roles is not { Length: > 0 }) return await EnsureDefaultRoleAsync(ct);
+        if (roles is not { Length: > 0 })
+            return await EnsureDefaultRoleAsync(ct);
 
-        var desiredNorm = new HashSet<string>(
-            roles.Where(r => !string.IsNullOrWhiteSpace(r))
-                 .Select(r => r.Trim().ToUpperInvariant()));
+        // ✅ Normalize input
+        var normalizedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in roles)
+        {
+            if (!string.IsNullOrWhiteSpace(r))
+                normalizedSet.Add(r.Trim().ToUpperInvariant());
+        }
 
-        var valid = await _roles.Roles
-            .Where(r => desiredNorm.Contains(r.NormalizedName!))
+        if (normalizedSet.Count == 0)
+            return await EnsureDefaultRoleAsync(ct);
+
+        // ✅ Convert to List for EF Core compatibility
+        var normalizedList = normalizedSet.ToList();
+
+        // ⚡ LOAD ALL ROLES - NO WHERE CLAUSE
+        var allRoles = await _db.Roles
+            .AsNoTracking()
+            .Select(r => new { r.Name, r.NormalizedName })
+            .ToListAsync(ct);
+
+        // ✅ Filter in-memory
+        var matchedNames = allRoles
+            .Where(r => normalizedList.Contains(r.NormalizedName!))
             .Select(r => r.Name!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArrayAsync(ct);
+            .ToArray();
 
-        return valid.Length == 0 ? await EnsureDefaultRoleAsync(ct) : valid;
+        return matchedNames.Length == 0
+            ? await EnsureDefaultRoleAsync(ct)
+            : matchedNames;
     }
-
     private async Task<string> GenerateUniqueUserNameAsync(string email, CancellationToken ct)
     {
         var at = email.IndexOf('@');
-        var local = (at > 0 ? email[..at] : email).Trim();
+        var local = (at > 0 ? email.Substring(0, at) : email).Trim();
 
         var baseName = Regex.Replace(local.ToLowerInvariant(), @"[^a-z0-9._-]", string.Empty);
         if (string.IsNullOrWhiteSpace(baseName)) baseName = "user";
         if (baseName.Length < 3)
-            baseName = (baseName + "user").Substring(0, Math.Min(16, (baseName + "user").Length));
+        {
+            var pad = baseName + "user";
+            baseName = pad.Substring(0, Math.Min(16, pad.Length));
+        }
 
         var candidate = baseName;
         var i = 0;
@@ -663,10 +679,110 @@ public sealed class UsersService : IUserService
             candidate = $"{baseName}{i}";
             if (i > 9999)
             {
-                candidate = $"{baseName}{Guid.NewGuid():N}".Substring(0, Math.Min(24, baseName.Length + 8));
+                var guidPart = Guid.NewGuid().ToString("N");
+                var combined = $"{baseName}{guidPart}";
+                candidate = combined.Substring(0, Math.Min(24, baseName.Length + 8));
                 break;
             }
         }
         return candidate;
+    }
+
+    // CORE thay roles (KHÔNG mở transaction)
+    private async Task<Result> ReplaceRolesCoreAsync(User user, IEnumerable<string> roles, CancellationToken ct)
+    {
+        // Normalize input
+        var normalizedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in roles)
+        {
+            if (!string.IsNullOrWhiteSpace(s))
+                normalizedSet.Add(s.Trim().ToUpperInvariant());
+        }
+
+        // ✅ Convert to List for EF Core compatibility
+        var normalizedList = normalizedSet.ToList();
+
+        // ⚡ LOAD ALL ROLES
+        var allRoles = await _db.Roles
+            .AsNoTracking()
+            .Select(r => new { r.Name, r.NormalizedName })
+            .ToListAsync(ct);
+
+        // ✅ Filter in-memory
+        var validDesired = allRoles
+            .Where(r => normalizedList.Contains(r.NormalizedName!))
+            .Select(r => r.Name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var finalSet = new HashSet<string>(validDesired, StringComparer.OrdinalIgnoreCase);
+        if (finalSet.Count == 0)
+        {
+            foreach (var d in await EnsureDefaultRoleAsync(ct))
+                finalSet.Add(d);
+        }
+
+        var current = await _users.GetRolesAsync(user);
+        var currentSet = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
+
+        var toRemove = current.Where(r => !finalSet.Contains(r)).ToArray();
+        var toAdd = finalSet.Where(r => !currentSet.Contains(r)).ToArray();
+
+        if (toRemove.Length > 0)
+        {
+            foreach (var roleName in toRemove)
+            {
+                var r1 = await _users.RemoveFromRoleAsync(user, roleName);
+                if (!r1.Succeeded) return r1.ToResult($"Remove role '{roleName}' failed");
+            }
+        }
+        if (toAdd.Length > 0)
+        {
+            var r2 = await AddRolesToUserAsync(user, toAdd);
+            if (!r2.IsSuccess) return r2;
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Add roles to user one by one to avoid EF Core translation issues with AddToRolesAsync
+    /// </summary>
+    private async Task<Result> AddRolesToUserAsync(User user, IEnumerable<string> roleNames)
+    {
+        foreach (var roleName in roleNames)
+        {
+            var result = await _users.AddToRoleAsync(user, roleName);
+            if (!result.Succeeded)
+                return result.ToResult($"Assign role '{roleName}' failed");
+        }
+        return Result.Success();
+    }
+
+    private async Task SendConfirmEmailIfNeededAsync(UserDetailDto dto, CancellationToken ct)
+    {
+        if (dto.EmailConfirmed ||
+            string.IsNullOrWhiteSpace(dto.Email) ||
+            string.IsNullOrWhiteSpace(_authLinks.PublicBaseUrl))
+            return;
+
+        var user = await _users.FindByIdAsync(dto.Id.ToString());
+        if (user is null) return;
+
+        var token = await _users.GenerateEmailConfirmationTokenAsync(user);
+        var path = string.IsNullOrWhiteSpace(_authLinks.ConfirmEmailPath)
+            ? "auth/confirm-email"
+            : _authLinks.ConfirmEmailPath;
+
+        var url = BuildPublicLink(
+            _authLinks.PublicBaseUrl,
+            path,
+            new()
+            {
+                ["uid"] = user.Id.ToString(),
+                ["token"] = token.Base64UrlEncodeUtf8()
+            });
+
+        await _emails.EnqueueAsync(_authEmails.BuildConfirmEmail(user, url), ct);
     }
 }
