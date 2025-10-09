@@ -6,6 +6,7 @@ global using DTOs.Friends;
 global using DTOs.Auth;
 global using DTOs.Auth.Requests;
 global using DTOs.Auth.Validation;
+global using DTOs.Quests;
 global using DTOs.Roles;
 global using DTOs.Roles.Filters;
 global using DTOs.Roles.Requests;

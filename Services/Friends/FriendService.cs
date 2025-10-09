@@ -3,6 +3,7 @@ using BusinessObjects.Common.Pagination;
 using BusinessObjects.Common.Results;
 using DTOs.Friends;
 using Microsoft.EntityFrameworkCore;
+using Services.Application.Quests;
 using Services.Common.Extensions;
 
 namespace Services.Friends;
@@ -14,12 +15,16 @@ public sealed class FriendService : IFriendService
     private readonly IGenericUnitOfWork _uow;
     private readonly IGenericRepository<User, Guid> _users;
     private readonly IGenericRepository<FriendLink, Guid> _friendLinks;
+    private readonly IQuestService? _quests;
 
-    public FriendService(IGenericUnitOfWork uow)
+    public FriendService(
+        IGenericUnitOfWork uow,
+        IQuestService? quests = null)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _users = _uow.GetRepository<User, Guid>();
         _friendLinks = _uow.GetRepository<FriendLink, Guid>();
+        _quests = quests;
     }
 
     public Task<Result> InviteAsync(Guid requesterId, Guid targetUserId, CancellationToken ct = default)
@@ -126,6 +131,14 @@ public sealed class FriendService : IFriendService
             link.UpdatedBy = requesterId;
 
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            
+            // ✅ HOOK: Trigger quest InviteAccepted cho người gửi lời mời (SenderId)
+            // Best-effort: không fail transaction nếu quest trigger lỗi
+            if (_quests is not null)
+            {
+                _ = await _quests.MarkInviteAcceptedAsync(link.SenderId, link.RecipientId, innerCt).ConfigureAwait(false);
+            }
+
             return Result.Success();
         }, ct: ct);
     }
