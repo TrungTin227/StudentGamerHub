@@ -1,6 +1,6 @@
-﻿using FluentValidation;
+using FluentValidation;
 
-namespace BusinessObjects.Common.Results
+namespace Services.Common.Results
 {
     public static class ValidationHelpers
     {

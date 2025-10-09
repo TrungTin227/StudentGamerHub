@@ -1,5 +1,6 @@
 using Application.Friends;
 using BusinessObjects;
+using BusinessObjects.Common;
 using BusinessObjects.Common.Results;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;

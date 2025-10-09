@@ -41,7 +41,8 @@ public sealed class PresenceServiceTests
         _batch.KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
             .Returns(ci => Task.FromResult(IsAlive(ci.Arg<RedisKey>().ToString())));
 
-        _batch.ExecuteAsync(Arg.Any<CommandFlags>()).Returns(Task.CompletedTask);
+        // PresenceService uses IBatch.Execute(); KeyExistsAsync enqueues operations and Execute() flushes them.
+        _batch.When(b => b.Execute()).Do(_ => { /* no-op for substitute */ });
 
         _service = new PresenceService(_connection, Options.Create(_options));
     }

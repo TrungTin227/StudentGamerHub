@@ -1,30 +1,34 @@
+using BusinessObjects.Common.Pagination;
+using BusinessObjects.Common.Results;
+using DTOs.Friends;
+
 namespace Application.Friends;
 
 public interface IFriendService
 {
-    Task<BusinessObjects.Common.Results.Result> InviteAsync(
+    Task<Result> InviteAsync(
         Guid requesterId,
         Guid targetUserId,
         CancellationToken ct = default);
 
-    Task<BusinessObjects.Common.Results.Result> AcceptAsync(
+    Task<Result> AcceptAsync(
         Guid requesterId,
         Guid targetUserId,
         CancellationToken ct = default);
 
-    Task<BusinessObjects.Common.Results.Result> DeclineAsync(
+    Task<Result> DeclineAsync(
         Guid requesterId,
         Guid targetUserId,
         CancellationToken ct = default);
 
-    Task<BusinessObjects.Common.Results.Result> CancelAsync(
+    Task<Result> CancelAsync(
         Guid requesterId,
         Guid targetUserId,
         CancellationToken ct = default);
 
-    Task<BusinessObjects.Common.Results.Result<BusinessObjects.Common.Pagination.CursorPageResult<DTOs.Friends.FriendDto>>> ListAsync(
+    Task<Result<CursorPageResult<FriendDto>>> ListAsync(
         Guid requesterId,
         FriendsFilter filter,
-        BusinessObjects.Common.Pagination.CursorRequest request,
+        CursorRequest request,
         CancellationToken ct = default);
 }
