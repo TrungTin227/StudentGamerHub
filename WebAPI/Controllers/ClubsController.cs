@@ -160,7 +160,7 @@ public sealed class ClubsController : ControllerBase
             return Unauthorized();
 
         var result = await _clubService.UpdateAsync(userId.Value, id, request, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -180,6 +180,6 @@ public sealed class ClubsController : ControllerBase
             return Unauthorized();
 
         var result = await _clubService.ArchiveAsync(userId.Value, id, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 }

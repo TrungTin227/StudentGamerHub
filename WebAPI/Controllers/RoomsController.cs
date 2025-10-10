@@ -315,7 +315,7 @@ public sealed class RoomsController : ControllerBase
             return Unauthorized();
 
         var result = await _roomService.UpdateRoomAsync(currentUserId.Value, id, request, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -350,7 +350,7 @@ public sealed class RoomsController : ControllerBase
             return Unauthorized();
 
         var result = await _roomService.TransferOwnershipAsync(currentUserId.Value, id, newOwnerId, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -379,6 +379,6 @@ public sealed class RoomsController : ControllerBase
             return Unauthorized();
 
         var result = await _roomService.ArchiveRoomAsync(currentUserId.Value, id, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 }
