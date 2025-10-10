@@ -13,4 +13,19 @@ public interface IClubCommandRepository
     /// <param name="club">Club entity to create</param>
     /// <param name="ct">Cancellation token</param>
     Task CreateAsync(Club club, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update an existing club.
+    /// </summary>
+    /// <param name="club">Club entity with updated values</param>
+    /// <param name="ct">Cancellation token</param>
+    Task UpdateAsync(Club club, CancellationToken ct = default);
+
+    /// <summary>
+    /// Soft delete (archive) a club.
+    /// </summary>
+    /// <param name="clubId">Club identifier</param>
+    /// <param name="deletedBy">User performing the deletion</param>
+    /// <param name="ct">Cancellation token</param>
+    Task SoftDeleteAsync(Guid clubId, Guid deletedBy, CancellationToken ct = default);
 }

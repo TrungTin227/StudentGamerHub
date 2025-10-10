@@ -73,6 +73,19 @@ public sealed class ClubQueryRepository : IClubQueryRepository
     }
 
     /// <summary>
+    /// Check if a club still has approved room members.
+    /// </summary>
+    public async Task<bool> HasAnyApprovedRoomsAsync(Guid clubId, CancellationToken ct = default)
+    {
+        return await _context.RoomMembers
+            .AsNoTracking()
+            .AnyAsync(rm =>
+                rm.Status == RoomMemberStatus.Approved &&
+                rm.Room!.ClubId == clubId,
+                ct);
+    }
+
+    /// <summary>
     /// Get club by ID.
     /// </summary>
     public async Task<Club?> GetByIdAsync(Guid clubId, CancellationToken ct = default)
