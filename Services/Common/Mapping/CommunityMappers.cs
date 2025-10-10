@@ -20,4 +20,21 @@ public static class CommunityMappers
             MembersCount: community.MembersCount
         );
     }
+
+    /// <summary>
+    /// Maps a community entity to its detailed DTO representation.
+    /// </summary>
+    public static CommunityDetailDto ToDetailDto(this Community community)
+    {
+        ArgumentNullException.ThrowIfNull(community);
+
+        return new CommunityDetailDto(
+            Id: community.Id,
+            Name: community.Name,
+            Description: community.Description,
+            School: community.School,
+            IsPublic: community.IsPublic,
+            MembersCount: community.MembersCount
+        );
+    }
 }

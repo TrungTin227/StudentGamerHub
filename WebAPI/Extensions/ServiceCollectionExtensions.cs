@@ -135,6 +135,22 @@ public static class ServiceCollectionExtensions
                 });
             });
 
+            // Communities write rate limiting: 10 requests per day per user
+            options.AddPolicy("CommunitiesWrite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 10,
+                    TokensPerPeriod = 10,
+                    ReplenishmentPeriod = TimeSpan.FromDays(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
             // Clubs read rate limiting: 120 requests per minute per user
             options.AddPolicy("ClubsRead", httpContext =>
             {

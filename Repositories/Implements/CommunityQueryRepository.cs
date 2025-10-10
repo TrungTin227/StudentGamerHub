@@ -16,6 +16,21 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
         _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
+    public async Task<Community?> GetByIdAsync(Guid id, CancellationToken ct = default)
+        => await _context.Communities
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, ct)
+            .ConfigureAwait(false);
+
+    public async Task<bool> HasAnyApprovedRoomsAsync(Guid communityId, CancellationToken ct = default)
+        => await _context.RoomMembers
+            .AsNoTracking()
+            .AnyAsync(
+                rm => rm.Status == RoomMemberStatus.Approved
+                      && rm.Room!.Club!.CommunityId == communityId,
+                ct)
+            .ConfigureAwait(false);
+
     /// <summary>
     /// Search communities with filtering and cursor-based pagination.
     /// Stable sort order: MembersCount DESC, Id DESC
