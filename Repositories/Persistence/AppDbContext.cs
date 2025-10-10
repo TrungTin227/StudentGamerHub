@@ -169,7 +169,10 @@ namespace Repositories.Persistence
             // ====== Communities ======
             b.Entity<Community>(e =>
             {
-                // (các field mặc định)
+                // Indexes for search/filtering
+                e.HasIndex(c => c.School);
+                e.HasIndex(c => c.IsPublic);
+                e.HasIndex(c => c.MembersCount);
             });
 
             b.Entity<CommunityGame>(e =>
@@ -189,6 +192,10 @@ namespace Repositories.Persistence
                  .OnDelete(DeleteBehavior.Cascade);
 
                 e.HasIndex(c => new { c.CommunityId, c.Name }).IsUnique();
+                
+                // Indexes for club queries
+                e.HasIndex(c => c.CommunityId);
+                e.HasIndex(c => c.MembersCount);
             });
 
             // ====== Rooms ======
@@ -203,6 +210,16 @@ namespace Repositories.Persistence
 
                 e.HasIndex(r => new { r.ClubId, r.Name }).IsUnique();
                 e.HasCheckConstraint("chk_room_capacity_nonneg", "\"Capacity\" IS NULL OR \"Capacity\" >= 0");
+                
+                // Check constraint: RequiresPassword => JoinPasswordHash must not be null
+                e.HasCheckConstraint("chk_room_password_required", 
+                    "(\"JoinPolicy\" <> '2') OR (\"JoinPasswordHash\" IS NOT NULL)");
+                
+                // Indexes for room queries
+                e.HasIndex(r => r.ClubId);
+                e.HasIndex(r => r.JoinPolicy);
+                e.HasIndex(r => r.MembersCount);
+                e.HasIndex(r => r.Capacity);
             });
 
             // ====== RoomMembers ======
@@ -221,6 +238,11 @@ namespace Repositories.Persistence
 
                 // PK đã đặt qua [PrimaryKey(RoomId, UserId)]
                 e.HasIndex(rm => new { rm.RoomId, rm.UserId }).IsUnique();
+                
+                // Indexes for member queries
+                e.HasIndex(rm => new { rm.RoomId, rm.Status }); // Composite for filtering by room + status
+                e.HasIndex(rm => rm.Status);
+                e.HasIndex(rm => rm.UserId);
             });
 
             // ====== Events ======

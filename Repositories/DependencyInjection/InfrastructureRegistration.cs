@@ -58,7 +58,10 @@ namespace Repositories.DependencyInjection
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddScoped<IGenericUnitOfWork, UnitOfWork>();
 
-            // 4) Hosted seeding
+            // 4) Password hasher for Room (for room password hashing)
+            services.AddScoped<IPasswordHasher<Room>, PasswordHasher<Room>>();
+
+            // 5) Hosted seeding
             services.AddHostedService<DbInitializerHostedService>();
 
             return services;
