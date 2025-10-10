@@ -420,4 +420,200 @@ public sealed class RoomService : IRoomService
             return Result.Success();
         }, ct: ct);
     }
+
+    /// <inheritdoc />
+    public async Task<Result<RoomDetailDto>> GetByIdAsync(Guid roomId, CancellationToken ct = default)
+    {
+        var room = await _roomQuery.GetRoomWithClubCommunityAsync(roomId, ct);
+
+        if (room is null)
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+
+        return Result<RoomDetailDto>.Success(room.ToRoomDetailDto());
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IReadOnlyList<RoomMemberBriefDto>>> ListMembersAsync(
+        Guid roomId,
+        int skip,
+        int take,
+        CancellationToken ct = default)
+    {
+        if (skip < 0)
+            return Result<IReadOnlyList<RoomMemberBriefDto>>.Failure(new Error(Error.Codes.Validation, "skip must be >= 0."));
+
+        if (take <= 0 || take > 100)
+            return Result<IReadOnlyList<RoomMemberBriefDto>>.Failure(new Error(Error.Codes.Validation, "take must be between 1 and 100."));
+
+        var room = await _roomQuery.GetByIdAsync(roomId, ct);
+        if (room is null)
+            return Result<IReadOnlyList<RoomMemberBriefDto>>.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+
+        var members = await _roomQuery.ListMembersAsync(roomId, take, skip, ct);
+        var dtos = members.Select(m => m.ToRoomMemberBriefDto()).ToList();
+
+        return Result<IReadOnlyList<RoomMemberBriefDto>>.Success(dtos);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> UpdateRoomAsync(
+        Guid currentUserId,
+        Guid roomId,
+        RoomUpdateRequestDto req,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return Result.Failure(new Error(Error.Codes.Validation, "Room name is required."));
+
+        if (req.Capacity.HasValue && req.Capacity.Value < 1)
+            return Result.Failure(new Error(Error.Codes.Validation, "Capacity must be at least 1 when provided."));
+
+        if (req.JoinPolicy == RoomJoinPolicy.RequiresPassword && string.IsNullOrWhiteSpace(req.Password))
+            return Result.Failure(new Error(Error.Codes.Validation, "Password is required for RequiresPassword policy."));
+
+        var trimmedName = req.Name.Trim();
+        var normalizedDescription = NormalizeOrNull(req.Description);
+        var trimmedPassword = req.Password?.Trim();
+
+        return await _uow.ExecuteTransactionAsync(async ctk =>
+        {
+            var room = await _roomQuery.GetByIdAsync(roomId, ctk);
+            if (room is null)
+                return Result.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+
+            var member = await _roomQuery.GetMemberAsync(roomId, currentUserId, ctk);
+            if (member is null || member.Status != RoomMemberStatus.Approved)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "You are not a member of this room."));
+
+            if (member.Role != RoomRole.Owner)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Only the owner can update the room."));
+
+            if (req.Capacity.HasValue)
+            {
+                var approvedCount = await _roomQuery.CountApprovedMembersAsync(roomId, ctk);
+                if (approvedCount > req.Capacity.Value)
+                    return Result.Failure(new Error(Error.Codes.Conflict, "Capacity cannot be lower than current approved members."));
+            }
+
+            room.Name = trimmedName;
+            room.Description = normalizedDescription;
+            room.JoinPolicy = req.JoinPolicy;
+            room.Capacity = req.Capacity;
+            room.UpdatedAtUtc = DateTime.UtcNow;
+            room.UpdatedBy = currentUserId;
+
+            if (req.JoinPolicy == RoomJoinPolicy.RequiresPassword)
+            {
+                room.JoinPasswordHash = _passwordHasher.HashPassword(room, trimmedPassword!);
+            }
+            else
+            {
+                room.JoinPasswordHash = null;
+            }
+
+            await _roomCommand.UpdateRoomAsync(room, ctk);
+            await _uow.SaveChangesAsync(ctk);
+
+            return Result.Success();
+        }, ct: ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> TransferOwnershipAsync(
+        Guid currentUserId,
+        Guid roomId,
+        Guid newOwnerUserId,
+        CancellationToken ct = default)
+    {
+        return await _uow.ExecuteTransactionAsync(async ctk =>
+        {
+            var room = await _roomQuery.GetByIdAsync(roomId, ctk);
+            if (room is null)
+                return Result.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+
+            var currentMember = await _roomQuery.GetMemberAsync(roomId, currentUserId, ctk);
+            if (currentMember is null || currentMember.Status != RoomMemberStatus.Approved)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "You are not a member of this room."));
+
+            if (currentMember.Role != RoomRole.Owner)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Only the owner can transfer ownership."));
+
+            var targetMember = await _roomQuery.GetMemberAsync(roomId, newOwnerUserId, ctk);
+            if (targetMember is null)
+                return Result.Failure(new Error(Error.Codes.NotFound, "Target member not found."));
+
+            if (targetMember.Status != RoomMemberStatus.Approved)
+                return Result.Failure(new Error(Error.Codes.Conflict, "Target member must be approved."));
+
+            currentMember.Role = RoomRole.Moderator;
+            targetMember.Role = RoomRole.Owner;
+
+            await _roomCommand.UpdateMemberAsync(currentMember, ctk);
+            await _roomCommand.UpdateMemberAsync(targetMember, ctk);
+            await _uow.SaveChangesAsync(ctk);
+
+            return Result.Success();
+        }, ct: ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> ArchiveRoomAsync(
+        Guid currentUserId,
+        Guid roomId,
+        CancellationToken ct = default)
+    {
+        return await _uow.ExecuteTransactionAsync(async ctk =>
+        {
+            var room = await _roomQuery.GetByIdAsync(roomId, ctk);
+            if (room is null)
+                return Result.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+
+            var member = await _roomQuery.GetMemberAsync(roomId, currentUserId, ctk);
+            if (member is null || member.Status != RoomMemberStatus.Approved)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "You are not a member of this room."));
+
+            if (member.Role != RoomRole.Owner)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Only the owner can archive the room."));
+
+            var approvedCount = await _roomQuery.CountApprovedMembersAsync(roomId, ctk);
+            if (approvedCount > 1)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Room still has other approved members."));
+
+            var members = await _roomQuery.ListMembersAsync(roomId, int.MaxValue, 0, ctk);
+            var approvedMembers = members
+                .Where(m => m.Status == RoomMemberStatus.Approved)
+                .Select(m => m.UserId)
+                .ToList();
+
+            await _roomCommand.SoftDeleteRoomAsync(roomId, currentUserId, ctk);
+            await _uow.SaveChangesAsync(ctk);
+
+            foreach (var userId in approvedMembers)
+            {
+                var hasOtherInClub = await _roomQuery.HasAnyApprovedInClubAsync(userId, room.ClubId, ctk);
+                if (!hasOtherInClub)
+                {
+                    await _roomCommand.IncrementClubMembersAsync(room.ClubId, -1, ctk);
+
+                    if (room.Club?.CommunityId is Guid communityId)
+                    {
+                        var hasOtherInCommunity = await _roomQuery.HasAnyApprovedInCommunityAsync(userId, communityId, ctk);
+                        if (!hasOtherInCommunity)
+                        {
+                            await _roomCommand.IncrementCommunityMembersAsync(communityId, -1, ctk);
+                        }
+                    }
+                }
+            }
+
+            await _uow.SaveChangesAsync(ctk);
+
+            return Result.Success();
+        }, ct: ct);
+    }
+
+    private static string? NormalizeOrNull(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

@@ -25,6 +25,34 @@ public sealed class RoomCommandRepository : IRoomCommandRepository
     }
 
     /// <summary>
+    /// Update existing room information.
+    /// </summary>
+    public Task UpdateRoomAsync(Room room, CancellationToken ct = default)
+    {
+        _context.Rooms.Update(room);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Soft delete a room by updating soft-delete audit fields.
+    /// </summary>
+    public async Task SoftDeleteRoomAsync(Guid roomId, Guid deletedBy, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+
+        await _context.Rooms
+            .IgnoreQueryFilters()
+            .Where(r => r.Id == roomId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(r => r.IsDeleted, r => true)
+                .SetProperty(r => r.DeletedAtUtc, r => now)
+                .SetProperty(r => r.DeletedBy, r => deletedBy)
+                .SetProperty(r => r.UpdatedAtUtc, r => now)
+                .SetProperty(r => r.UpdatedBy, r => deletedBy)
+                .SetProperty(r => r.MembersCount, r => 0), ct);
+    }
+
+    /// <summary>
     /// Upsert room member (insert or update).
     /// </summary>
     public async Task UpsertMemberAsync(RoomMember member, CancellationToken ct = default)

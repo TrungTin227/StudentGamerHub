@@ -21,6 +21,54 @@ public sealed class RoomsController : ControllerBase
     }
 
     /// <summary>
+    /// Get a room by ID.
+    /// Rate limit: 120 requests per minute per user.
+    /// </summary>
+    /// <param name="id">Room ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Room detail</returns>
+    /// <response code="200">Room detail returned</response>
+    /// <response code="404">Room not found</response>
+    [HttpGet("{id:guid}")]
+    [EnableRateLimiting("RoomsRead")]
+    [ProducesResponseType(typeof(RoomDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<RoomDetailDto>> GetRoom(Guid id, CancellationToken ct)
+    {
+        var result = await _roomService.GetByIdAsync(id, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// List room members.
+    /// Rate limit: 120 requests per minute per user.
+    /// </summary>
+    /// <param name="id">Room ID</param>
+    /// <param name="skip">Number of members to skip</param>
+    /// <param name="take">Number of members to take (1-100)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of members</returns>
+    /// <response code="200">Members returned</response>
+    /// <response code="400">Invalid pagination parameters</response>
+    /// <response code="404">Room not found</response>
+    [HttpGet("{id:guid}/members")]
+    [EnableRateLimiting("RoomsRead")]
+    [ProducesResponseType(typeof(IReadOnlyList<RoomMemberBriefDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<IReadOnlyList<RoomMemberBriefDto>>> ListMembers(
+        Guid id,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 20,
+        CancellationToken ct = default)
+    {
+        var result = await _roomService.ListMembersAsync(id, skip, take, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
     /// Create a new room within a club.
     /// Creator becomes the room owner with automatic approval.
     /// Rate limit: 10 requests per day per user.
@@ -86,7 +134,7 @@ public sealed class RoomsController : ControllerBase
     /// <response code="409">Already a member or room at capacity</response>
     /// <response code="429">Rate limit exceeded (60 per minute)</response>
     [HttpPost("{id:guid}/join")]
-    [EnableRateLimiting("RoomsAction")]
+    [EnableRateLimiting("RoomsWrite")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -128,7 +176,7 @@ public sealed class RoomsController : ControllerBase
     /// <response code="409">Member not pending or room at capacity</response>
     /// <response code="429">Rate limit exceeded (60 per minute)</response>
     [HttpPost("{id:guid}/approve/{userId:guid}")]
-    [EnableRateLimiting("RoomsAction")]
+    [EnableRateLimiting("RoomsWrite")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -168,7 +216,7 @@ public sealed class RoomsController : ControllerBase
     /// <response code="404">Room or membership not found</response>
     /// <response code="429">Rate limit exceeded (60 per minute)</response>
     [HttpPost("{id:guid}/leave")]
-    [EnableRateLimiting("RoomsAction")]
+    [EnableRateLimiting("RoomsWrite")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -207,7 +255,7 @@ public sealed class RoomsController : ControllerBase
     /// <response code="404">Room or member not found</response>
     /// <response code="429">Rate limit exceeded (60 per minute)</response>
     [HttpPost("{id:guid}/kickban/{userId:guid}")]
-    [EnableRateLimiting("RoomsAction")]
+    [EnableRateLimiting("RoomsWrite")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -231,5 +279,106 @@ public sealed class RoomsController : ControllerBase
             ct);
 
         return this.ToActionResult(result);
+    }
+
+    /// <summary>
+    /// Update room metadata (owner only).
+    /// Rate limit: 30 requests per minute per user.
+    /// </summary>
+    /// <param name="id">Room ID</param>
+    /// <param name="request">Update payload</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Success or error</returns>
+    /// <response code="204">Updated successfully</response>
+    /// <response code="400">Validation error</response>
+    /// <response code="401">Not authenticated</response>
+    /// <response code="403">Forbidden (not owner)</response>
+    /// <response code="404">Room not found</response>
+    /// <response code="409">Capacity conflict</response>
+    /// <response code="429">Rate limit exceeded</response>
+    [HttpPatch("{id:guid}")]
+    [EnableRateLimiting("RoomsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> UpdateRoom(
+        Guid id,
+        [FromBody] RoomUpdateRequestDto request,
+        CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+            return Unauthorized();
+
+        var result = await _roomService.UpdateRoomAsync(currentUserId.Value, id, request, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+    }
+
+    /// <summary>
+    /// Transfer room ownership to another approved member.
+    /// Rate limit: 30 requests per minute per user.
+    /// </summary>
+    /// <param name="id">Room ID</param>
+    /// <param name="newOwnerId">New owner user ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Success or error</returns>
+    /// <response code="204">Ownership transferred</response>
+    /// <response code="401">Not authenticated</response>
+    /// <response code="403">Forbidden (not owner)</response>
+    /// <response code="404">Room or member not found</response>
+    /// <response code="409">Target member not approved</response>
+    /// <response code="429">Rate limit exceeded</response>
+    [HttpPost("{id:guid}/transfer-ownership/{newOwnerId:guid}")]
+    [EnableRateLimiting("RoomsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> TransferOwnership(
+        Guid id,
+        Guid newOwnerId,
+        CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+            return Unauthorized();
+
+        var result = await _roomService.TransferOwnershipAsync(currentUserId.Value, id, newOwnerId, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+    }
+
+    /// <summary>
+    /// Archive a room (soft delete).
+    /// Rate limit: 10 requests per day per user.
+    /// </summary>
+    /// <param name="id">Room ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Success or error</returns>
+    /// <response code="204">Room archived</response>
+    /// <response code="401">Not authenticated</response>
+    /// <response code="403">Forbidden (not owner or members remain)</response>
+    /// <response code="404">Room not found</response>
+    /// <response code="429">Rate limit exceeded</response>
+    [HttpDelete("{id:guid}")]
+    [EnableRateLimiting("RoomsArchive")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> ArchiveRoom(Guid id, CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+            return Unauthorized();
+
+        var result = await _roomService.ArchiveRoomAsync(currentUserId.Value, id, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
     }
 }
