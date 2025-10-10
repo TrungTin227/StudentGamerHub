@@ -103,16 +103,48 @@ public static class ServiceCollectionExtensions
                 });
             });
 
-            // Room actions rate limiting: 60 requests per minute per user
-            options.AddPolicy("RoomsAction", httpContext =>
+            // Room read rate limiting: 120 requests per minute per user
+            options.AddPolicy("RoomsRead", httpContext =>
             {
                 var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
 
                 return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
                 {
-                    TokenLimit = 60,
-                    TokensPerPeriod = 60,
+                    TokenLimit = 120,
+                    TokensPerPeriod = 120,
                     ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            // Room write rate limiting: 30 requests per minute per user
+            options.AddPolicy("RoomsWrite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 30,
+                    TokensPerPeriod = 30,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            // Room archive rate limiting: 10 requests per day per user
+            options.AddPolicy("RoomsArchive", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 10,
+                    TokensPerPeriod = 10,
+                    ReplenishmentPeriod = TimeSpan.FromDays(1),
                     QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                     QueueLimit = 0,
                     AutoReplenishment = true

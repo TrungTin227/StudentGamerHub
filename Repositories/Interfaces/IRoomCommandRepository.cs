@@ -12,6 +12,16 @@ public interface IRoomCommandRepository
     Task CreateRoomAsync(Room room, CancellationToken ct = default);
 
     /// <summary>
+    /// Update existing room information.
+    /// </summary>
+    Task UpdateRoomAsync(Room room, CancellationToken ct = default);
+
+    /// <summary>
+    /// Soft delete a room by ID.
+    /// </summary>
+    Task SoftDeleteRoomAsync(Guid roomId, Guid deletedBy, CancellationToken ct = default);
+
+    /// <summary>
     /// Upsert room member (insert or update if exists).
     /// </summary>
     Task UpsertMemberAsync(RoomMember member, CancellationToken ct = default);

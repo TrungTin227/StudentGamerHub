@@ -29,6 +29,17 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
     }
 
     /// <summary>
+    /// Get room tracked for updates, including Club and Community navigations.
+    /// </summary>
+    public async Task<Room?> GetByIdAsync(Guid roomId, CancellationToken ct = default)
+    {
+        return await _context.Rooms
+            .Include(r => r.Club)
+                .ThenInclude(c => c.Community)
+            .FirstOrDefaultAsync(r => r.Id == roomId, ct);
+    }
+
+    /// <summary>
     /// Get specific room member.
     /// </summary>
     public async Task<RoomMember?> GetMemberAsync(Guid roomId, Guid userId, CancellationToken ct = default)
@@ -48,6 +59,21 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
             .AsNoTracking()
             .Where(rm => rm.RoomId == roomId && rm.Status == RoomMemberStatus.Approved)
             .CountAsync(ct);
+    }
+
+    /// <summary>
+    /// List members in a room with pagination.
+    /// </summary>
+    public async Task<IReadOnlyList<RoomMember>> ListMembersAsync(Guid roomId, int take, int skip, CancellationToken ct = default)
+    {
+        return await _context.RoomMembers
+            .AsNoTracking()
+            .Where(rm => rm.RoomId == roomId)
+            .Include(rm => rm.User)
+            .OrderBy(rm => rm.JoinedAt)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(ct);
     }
 
     /// <summary>

@@ -87,9 +87,34 @@ public interface IRoomService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Success or error</returns>
     Task<Result> KickOrBanAsync(
-        Guid currentUserId, 
-        Guid roomId, 
-        Guid targetUserId, 
-        bool ban, 
+        Guid currentUserId,
+        Guid roomId,
+        Guid targetUserId,
+        bool ban,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Get room detail by ID.
+    /// </summary>
+    Task<Result<RoomDetailDto>> GetByIdAsync(Guid roomId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List room members with pagination.
+    /// </summary>
+    Task<Result<IReadOnlyList<RoomMemberBriefDto>>> ListMembersAsync(Guid roomId, int skip, int take, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update room metadata. Only owner can update.
+    /// </summary>
+    Task<Result> UpdateRoomAsync(Guid currentUserId, Guid roomId, RoomUpdateRequestDto req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Transfer ownership to another approved member.
+    /// </summary>
+    Task<Result> TransferOwnershipAsync(Guid currentUserId, Guid roomId, Guid newOwnerUserId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archive a room (soft delete). Only allowed when no other approved members remain.
+    /// </summary>
+    Task<Result> ArchiveRoomAsync(Guid currentUserId, Guid roomId, CancellationToken ct = default);
 }
