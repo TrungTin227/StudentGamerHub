@@ -12,7 +12,6 @@ namespace WebAPI.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Produces("application/json")]
 [Authorize]
 public sealed class TeammatesController : ControllerBase
 {

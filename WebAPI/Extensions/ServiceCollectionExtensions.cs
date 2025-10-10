@@ -19,6 +19,9 @@ public static class ServiceCollectionExtensions
 
         services.AddSignalR();
 
+        // Ensure API explorer for controllers is available for OpenAPI/Scalar
+        services.AddEndpointsApiExplorer();
+
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -131,6 +134,38 @@ public static class ServiceCollectionExtensions
                     AutoReplenishment = true
                 });
             });
+
+            // Clubs read rate limiting: 120 requests per minute per user
+            options.AddPolicy("ClubsRead", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 120,
+                    TokensPerPeriod = 120,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            // Clubs create rate limiting: 10 requests per day per user
+            options.AddPolicy("ClubsCreate", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 10,
+                    TokensPerPeriod = 10,
+                    ReplenishmentPeriod = TimeSpan.FromDays(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
         });
 
         services.TryAddSingleton<IConnectionMultiplexer>(sp =>
@@ -171,10 +206,28 @@ public static class ServiceCollectionExtensions
 
         services.AddCors(opt =>
         {
-            opt.AddPolicy("Default", p => p
-                .AllowAnyOrigin()
-                .AllowAnyHeader()
-                .AllowAnyMethod());
+            opt.AddPolicy("Default", p =>
+            {
+                // Read allowed origins from configuration: Cors:AllowedOrigins as string[]
+                var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                                     ?? Array.Empty<string>();
+
+                if (allowedOrigins.Length == 0 || Array.Exists(allowedOrigins, o => o == "*"))
+                {
+                    // Fallback: allow any origin (no credentials allowed with wildcard)
+                    p.AllowAnyOrigin()
+                     .AllowAnyHeader()
+                     .AllowAnyMethod();
+                }
+                else
+                {
+                    // Explicit origins: allow credentials for SPA auth/cookies if needed
+                    p.WithOrigins(allowedOrigins)
+                     .AllowAnyHeader()
+                     .AllowAnyMethod()
+                     .AllowCredentials();
+                }
+            });
         });
 
         services.Configure<ApiBehaviorOptions>(opt =>

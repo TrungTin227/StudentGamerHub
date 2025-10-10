@@ -5,7 +5,6 @@ namespace WebAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Produces("application/json")]
     [Authorize(Roles = "Admin")]
     public sealed class UsersController : ControllerBase
     {

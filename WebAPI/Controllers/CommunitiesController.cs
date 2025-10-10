@@ -9,8 +9,7 @@ namespace WebAPI.Controllers;
 /// Provides cursor-based pagination for community discovery.
 /// </summary>
 [ApiController]
-[Route("communities")]
-[Produces("application/json")]
+[Route("api/[controller]")]
 [Authorize]
 public sealed class CommunitiesController : ControllerBase
 {

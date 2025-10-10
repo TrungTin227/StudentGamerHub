@@ -9,8 +9,7 @@ namespace WebAPI.Controllers;
 /// Handles room creation, joining, member approval, leaving, and moderation.
 /// </summary>
 [ApiController]
-[Route("rooms")]
-[Produces("application/json")]
+[Route("api/[controller]")]
 [Authorize]
 public sealed class RoomsController : ControllerBase
 {

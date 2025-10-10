@@ -11,8 +11,7 @@ namespace WebAPI.Controllers;
 /// - Optimized with batch Redis operations
 /// </summary>
 [ApiController]
-[Route("dashboard")]
-[Produces("application/json")]
+[Route("api/[controller]")]
 [Authorize]
 public sealed class DashboardController : ControllerBase
 {

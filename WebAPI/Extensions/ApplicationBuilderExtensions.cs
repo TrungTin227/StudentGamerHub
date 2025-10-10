@@ -8,15 +8,18 @@ public static class ApplicationBuilderExtensions
     {
         app.UseExceptionHandler();
 
-        app.MapOpenApi();
-        app.MapScalarApiReference("/docs", o => o.WithTitle("Student Gamer Hub API"));
-        app.MapGet("/", () => Results.Redirect("/docs"));
-
         app.UseHttpsRedirection();
         app.UseCors("Default");
+        app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
+
+        // Map OpenAPI and documentation AFTER all endpoints are mapped
+        // so the document includes controller routes (e.g., Clubs endpoints).
+        app.MapOpenApi();
+        app.MapScalarApiReference("/docs", o => o.WithTitle("Student Gamer Hub API"));
+        app.MapGet("/", () => Results.Redirect("/docs"));
 
         return app;
     }

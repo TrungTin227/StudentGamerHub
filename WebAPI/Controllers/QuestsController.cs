@@ -14,8 +14,7 @@ namespace WebAPI.Controllers;
 /// Các quest khác ???c trigger t? ??ng t? các service t??ng ?ng.
 /// </summary>
 [ApiController]
-[Route("quests")]
-[Produces("application/json")]
+[Route("api/[controller]")]
 [Authorize]
 public sealed class QuestsController : ControllerBase
 {

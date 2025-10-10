@@ -7,7 +7,6 @@ namespace WebAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Produces("application/json")]
 public sealed class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;

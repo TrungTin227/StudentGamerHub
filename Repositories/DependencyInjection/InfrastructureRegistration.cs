@@ -61,7 +61,14 @@ namespace Repositories.DependencyInjection
             // 4) Password hasher for Room (for room password hashing)
             services.AddScoped<IPasswordHasher<Room>, PasswordHasher<Room>>();
 
-            // 5) Hosted seeding
+            // 5) Specific Repositories (not auto-registered by convention)
+            services.AddScoped<ICommunityQueryRepository, CommunityQueryRepository>();
+            services.AddScoped<IRoomQueryRepository, RoomQueryRepository>();
+            services.AddScoped<IRoomCommandRepository, RoomCommandRepository>();
+            services.AddScoped<IClubQueryRepository, ClubQueryRepository>();
+            services.AddScoped<IClubCommandRepository, ClubCommandRepository>();
+
+            // 6) Hosted seeding
             services.AddHostedService<DbInitializerHostedService>();
 
             return services;
