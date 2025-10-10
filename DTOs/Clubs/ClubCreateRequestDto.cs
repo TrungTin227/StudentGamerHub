@@ -2,9 +2,10 @@ namespace DTOs.Clubs;
 
 /// <summary>
 /// Request DTO for creating a new club.
-/// CommunityId is provided in the route parameter.
+/// Includes the community identifier where the club belongs.
 /// </summary>
 public sealed record ClubCreateRequestDto(
+    Guid CommunityId,
     string Name,
     string? Description,
     bool IsPublic

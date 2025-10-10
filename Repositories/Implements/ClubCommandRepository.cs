@@ -23,4 +23,36 @@ public sealed class ClubCommandRepository : IClubCommandRepository
     {
         await _context.Clubs.AddAsync(club, ct);
     }
+
+    /// <summary>
+    /// Update existing club entity.
+    /// </summary>
+    public Task UpdateAsync(Club club, CancellationToken ct = default)
+    {
+        _context.Clubs.Update(club);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Soft delete (archive) a club.
+    /// </summary>
+    public async Task SoftDeleteAsync(Guid clubId, Guid deletedBy, CancellationToken ct = default)
+    {
+        var club = await _context.Clubs
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == clubId, ct)
+            .ConfigureAwait(false);
+
+        if (club is null)
+            return;
+
+        var now = DateTime.UtcNow;
+        club.IsDeleted = true;
+        club.DeletedAtUtc = now;
+        club.DeletedBy = deletedBy;
+        club.UpdatedAtUtc = now;
+        club.UpdatedBy = deletedBy;
+
+        _context.Clubs.Update(club);
+    }
 }

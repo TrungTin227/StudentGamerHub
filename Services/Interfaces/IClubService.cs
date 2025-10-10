@@ -53,6 +53,16 @@ public interface IClubService
     /// </summary>
     /// <param name="clubId">Club ID</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Result with club brief DTO, or NotFound if club doesn't exist</returns>
-    Task<Result<ClubBriefDto>> GetByIdAsync(Guid clubId, CancellationToken ct = default);
+    /// <returns>Result with club detail DTO, or NotFound if club doesn't exist</returns>
+    Task<Result<ClubDetailDto>> GetByIdAsync(Guid clubId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update club information.
+    /// </summary>
+    Task<Result> UpdateAsync(Guid currentUserId, Guid id, ClubUpdateRequestDto req, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archive (soft delete) a club.
+    /// </summary>
+    Task<Result> ArchiveAsync(Guid currentUserId, Guid id, CancellationToken ct = default);
 }

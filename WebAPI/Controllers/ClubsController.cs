@@ -40,7 +40,7 @@ public sealed class ClubsController : ControllerBase
     /// <response code="400">Invalid request (validation error)</response>
     /// <response code="401">Not authenticated</response>
     /// <response code="429">Rate limit exceeded (120 per minute)</response>
-    [HttpGet("communities/{communityId:guid}")]
+    [HttpGet("~/api/communities/{communityId:guid}/clubs")]
     [EnableRateLimiting("ClubsRead")]
     [ProducesResponseType(typeof(CursorPageResult<ClubBriefDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -85,21 +85,20 @@ public sealed class ClubsController : ControllerBase
     /// Initial MembersCount = 0.
     /// Rate limit: 10 requests per day per user.
     /// </summary>
-    /// <param name="request">Club creation request</param>
+    /// <param name="request">Club creation request (includes CommunityId)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>New club ID</returns>
     /// <response code="201">Club created successfully</response>
     /// <response code="400">Invalid request (validation error)</response>
     /// <response code="401">Not authenticated</response>
     /// <response code="429">Rate limit exceeded (10 per day)</response>
-    [HttpPost("communities/{communityId:guid}")]
-    [EnableRateLimiting("ClubsCreate")]
+    [HttpPost]
+    [EnableRateLimiting("ClubsWrite")]
     [ProducesResponseType(typeof(Guid), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult> CreateClub(
-        Guid communityId,
         [FromBody] ClubCreateRequestDto request,
         CancellationToken ct = default)
     {
@@ -109,7 +108,7 @@ public sealed class ClubsController : ControllerBase
 
         var result = await _clubService.CreateClubAsync(
             userId.Value,
-            communityId,
+            request.CommunityId,
             request.Name,
             request.Description,
             request.IsPublic,
@@ -123,21 +122,64 @@ public sealed class ClubsController : ControllerBase
     /// </summary>
     /// <param name="id">Club ID</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Club brief information</returns>
+    /// <returns>Club detail information</returns>
     /// <response code="200">Club retrieved successfully</response>
     /// <response code="401">Not authenticated</response>
     /// <response code="404">Club not found</response>
-    [HttpGet("communities/{communityId:guid}/{id:guid}")]
+    [HttpGet("{id:guid}")]
     [EnableRateLimiting("ClubsRead")]
-    [ProducesResponseType(typeof(ClubBriefDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ClubDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult> GetClubById(
-        Guid communityId,
         Guid id,
         CancellationToken ct = default)
     {
         var result = await _clubService.GetByIdAsync(id, ct);
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Update club information.
+    /// Rate limit: 10 requests per day per user (shared with create/delete).
+    /// </summary>
+    [HttpPatch("{id:guid}")]
+    [EnableRateLimiting("ClubsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> UpdateClub(
+        Guid id,
+        [FromBody] ClubUpdateRequestDto request,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _clubService.UpdateAsync(userId.Value, id, request, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+    }
+
+    /// <summary>
+    /// Archive (soft delete) a club.
+    /// Rate limit: 10 requests per day per user (shared with create/update).
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [EnableRateLimiting("ClubsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ArchiveClub(Guid id, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _clubService.ArchiveAsync(userId.Value, id, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
     }
 }

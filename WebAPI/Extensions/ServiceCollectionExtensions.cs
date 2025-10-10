@@ -167,8 +167,8 @@ public static class ServiceCollectionExtensions
                 });
             });
 
-            // Clubs create rate limiting: 10 requests per day per user
-            options.AddPolicy("ClubsCreate", httpContext =>
+            // Clubs write rate limiting (create/update/archive): 10 requests per day per user
+            options.AddPolicy("ClubsWrite", httpContext =>
             {
                 var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
 
@@ -182,6 +182,7 @@ public static class ServiceCollectionExtensions
                     AutoReplenishment = true
                 });
             });
+
         });
 
         services.TryAddSingleton<IConnectionMultiplexer>(sp =>

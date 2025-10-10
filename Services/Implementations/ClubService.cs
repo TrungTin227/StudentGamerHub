@@ -85,7 +85,7 @@ public sealed class ClubService : IClubService
 
         // Trim inputs
         name = name.Trim();
-        description = description?.Trim();
+        description = NormalizeOrNull(description);
 
         // Validate name length (reasonable limit)
         if (name.Length > 256)
@@ -103,7 +103,8 @@ public sealed class ClubService : IClubService
                 Name = name,
                 Description = description,
                 IsPublic = isPublic,
-                MembersCount = 0
+                MembersCount = 0,
+                CreatedBy = currentUserId
             };
 
             // Note: Audit fields (CreatedBy, CreatedAtUtc) are auto-set by AppDbContext.SaveChanges
@@ -116,15 +117,83 @@ public sealed class ClubService : IClubService
     }
 
     /// <inheritdoc/>
-    public async Task<Result<ClubBriefDto>> GetByIdAsync(Guid clubId, CancellationToken ct = default)
+    public async Task<Result<ClubDetailDto>> GetByIdAsync(Guid clubId, CancellationToken ct = default)
     {
         var club = await _clubQuery.GetByIdAsync(clubId, ct);
 
         if (club is null)
-            return Result<ClubBriefDto>.Failure(
+            return Result<ClubDetailDto>.Failure(
                 new Error(Error.Codes.NotFound, $"Club with ID '{clubId}' not found."));
 
-        var dto = club.ToClubBriefDto();
-        return Result<ClubBriefDto>.Success(dto);
+        var dto = club.ToClubDetailDto();
+        return Result<ClubDetailDto>.Success(dto);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> UpdateAsync(Guid currentUserId, Guid id, ClubUpdateRequestDto req, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return Result.Failure(new Error(Error.Codes.Validation, "Club name is required."));
+
+        var name = req.Name.Trim();
+        if (name.Length > 256)
+            return Result.Failure(new Error(Error.Codes.Validation, "Club name must not exceed 256 characters."));
+
+        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            var club = await _clubQuery.GetByIdAsync(id, innerCt).ConfigureAwait(false);
+            if (club is null)
+                return Result.Failure(new Error(Error.Codes.NotFound, "Club not found."));
+
+            if (!IsAuthorized(currentUserId, club))
+                return Result.Failure(new Error(Error.Codes.Forbidden, "You are not allowed to update this club."));
+
+            club.Name = name;
+            club.Description = NormalizeOrNull(req.Description);
+            club.IsPublic = req.IsPublic;
+            club.UpdatedBy = currentUserId;
+            club.UpdatedAtUtc = DateTime.UtcNow;
+
+            await _clubCommand.UpdateAsync(club, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> ArchiveAsync(Guid currentUserId, Guid id, CancellationToken ct = default)
+    {
+        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            var club = await _clubQuery.GetByIdAsync(id, innerCt).ConfigureAwait(false);
+            if (club is null)
+                return Result.Failure(new Error(Error.Codes.NotFound, "Club not found."));
+
+            if (!IsAuthorized(currentUserId, club))
+                return Result.Failure(new Error(Error.Codes.Forbidden, "You are not allowed to archive this club."));
+
+            var hasApprovedRooms = await _clubQuery.HasAnyApprovedRoomsAsync(id, innerCt).ConfigureAwait(false);
+            if (hasApprovedRooms)
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Club still has approved room members."));
+
+            await _clubCommand.SoftDeleteAsync(id, currentUserId, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+    }
+
+    private static bool IsAuthorized(Guid currentUserId, Club club)
+    {
+        return club.CreatedBy == currentUserId;
+    }
+
+    private static string? NormalizeOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return value.Trim();
     }
 }

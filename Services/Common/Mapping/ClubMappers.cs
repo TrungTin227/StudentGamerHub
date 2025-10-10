@@ -21,4 +21,21 @@ public static class ClubMappers
             Description: club.Description
         );
     }
+
+    /// <summary>
+    /// Maps Club entity to ClubDetailDto.
+    /// </summary>
+    public static ClubDetailDto ToClubDetailDto(this Club club)
+    {
+        ArgumentNullException.ThrowIfNull(club);
+
+        return new ClubDetailDto(
+            Id: club.Id,
+            CommunityId: club.CommunityId,
+            Name: club.Name,
+            Description: club.Description,
+            IsPublic: club.IsPublic,
+            MembersCount: club.MembersCount
+        );
+    }
 }

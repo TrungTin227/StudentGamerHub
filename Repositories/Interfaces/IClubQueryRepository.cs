@@ -27,6 +27,13 @@ public interface IClubQueryRepository
         CancellationToken ct = default);
 
     /// <summary>
+    /// Determine whether the club has any approved room members.
+    /// </summary>
+    /// <param name="clubId">Club ID</param>
+    /// <param name="ct">Cancellation token</param>
+    Task<bool> HasAnyApprovedRoomsAsync(Guid clubId, CancellationToken ct = default);
+
+    /// <summary>
     /// Get club by ID.
     /// </summary>
     /// <param name="clubId">Club ID</param>
