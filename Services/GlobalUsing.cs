@@ -13,6 +13,8 @@ global using DTOs.Roles.Filters;
 global using DTOs.Roles.Requests;
 global using DTOs.Users;
 global using DTOs.Users.Requests;
+global using DTOs.Communities;
+global using DTOs.Rooms;
 global using Repositories.Interfaces;
 global using Repositories.Persistence;
 global using Repositories.WorkSeeds.Extensions;
