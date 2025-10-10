@@ -3,6 +3,7 @@ global using BusinessObjects.Common.Pagination;
 global using BusinessObjects.Common.Results;
 global using DTOs.Auth.Requests;
 global using DTOs.Auth.Responses;
+global using DTOs.Clubs;
 global using DTOs.Communities;
 global using DTOs.Dashboard;
 global using DTOs.Quests;

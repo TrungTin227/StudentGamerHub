@@ -5,7 +5,6 @@ namespace WebAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Produces("application/json")]
     public sealed class GoogleAuthController : ControllerBase
     {
         private readonly IGoogleAuthService _google;

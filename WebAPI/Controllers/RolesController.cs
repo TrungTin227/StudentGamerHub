@@ -1,10 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 
-namespace WebApi.Controllers;
+namespace WebAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-// [Authorize(Roles = "Admin")]
 public sealed class RolesController : ControllerBase
 {
     private readonly IRoleService _service;
