@@ -14,10 +14,40 @@ namespace WebAPI.Controllers;
 public sealed class CommunitiesController : ControllerBase
 {
     private readonly ICommunitySearchService _communitySearch;
+    private readonly ICommunityService _communityService;
 
-    public CommunitiesController(ICommunitySearchService communitySearch)
+    public CommunitiesController(
+        ICommunitySearchService communitySearch,
+        ICommunityService communityService)
     {
         _communitySearch = communitySearch ?? throw new ArgumentNullException(nameof(communitySearch));
+        _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
+    }
+
+    /// <summary>
+    /// Create a new community.
+    /// </summary>
+    /// <param name="request">Creation payload.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Identifier of the created community.</returns>
+    /// <response code="201">Community created successfully.</response>
+    /// <response code="400">Validation failure.</response>
+    /// <response code="401">Not authenticated.</response>
+    /// <response code="429">Write rate limit exceeded.</response>
+    [HttpPost]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> CreateCommunity([FromBody] CommunityCreateRequestDto request, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _communityService.CreateAsync(userId.Value, request, ct);
+        return this.ToActionResult(result, value => new { communityId = value }, StatusCodes.Status201Created);
     }
 
     /// <summary>
@@ -77,5 +107,80 @@ public sealed class CommunitiesController : ControllerBase
             ct);
 
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Retrieve community details by identifier.
+    /// </summary>
+    /// <param name="id">Community identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Detailed community information.</returns>
+    /// <response code="200">Community found.</response>
+    /// <response code="401">Not authenticated.</response>
+    /// <response code="404">Community not found.</response>
+    [HttpGet("{id:guid}")]
+    [EnableRateLimiting("CommunitiesRead")]
+    [ProducesResponseType(typeof(CommunityDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> GetById(Guid id, CancellationToken ct = default)
+    {
+        var result = await _communityService.GetByIdAsync(id, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Update a community's metadata.
+    /// </summary>
+    /// <param name="id">Community identifier.</param>
+    /// <param name="request">Update payload.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="204">Update succeeded.</response>
+    /// <response code="400">Validation failure.</response>
+    /// <response code="401">Not authenticated.</response>
+    /// <response code="404">Community not found.</response>
+    /// <response code="429">Write rate limit exceeded.</response>
+    [HttpPatch("{id:guid}")]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> Update(Guid id, [FromBody] CommunityUpdateRequestDto request, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _communityService.UpdateAsync(userId.Value, id, request, ct);
+        return this.ToActionResult(result);
+    }
+
+    /// <summary>
+    /// Archive a community (soft delete).
+    /// </summary>
+    /// <param name="id">Community identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <response code="204">Archive succeeded.</response>
+    /// <response code="401">Not authenticated.</response>
+    /// <response code="403">Archive forbidden when approved rooms exist.</response>
+    /// <response code="404">Community not found.</response>
+    /// <response code="429">Write rate limit exceeded.</response>
+    [HttpDelete("{id:guid}")]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> Archive(Guid id, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _communityService.ArchiveAsync(userId.Value, id, ct);
+        return this.ToActionResult(result);
     }
 }

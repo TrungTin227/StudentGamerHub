@@ -6,6 +6,16 @@ namespace Repositories.Interfaces;
 public interface ICommunityQueryRepository
 {
     /// <summary>
+    /// Get a community by identifier.
+    /// </summary>
+    Task<Community?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Determine whether the community still has any approved room members.
+    /// </summary>
+    Task<bool> HasAnyApprovedRoomsAsync(Guid communityId, CancellationToken ct = default);
+
+    /// <summary>
     /// Search communities with filtering by school, game, visibility, and member count range.
     /// Uses cursor-based pagination with stable sorting by (MembersCount DESC, Id DESC).
     /// </summary>

@@ -63,6 +63,7 @@ namespace Repositories.DependencyInjection
 
             // 5) Specific Repositories (not auto-registered by convention)
             services.AddScoped<ICommunityQueryRepository, CommunityQueryRepository>();
+            services.AddScoped<ICommunityCommandRepository, CommunityCommandRepository>();
             services.AddScoped<IRoomQueryRepository, RoomQueryRepository>();
             services.AddScoped<IRoomCommandRepository, RoomCommandRepository>();
             services.AddScoped<IClubQueryRepository, ClubQueryRepository>();
