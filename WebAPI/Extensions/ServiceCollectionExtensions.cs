@@ -26,6 +26,91 @@ public static class ServiceCollectionExtensions
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+            options.AddPolicy("EventsWrite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return PartitionedRateLimiter.CreateChained(
+                    RateLimitPartition.GetTokenBucketLimiter($"{userKey}:events:minute", _ => new TokenBucketRateLimiterOptions
+                    {
+                        TokenLimit = 60,
+                        TokensPerPeriod = 60,
+                        ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }),
+                    RateLimitPartition.GetTokenBucketLimiter($"{userKey}:events:day", _ => new TokenBucketRateLimiterOptions
+                    {
+                        TokenLimit = 20,
+                        TokensPerPeriod = 20,
+                        ReplenishmentPeriod = TimeSpan.FromDays(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+            });
+
+            options.AddPolicy("RegistrationsWrite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 60,
+                    TokensPerPeriod = 60,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            options.AddPolicy("PaymentsWrite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 120,
+                    TokensPerPeriod = 120,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            options.AddPolicy("ReadsHeavy", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 300,
+                    TokensPerPeriod = 300,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            options.AddPolicy("ReadsLight", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 600,
+                    TokensPerPeriod = 600,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
             options.AddPolicy("FriendInvite", httpContext =>
             {
                 var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();

@@ -18,6 +18,7 @@ public interface IEventReadService
     Task<Result<PagedResponse<EventDetailDto>>> SearchMyOrganizedAsync(
         Guid organizerId,
         IEnumerable<EventStatus>? statuses,
+        Guid? communityId,
         DateTimeOffset? from,
         DateTimeOffset? to,
         string? search,
