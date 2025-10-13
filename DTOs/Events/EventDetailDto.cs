@@ -1,0 +1,25 @@
+namespace DTOs.Events;
+
+public sealed record EventDetailDto(
+    Guid Id,
+    Guid OrganizerId,
+    Guid? CommunityId,
+    string Title,
+    string? Description,
+    EventMode Mode,
+    string? Location,
+    DateTimeOffset StartsAt,
+    DateTimeOffset? EndsAt,
+    long PriceCents,
+    int? Capacity,
+    long EscrowMinCents,
+    decimal PlatformFeeRate,
+    GatewayFeePolicy GatewayFeePolicy,
+    EventStatus Status,
+    long EscrowAmountHoldCents,
+    EscrowStatus EscrowStatus,
+    bool IsOrganizer,
+    Guid? MyRegistrationId,
+    EventRegistrationStatus? MyRegistrationStatus,
+    DateTime CreatedAtUtc,
+    DateTime? UpdatedAtUtc);
