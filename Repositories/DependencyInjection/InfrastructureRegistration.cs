@@ -68,6 +68,14 @@ namespace Repositories.DependencyInjection
             services.AddScoped<IRoomCommandRepository, RoomCommandRepository>();
             services.AddScoped<IClubQueryRepository, ClubQueryRepository>();
             services.AddScoped<IClubCommandRepository, ClubCommandRepository>();
+            services.AddScoped<IEventQueryRepository, EventQueryRepository>();
+            services.AddScoped<IEventCommandRepository, EventCommandRepository>();
+            services.AddScoped<IRegistrationQueryRepository, RegistrationQueryRepository>();
+            services.AddScoped<IRegistrationCommandRepository, RegistrationCommandRepository>();
+            services.AddScoped<IEscrowRepository, EscrowRepository>();
+            services.AddScoped<IWalletRepository, WalletRepository>();
+            services.AddScoped<ITransactionRepository, TransactionRepository>();
+            services.AddScoped<IPaymentIntentRepository, PaymentIntentRepository>();
 
             // 6) Hosted seeding
             services.AddHostedService<DbInitializerHostedService>();

@@ -1,12 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 namespace Repositories.Implements;
 
-/// <summary>
-/// Event query implementation for Dashboard feature
-/// Uses AppDbContext for read-only queries
-/// Respects soft-delete global filters
-/// </summary>
 public sealed class EventQueryRepository : IEventQueryRepository
 {
     private readonly AppDbContext _context;
@@ -16,34 +12,127 @@ public sealed class EventQueryRepository : IEventQueryRepository
         _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
-    /// <summary>
-    /// Get events starting within UTC range [startUtc, endUtc)
-    /// Filters: Status != Draft/Canceled, soft-delete enabled
-    /// Uses StartsAt index for performance
-    /// </summary>
-    public async Task<IReadOnlyList<Event>> GetEventsStartingInRangeUtcAsync(
-        DateTimeOffset startUtc, 
-        DateTimeOffset endUtc, 
+    public Task<Event?> GetByIdAsync(Guid id, CancellationToken ct = default)
+        => _context.Events
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == id, ct);
+
+    public async Task<Event?> GetForUpdateAsync(Guid id, CancellationToken ct = default)
+    {
+        var query = _context.Events
+            .Where(e => e.Id == id);
+
+        if (_context.Database.IsNpgsql())
+        {
+            query = query.ForUpdate();
+        }
+
+        return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
+
+    public Task<int> CountConfirmedAsync(Guid eventId, CancellationToken ct = default)
+    {
+        return _context.EventRegistrations
+            .AsNoTracking()
+            .Where(r => r.EventId == eventId)
+            .Where(r => r.Status == EventRegistrationStatus.Confirmed || r.Status == EventRegistrationStatus.CheckedIn)
+            .CountAsync(ct);
+    }
+
+    public Task<int> CountPendingOrConfirmedAsync(Guid eventId, CancellationToken ct = default)
+    {
+        return _context.EventRegistrations
+            .AsNoTracking()
+            .Where(r => r.EventId == eventId)
+            .Where(r => r.Status == EventRegistrationStatus.Pending ||
+                        r.Status == EventRegistrationStatus.Confirmed ||
+                        r.Status == EventRegistrationStatus.CheckedIn)
+            .CountAsync(ct);
+    }
+
+    public async Task<(IReadOnlyList<Event> Items, int Total)> SearchAsync(
+        IEnumerable<EventStatus>? statuses,
+        Guid? communityId,
+        Guid? organizerId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        string? search,
+        int page,
+        int pageSize,
+        bool sortAscByStartsAt,
         CancellationToken ct = default)
     {
-        // Query with StartsAt index
-        // Global soft-delete filter is automatically applied
-        var events = await _context.Events
-            .AsNoTracking()
-            .Where(e => e.StartsAt >= startUtc && e.StartsAt < endUtc)
-            .Where(e => e.Status != EventStatus.Draft && e.Status != EventStatus.Canceled)
-            .Select(e => new Event
+        var query = _context.Events.AsNoTracking().AsQueryable();
+
+        if (statuses is not null)
+        {
+            var statusList = statuses.Distinct().ToArray();
+            if (statusList.Length > 0)
             {
-                Id = e.Id,
-                Title = e.Title,
-                StartsAt = e.StartsAt,
-                EndsAt = e.EndsAt,
-                Location = e.Location,
-                Mode = e.Mode
-            })
+                query = query.Where(e => statusList.Contains(e.Status));
+            }
+        }
+
+        if (communityId.HasValue)
+        {
+            query = query.Where(e => e.CommunityId == communityId);
+        }
+
+        if (organizerId.HasValue)
+        {
+            query = query.Where(e => e.OrganizerId == organizerId);
+        }
+
+        if (from.HasValue)
+        {
+            query = query.Where(e => e.StartsAt >= from.Value);
+        }
+
+        if (to.HasValue)
+        {
+            query = query.Where(e => e.StartsAt <= to.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            var pattern = $"%{term}%";
+            if (_context.Database.IsNpgsql())
+            {
+                query = query.Where(e => EF.Functions.ILike(e.Title, pattern) ||
+                                          (e.Description != null && EF.Functions.ILike(e.Description, pattern)));
+            }
+            else
+            {
+                query = query.Where(e => EF.Functions.Like(e.Title, pattern) ||
+                                          (e.Description != null && EF.Functions.Like(e.Description, pattern)));
+            }
+        }
+
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+
+        if (pageSize <= 0)
+        {
+            pageSize = 20;
+        }
+
+        if (page <= 0)
+        {
+            page = 1;
+        }
+
+        var skip = (page - 1) * pageSize;
+
+        query = sortAscByStartsAt
+            ? query.OrderBy(e => e.StartsAt).ThenBy(e => e.Id)
+            : query.OrderByDescending(e => e.StartsAt).ThenByDescending(e => e.Id);
+
+        var items = await query
+            .Skip(skip)
+            .Take(pageSize)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return events;
+        return (items, total);
     }
 }
