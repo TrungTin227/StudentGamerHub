@@ -1,17 +1,20 @@
 namespace Repositories.Interfaces;
 
-/// <summary>
-/// Query interface for Event entity - Dashboard feature
-/// </summary>
 public interface IEventQueryRepository
 {
-    /// <summary>
-    /// Get events starting within UTC range [startUtc, endUtc)
-    /// Filters: Status != Draft/Canceled, soft-delete enabled
-    /// Uses StartsAt index
-    /// </summary>
-    Task<IReadOnlyList<Event>> GetEventsStartingInRangeUtcAsync(
-        DateTimeOffset startUtc, 
-        DateTimeOffset endUtc, 
+    Task<Event?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    Task<Event?> GetForUpdateAsync(Guid id, CancellationToken ct = default);
+    Task<int> CountConfirmedAsync(Guid eventId, CancellationToken ct = default);
+    Task<int> CountPendingOrConfirmedAsync(Guid eventId, CancellationToken ct = default);
+    Task<(IReadOnlyList<Event> Items, int Total)> SearchAsync(
+        IEnumerable<EventStatus>? statuses,
+        Guid? communityId,
+        Guid? organizerId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        string? search,
+        int page,
+        int pageSize,
+        bool sortAscByStartsAt,
         CancellationToken ct = default);
 }
