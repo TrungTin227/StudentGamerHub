@@ -71,6 +71,7 @@ public sealed class EventReadService : IEventReadService
     public async Task<Result<PagedResponse<EventDetailDto>>> SearchMyOrganizedAsync(
         Guid organizerId,
         IEnumerable<EventStatus>? statuses,
+        Guid? communityId,
         DateTimeOffset? from,
         DateTimeOffset? to,
         string? search,
@@ -81,7 +82,7 @@ public sealed class EventReadService : IEventReadService
     {
         var (items, total) = await _eventQueryRepository.SearchAsync(
             statuses,
-            communityId: null,
+            communityId,
             organizerId: organizerId,
             from,
             to,

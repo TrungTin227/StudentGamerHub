@@ -15,12 +15,12 @@ public sealed class EventQueryRepository : IEventQueryRepository
     public Task<Event?> GetByIdAsync(Guid id, CancellationToken ct = default)
         => _context.Events
             .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.Id == id, ct);
+            .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted, ct);
 
     public async Task<Event?> GetForUpdateAsync(Guid id, CancellationToken ct = default)
     {
         var query = _context.Events
-            .Where(e => e.Id == id);
+            .Where(e => e.Id == id && !e.IsDeleted);
 
         if (_context.Database.IsNpgsql())
         {
@@ -62,7 +62,10 @@ public sealed class EventQueryRepository : IEventQueryRepository
         bool sortAscByStartsAt,
         CancellationToken ct = default)
     {
-        var query = _context.Events.AsNoTracking().AsQueryable();
+        var query = _context.Events
+            .AsNoTracking()
+            .Where(e => !e.IsDeleted)
+            .AsQueryable();
 
         if (statuses is not null)
         {
