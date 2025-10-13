@@ -244,6 +244,7 @@ namespace Repositories.Migrations
                     b.ToTable("escrows", null, t =>
                         {
                             t.HasCheckConstraint("chk_escrow_amount_nonneg", "\"AmountHoldCents\" >= 0");
+                            t.HasCheckConstraint("chk_escrow_status_allowed", "\"Status\" IN ('Held','Released','Refunded')");
                         });
                 });
 
@@ -327,7 +328,15 @@ namespace Repositories.Migrations
 
                     b.HasIndex("OrganizerId");
 
-                    b.ToTable("events", (string)null);
+                    b.HasIndex("StartsAt");
+
+                    b.ToTable("events", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_event_price_nonneg", "\"PriceCents\" >= 0");
+                            t.HasCheckConstraint("chk_event_platform_fee_range", "\"PlatformFeeRate\" >= 0 AND \"PlatformFeeRate\" <= 1");
+                            t.HasCheckConstraint("chk_event_starts_before_ends", "\"EndsAt\" IS NULL OR \"StartsAt\" < \"EndsAt\"");
+                            t.HasCheckConstraint("chk_event_status_allowed", "\"Status\" IN ('Draft','Open','Closed','Completed','Canceled')");
+                        });
                 });
 
             modelBuilder.Entity("BusinessObjects.EventRegistration", b =>
@@ -386,7 +395,12 @@ namespace Repositories.Migrations
                     b.HasIndex("EventId", "UserId")
                         .IsUnique();
 
-                    b.ToTable("event_registrations", (string)null);
+                    b.HasIndex("EventId", "Status");
+
+                    b.ToTable("event_registrations", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_event_registration_status_allowed", "\"Status\" IN ('Pending','Confirmed','Canceled','Refunded')");
+                        });
                 });
 
             modelBuilder.Entity("BusinessObjects.FriendLink", b =>
@@ -597,9 +611,9 @@ namespace Repositories.Migrations
 
                     b.ToTable("payment_intents", null, t =>
                         {
-                            t.HasCheckConstraint("CK_PI_EventTicket_RequiresER", "\"Purpose\" <> 'EventTicket' OR \"EventRegistrationId\" IS NOT NULL");
-
-                            t.HasCheckConstraint("CK_PI_NonTicket_NoER", "\"Purpose\" = 'EventTicket' OR \"EventRegistrationId\" IS NULL");
+                            t.HasCheckConstraint("chk_payment_intent_amount_positive", "\"AmountCents\" > 0");
+                            t.HasCheckConstraint("chk_payment_intent_purpose_allowed", "\"Purpose\" IN ('TopUp','EventTicket')");
+                            t.HasCheckConstraint("chk_payment_intent_status_allowed", "\"Status\" IN ('RequiresPayment','Succeeded','Canceled','Expired')");
                         });
                 });
 
@@ -914,9 +928,17 @@ namespace Repositories.Migrations
 
                     b.HasIndex("EventId");
 
+                    b.HasIndex("WalletId");
+
                     b.HasIndex("WalletId", "CreatedAtUtc");
 
-                    b.ToTable("transactions", (string)null);
+                    b.ToTable("transactions", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_transaction_amount_positive", "\"AmountCents\" > 0");
+                            t.HasCheckConstraint("chk_transaction_direction_allowed", "\"Direction\" IN ('In','Out')");
+                            t.HasCheckConstraint("chk_transaction_method_allowed", "\"Method\" IN ('Wallet','Gateway','Manual')");
+                            t.HasCheckConstraint("chk_transaction_status_allowed", "\"Status\" IN ('Pending','Succeeded','Failed','Refunded')");
+                        });
                 });
 
             modelBuilder.Entity("BusinessObjects.User", b =>
@@ -1122,7 +1144,10 @@ namespace Repositories.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("wallets", (string)null);
+                    b.ToTable("wallets", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_wallet_balance_nonneg", "\"BalanceCents\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
