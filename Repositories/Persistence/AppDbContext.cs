@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using System;
 
 namespace Repositories.Persistence
 {
@@ -246,12 +247,42 @@ namespace Repositories.Persistence
             });
 
             // ====== Events ======
+            var providerName = Database.ProviderName ?? string.Empty;
+            var isNpgsql = providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
+
             b.Entity<Event>(e =>
             {
                 e.Property(x => x.Mode).HasConversion<string>();
                 e.Property(x => x.Status).HasConversion<string>();
                 e.Property(x => x.GatewayFeePolicy).HasConversion<string>();
                 e.Property(x => x.PlatformFeeRate).HasPrecision(5, 4);
+
+                e.HasIndex(x => x.StartsAt);
+                e.HasIndex(x => x.OrganizerId);
+                e.HasIndex(x => x.CommunityId);
+
+                e.HasCheckConstraint(
+                    "chk_event_price_nonneg",
+                    isNpgsql
+                        ? "\"PriceCents\" >= 0"
+                        : "[PriceCents] >= 0");
+
+                e.HasCheckConstraint(
+                    "chk_event_platform_fee_range",
+                    isNpgsql
+                        ? "\"PlatformFeeRate\" >= 0 AND \"PlatformFeeRate\" <= 1"
+                        : "[PlatformFeeRate] >= 0 AND [PlatformFeeRate] <= 1");
+
+                e.HasCheckConstraint(
+                    "chk_event_starts_before_ends",
+                    isNpgsql
+                        ? "\"EndsAt\" IS NULL OR \"StartsAt\" < \"EndsAt\""
+                        : "[EndsAt] IS NULL OR [StartsAt] < [EndsAt]");
+
+                var eventStatusConstraint = isNpgsql
+                    ? "\"Status\" IN ('Draft','Open','Closed','Completed','Canceled')"
+                    : "[Status] IN ('Draft','Open','Closed','Completed','Canceled')";
+                e.HasCheckConstraint("chk_event_status_allowed", eventStatusConstraint);
 
                 e.HasOne(x => x.Community).WithMany()
                  .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.SetNull);
@@ -281,6 +312,12 @@ namespace Repositories.Persistence
                 e.HasIndex(x => x.PaidTransactionId).IsUnique();
 
                 e.HasIndex(x => new { x.EventId, x.UserId }).IsUnique();
+                e.HasIndex(x => new { x.EventId, x.Status });
+
+                var registrationStatusConstraint = isNpgsql
+                    ? "\"Status\" IN ('Pending','Confirmed','Canceled','Refunded')"
+                    : "[Status] IN ('Pending','Confirmed','Canceled','Refunded')";
+                e.HasCheckConstraint("chk_event_registration_status_allowed", registrationStatusConstraint);
 
                 e.HasOne(er => er.PaymentIntent)
                  .WithOne(pi => pi.EventRegistration)
@@ -291,7 +328,18 @@ namespace Repositories.Persistence
             b.Entity<Escrow>(e =>
             {
                 e.Property(x => x.Status).HasConversion<string>();
-                e.HasCheckConstraint("chk_escrow_amount_nonneg", "\"AmountHoldCents\" >= 0");
+                e.HasCheckConstraint(
+                    "chk_escrow_amount_nonneg",
+                    isNpgsql
+                        ? "\"AmountHoldCents\" >= 0"
+                        : "[AmountHoldCents] >= 0");
+
+                var escrowStatusConstraint = isNpgsql
+                    ? "\"Status\" IN ('Held','Released','Refunded')"
+                    : "[Status] IN ('Held','Released','Refunded')";
+                e.HasCheckConstraint("chk_escrow_status_allowed", escrowStatusConstraint);
+
+                e.HasIndex(x => x.EventId).IsUnique();
             });
 
             // ====== Wallet & Payments ======
@@ -302,6 +350,12 @@ namespace Repositories.Persistence
                  .OnDelete(DeleteBehavior.Cascade);
 
                 e.HasIndex(x => x.UserId).IsUnique();
+
+                e.HasCheckConstraint(
+                    "chk_wallet_balance_nonneg",
+                    isNpgsql
+                        ? "\"BalanceCents\" >= 0"
+                        : "[BalanceCents] >= 0");
             });
 
             b.Entity<Transaction>(e =>
@@ -320,7 +374,29 @@ namespace Repositories.Persistence
                  .OnDelete(DeleteBehavior.SetNull);
 
                 e.HasIndex(x => x.EventId);
+                e.HasIndex(x => x.WalletId);
                 e.HasIndex(x => new { x.WalletId, x.CreatedAtUtc });
+
+                e.HasCheckConstraint(
+                    "chk_transaction_amount_positive",
+                    isNpgsql
+                        ? "\"AmountCents\" > 0"
+                        : "[AmountCents] > 0");
+
+                var transactionDirectionConstraint = isNpgsql
+                    ? "\"Direction\" IN ('In','Out')"
+                    : "[Direction] IN ('In','Out')";
+                e.HasCheckConstraint("chk_transaction_direction_allowed", transactionDirectionConstraint);
+
+                var transactionMethodConstraint = isNpgsql
+                    ? "\"Method\" IN ('Wallet','Gateway','Manual')"
+                    : "[Method] IN ('Wallet','Gateway','Manual')";
+                e.HasCheckConstraint("chk_transaction_method_allowed", transactionMethodConstraint);
+
+                var transactionStatusConstraint = isNpgsql
+                    ? "\"Status\" IN ('Pending','Succeeded','Failed','Refunded')"
+                    : "[Status] IN ('Pending','Succeeded','Failed','Refunded')";
+                e.HasCheckConstraint("chk_transaction_status_allowed", transactionStatusConstraint);
             });
 
             b.Entity<PaymentIntent>(e =>
@@ -334,15 +410,24 @@ namespace Repositories.Persistence
                  .HasForeignKey(x => x.UserId)
                  .OnDelete(DeleteBehavior.Restrict);
 
+                e.HasIndex(x => x.UserId);
                 e.HasIndex(x => x.EventRegistrationId).IsUnique();
 
                 e.HasCheckConstraint(
-                    "CK_PI_EventTicket_RequiresER",
-                    "\"Purpose\" <> 'EventTicket' OR \"EventRegistrationId\" IS NOT NULL");
+                    "chk_payment_intent_amount_positive",
+                    isNpgsql
+                        ? "\"AmountCents\" > 0"
+                        : "[AmountCents] > 0");
 
-                e.HasCheckConstraint(
-                    "CK_PI_NonTicket_NoER",
-                    "\"Purpose\" = 'EventTicket' OR \"EventRegistrationId\" IS NULL");
+                var paymentPurposeConstraint = isNpgsql
+                    ? "\"Purpose\" IN ('TopUp','EventTicket')"
+                    : "[Purpose] IN ('TopUp','EventTicket')";
+                e.HasCheckConstraint("chk_payment_intent_purpose_allowed", paymentPurposeConstraint);
+
+                var paymentStatusConstraint = isNpgsql
+                    ? "\"Status\" IN ('RequiresPayment','Succeeded','Canceled','Expired')"
+                    : "[Status] IN ('RequiresPayment','Succeeded','Canceled','Expired')";
+                e.HasCheckConstraint("chk_payment_intent_status_allowed", paymentStatusConstraint);
             });
 
             // ====== Gifts ======
