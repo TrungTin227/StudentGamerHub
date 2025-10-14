@@ -23,6 +23,11 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
             .AsNoTracking()
             .FirstOrDefaultAsync(ct);
 
+    public Task<PaymentIntent?> GetByProviderRefAsync(string providerRef, CancellationToken ct = default)
+        => _context.PaymentIntents
+            .AsNoTracking()
+            .FirstOrDefaultAsync(pi => pi.ClientSecret == providerRef, ct);
+
     public async Task CreateAsync(PaymentIntent pi, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(pi);

@@ -1,0 +1,75 @@
+feat: Add teammates search feature with real-time presence
+
+Implement full-stack teammate discovery system with multi-criteria filtering,
+real-time online status, and cursor-based pagination.
+
+## Features
+- Multi-criteria search: game, university, skill level, online status
+- Real-time presence via Redis batch operations (single pipeline)
+- Smart sorting: online ? points ? shared games ? user ID (all DESC)
+- Cursor-based pagination with stable ordering
+- Rate limiting: 120 requests/minute per user
+
+## Database
+- Add index on users.University for university filtering
+- Add index on user_games.Skill for skill level filtering
+- Migration: Add_Teammates_Indexes (20251009135236)
+
+## DTOs
+- Create TeammateDto (User, IsOnline, SharedGames)
+- Reuses existing UserBriefDto for consistency
+
+## Repositories
+- Create ITeammateQueries interface with SearchCandidatesAsync
+- Create TeammateSearchFilter (GameId, University, Skill)
+- Create TeammateCandidate projection (minimal DB projection)
+- Implement indexed query with SharedGames calculation
+- Cursor pagination format: "points:sharedGames:userId"
+
+## Services
+- Create ITeammateFinderService interface with SearchAsync
+- Implement 6-step pipeline:
+  1. Call repository with filters
+  2. Batch presence check (1 Redis pipeline)
+  3. Map to DTOs with online status
+  4. Filter by onlineOnly if needed
+  5. Sort: online DESC ? points DESC ? shared DESC ? id DESC
+  6. Wrap in CursorPageResult
+- Auto-registration via convention-based DI
+
+## WebAPI
+- Create TeammatesController with GET /api/teammates
+- Query parameters: gameId, university, skill, onlineOnly, cursor, size
+- Rate limiting policy: "TeammatesRead" (120/min/user)
+- Authentication: [Authorize] with Bearer token
+- OpenAPI documentation via Scalar /docs
+
+## Performance
+- Repository: < 50ms (indexed queries, no table scans)
+- Presence: < 10ms (single Redis batch for ~20 IDs)
+- Service: < 5ms (in-memory mapping/sorting)
+- Total target: < 100ms for typical request
+
+## Architecture
+- Clean layering: BusinessObjects ? DTOs ? Repositories ? Services ? WebAPI
+- Reuses existing Result<T>, CursorRequest, soft-delete filters
+- No new Result/Error types created
+- No circular dependencies
+
+## Documentation
+- TEAMMATES_SEARCH_REPOSITORY_IMPLEMENTATION.md
+- TEAMMATES_SEARCH_SERVICE_IMPLEMENTATION.md
+- TEAMMATES_SEARCH_WEBAPI_IMPLEMENTATION.md
+- TEAMMATES_SEARCH_COMPLETE_SUMMARY.md
+
+## Testing Strategy
+- Unit tests: empty results, presence failure, onlineOnly, sort order
+- Integration tests: cursor pagination, filters, performance, rate limiting
+- Manual testing via /docs (Scalar UI)
+
+## Known Limitations (Acceptable for MVP)
+- Cursor jitter: online status changes between pages (ephemeral data)
+- PrevCursor: not implemented (forward pagination only)
+- SharedGames: computed per request (indexed query, fast)
+
+Closes #[teammates-search]

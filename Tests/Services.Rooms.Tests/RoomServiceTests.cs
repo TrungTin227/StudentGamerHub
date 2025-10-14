@@ -1,6 +1,7 @@
 using BusinessObjects;
 using BusinessObjects.Common;
 using BusinessObjects.Common.Results;
+using DTOs.Rooms;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
