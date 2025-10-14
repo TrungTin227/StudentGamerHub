@@ -71,6 +71,21 @@ public static class ServiceCollectionExtensions
                 });
             });
 
+            options.AddPolicy("PaymentsWebhook", httpContext =>
+            {
+                var ipKey = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                return RateLimitPartition.GetTokenBucketLimiter(ipKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 300,
+                    TokensPerPeriod = 300,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
             options.AddPolicy("ReadsHeavy", httpContext =>
             {
                 var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
@@ -327,6 +342,10 @@ public static class ServiceCollectionExtensions
 
         services.AddProblemDetails();
         services.AddExceptionHandler<AppExceptionHandler>();
+
+        // VNPAY configuration and service
+        services.Configure<Services.Configuration.VnPayConfig>(configuration.GetSection("VnPay"));
+        services.AddHttpClient<IVnPayService, Services.Implementations.VnPayService>();
 
         services.AddCors(opt =>
         {

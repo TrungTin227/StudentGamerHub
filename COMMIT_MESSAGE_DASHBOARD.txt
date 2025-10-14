@@ -1,0 +1,58 @@
+feat: Implement Dashboard/Today feature with optimized batch operations
+
+Complete implementation across all architectural layers:
+
+DTOs Layer (3 files):
+- Add DashboardTodayDto aggregating points, quests, events, activity
+- Add EventBriefDto for event summaries with mode mapping
+- Add ActivityDto for online friends and quest metrics
+
+Repositories Layer (4 files):
+- Add IEventQueries interface with GetEventsStartingInRangeUtcAsync
+- Add EventQueries implementation using StartsAt index
+- Add IFriendLinkQueries interface with GetAcceptedFriendIdsAsync
+- Add FriendLinkQueries implementation returning only friend IDs
+
+Services Layer (3 files):
+- Add IDashboardService interface with GetTodayAsync method
+- Add DashboardService with VN timezone handling (UTC+7)
+- Implement parallel data fetching (Task.WhenAll)
+- Implement batch Redis operations:
+  * 1 pipeline call for N friend presence checks
+  * 1 MGET operation for 60 quest counter keys
+- Add optimized database queries with AsNoTracking
+- Update Services/GlobalUsing.cs with DTOs.Dashboard
+
+WebAPI Layer (3 files):
+- Add DashboardController with GET /dashboard/today endpoint
+- Add [Authorize] and [EnableRateLimiting] attributes
+- Add DashboardRead rate limiting policy (120 req/min per user)
+- Update WebAPI/GlobalUsing.cs with DTOs.Dashboard and DTOs.Quests
+- Add comprehensive XML documentation for Scalar/OpenAPI
+
+Performance Optimizations:
+? Batch operations: 1 pipeline (not N calls), 1 MGET (not 60 calls)
+? Parallel execution: All data sources fetched concurrently
+? Minimal queries: Project only needed fields, use indexes
+? Rate limiting: Prevents abuse, 120 requests per minute per user
+
+Documentation:
+? Scalar/OpenAPI documentation at /docs
+? Example payloads in XML comments
+? ProducesResponseType attributes for all status codes
+? Comprehensive README files for each layer
+
+Architecture Compliance:
+? Clean layer separation (DTOs ? Repositories ? Services ? WebAPI)
+? No layer violations (verified with grep)
+? Reuses existing Result/Error types (no new types created)
+? Uses ClaimsPrincipalExtensions and ResultHttpExtensions
+? Auto-registered via DI convention (service naming)
+
+Testing:
+- Manual testing available via Scalar at /docs
+- Integration test guidelines provided
+- Rate limiting verified with curl commands
+
+Branch: feature/dashboard-today
+Status: Ready for review and merge

@@ -1,0 +1,57 @@
+feat: implement Daily Quests MVP with idempotent Redis-backed completion
+
+FEATURES
+- 4 quest types: CHECK_IN_DAILY (+5), JOIN_ANY_ROOM (+5), INVITE_ACCEPTED (+10), ATTEND_EVENT (+20)
+- Asia/Ho_Chi_Minh timezone (UTC+7) for daily reset at 00:00 VN
+- Idempotent completion via Redis SET NX (when: NotExists)
+- Transactional points award with automatic flag rollback on DB failure
+- Analytics counter (qc:done:{yyyyMMddHHmm}) for dashboard metrics
+
+IMPLEMENTATION
+- DTOs: QuestTodayDto (Points + Quests[]), QuestItemDto (Code, Title, Reward, Done)
+- Service: IQuestService with 5 methods (GetToday, CompleteCheckIn, MarkJoinRoom, MarkInviteAccepted, MarkAttendEvent)
+- Controller: QuestsController with 4 endpoints (GET today, POST check-in, POST join-room, POST attend-event)
+- Integration: FriendService.AcceptAsync triggers INVITE_ACCEPTED quest (best-effort)
+
+TECHNICAL DETAILS
+- Redis keys: q:{yyyyMMdd}:{userId}:{questCode} = "1" (TTL to 00:00 VN next day)
+- Idempotency: SET NX ? DB transaction ? INCR counter | DEL flag (rollback if DB fail)
+- HTTP semantics: 204 success (first time), 400 idempotent (already done), 404/500 errors
+- Auto-registration: Convention DI via RegisterServiceInterfacesByConvention
+
+ACCEPTANCE CRITERIA
+? First POST /quests/check-in ? 204 No Content + points +5
+? Second POST same day ? 400 Bad Request "Quest already completed today"
+? Redis flag with correct TTL (expires at 00:00 VN)
+? Analytics counter incremented (TTL 2h)
+? FriendService integration: Accept invite triggers INVITE_ACCEPTED quest
+
+TESTING
+- Manual test script: test-quests.ps1
+- Acceptance guide: QUEST_ACCEPTANCE_TESTS.md
+- Documentation: QUESTS_MVP_README.md
+
+CONSTRAINTS COMPLIANCE
+? Result/Result<T> with Error.Codes (Validation, NotFound, Unexpected)
+? ExecuteTransactionAsync for all User.Points updates
+? Idempotent via Redis SET NX + TTL to 00:00 VN
+? No quest state in DB (only Redis)
+? No custom Result/Error/UoW helpers
+
+FILES CHANGED
+- DTOs/Quests/QuestDtos.cs (new)
+- Services/Application/Quests/IQuestService.cs (new)
+- Services/Quests/QuestService.cs (new)
+- Services/GlobalUsing.cs (add DTOs.Quests)
+- WebAPI/Controllers/QuestsController.cs (new)
+- Services/Friends/FriendService.cs (inject IQuestService, hook MarkInviteAcceptedAsync)
+- QUESTS_MVP_README.md (new)
+- QUEST_ACCEPTANCE_TESTS.md (new)
+- test-quests.ps1 (new)
+
+FUTURE WORK
+- RoomService integration: MarkJoinRoomAsync
+- EventService integration: MarkAttendEventAsync
+- Rate limiting per quest action
+- Config-driven quest definitions
+- Unit tests for QuestService

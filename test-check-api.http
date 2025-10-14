@@ -1,0 +1,11 @@
+### KI?M TRA API ?ANG CH?Y
+
+### 1. Ki?m tra OpenAPI (không c?n auth)
+GET https://localhost:7227/openapi/v1.json
+Accept: application/json
+
+### 2. Ki?m tra Swagger UI
+### M? browser: https://localhost:7227/docs
+
+### 3. Test endpoint ??n gi?n (không c?n auth)
+GET https://localhost:7227/

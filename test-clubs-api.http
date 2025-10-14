@@ -1,0 +1,47 @@
+### Test Clubs API Endpoints
+### INSTRUCTIONS:
+### 1. First, run the "Login" request to get your token
+### 2. Replace <YOUR_COMMUNITY_ID> with an actual Community ID from your database
+### 3. After creating a club, use its ID in the "Get club by ID" request
+
+@baseUrl = https://localhost:7227
+
+### STEP 1: Login to get token
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "Email": "your-email@example.com",
+  "Password": "YourPassword123"
+}
+
+### STEP 2: Get OpenAPI Spec (no auth required)
+GET {{baseUrl}}/openapi/v1.json
+Accept: application/json
+
+### STEP 3: Search communities to get a communityId
+GET {{baseUrl}}/communities?page=1&size=10
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### STEP 4: Search clubs in a community
+GET {{baseUrl}}/communities/YOUR_COMMUNITY_ID_HERE/clubs?size=20
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### STEP 5: Search clubs with filters
+GET {{baseUrl}}/communities/YOUR_COMMUNITY_ID_HERE/clubs?name=test&isPublic=true&size=10
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### STEP 6: Create a club
+POST {{baseUrl}}/communities/YOUR_COMMUNITY_ID_HERE/clubs
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "Name": "Test Gaming Club",
+  "Description": "A club for competitive gaming",
+  "IsPublic": true
+}
+
+### STEP 7: Get club by ID (replace with actual club ID from create response)
+GET {{baseUrl}}/communities/YOUR_COMMUNITY_ID_HERE/clubs/YOUR_CLUB_ID_HERE
+Authorization: Bearer YOUR_TOKEN_HERE
