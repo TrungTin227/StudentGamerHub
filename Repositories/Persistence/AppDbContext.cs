@@ -439,7 +439,14 @@ namespace Repositories.Persistence
             // ====== BugReport ======
             b.Entity<BugReport>(e =>
             {
-                e.Property(x => x.Status).HasConversion<string>();
+                e.HasKey(x => x.Id);
+                e.Property(x => x.Category).HasMaxLength(64).IsRequired();
+                e.Property(x => x.Description).HasMaxLength(4000).IsRequired();
+                e.Property(x => x.ImageUrl).HasMaxLength(1024);
+                e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
+                
+                e.HasIndex(x => new { x.UserId, x.CreatedAtUtc }).HasDatabaseName("IX_BugReports_User_CreatedAt");
+                e.HasIndex(x => new { x.Status, x.CreatedAtUtc }).HasDatabaseName("IX_BugReports_Status_CreatedAt");
 
                 e.HasOne(x => x.User).WithMany()
                  .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
