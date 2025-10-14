@@ -350,6 +350,14 @@ public static class ServiceCollectionExtensions
             return ConnectionMultiplexer.Connect(options);
         });
 
+        // Chat configuration and services
+        services.Configure<Services.Configuration.ChatOptions>(configuration.GetSection("Chat"));
+        services.AddSingleton<Services.Interfaces.IChatHistoryService, Services.Implementations.ChatHistoryService>();
+
+        // SignalR with Redis backplane
+        var redisConn = configuration.GetSection("Redis")["ConnectionString"] ?? "localhost:6379";
+        services.AddSignalR().AddStackExchangeRedis(redisConn, _ => { });
+
         services.AddOpenApi(options =>
         {
             options.AddDocumentTransformer(new BearerSecuritySchemeTransformer());
