@@ -305,6 +305,22 @@ public static class ServiceCollectionExtensions
                 });
             });
 
+            // Bug reports write rate limiting: 20 requests per day per user
+            options.AddPolicy("BugsWrite", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 20,
+                    TokensPerPeriod = 20,
+                    ReplenishmentPeriod = TimeSpan.FromDays(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
         });
 
         services.TryAddSingleton<IConnectionMultiplexer>(sp =>
