@@ -30,25 +30,15 @@ public static class ServiceCollectionExtensions
             {
                 var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
 
-                return PartitionedRateLimiter.CreateChained(
-                    RateLimitPartition.GetTokenBucketLimiter($"{userKey}:events:minute", _ => new TokenBucketRateLimiterOptions
-                    {
-                        TokenLimit = 60,
-                        TokensPerPeriod = 60,
-                        ReplenishmentPeriod = TimeSpan.FromMinutes(1),
-                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                        QueueLimit = 0,
-                        AutoReplenishment = true
-                    }),
-                    RateLimitPartition.GetTokenBucketLimiter($"{userKey}:events:day", _ => new TokenBucketRateLimiterOptions
-                    {
-                        TokenLimit = 20,
-                        TokensPerPeriod = 20,
-                        ReplenishmentPeriod = TimeSpan.FromDays(1),
-                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                        QueueLimit = 0,
-                        AutoReplenishment = true
-                    }));
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 60,
+                    TokensPerPeriod = 60,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
             });
 
             options.AddPolicy("RegistrationsWrite", httpContext =>

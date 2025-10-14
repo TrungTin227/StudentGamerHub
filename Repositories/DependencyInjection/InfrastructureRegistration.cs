@@ -13,19 +13,38 @@ namespace Repositories.DependencyInjection
             this IServiceCollection services,
             IConfiguration configuration)
         {
-            // 1) DbContext (PostgreSQL)
+            // 1) DbContext (PostgreSQL or InMemory fallback in Development)
             var connStr = configuration.GetConnectionString("Default")
                           ?? configuration.GetConnectionString("AppDb")
-                          ?? configuration.GetConnectionString("StudentGamerHub")
-                          ?? throw new InvalidOperationException("Missing ConnectionStrings: Default/AppDb/SchoolHealthManager");
+                          ?? configuration.GetConnectionString("StudentGamerHub");
 
-            services.AddDbContext<AppDbContext>(options =>
-                options.UseNpgsql(connStr, npgsql =>
+            var envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+                           ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+            var isDevelopment = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
+
+            if (string.IsNullOrWhiteSpace(connStr))
+            {
+                if (isDevelopment)
                 {
-                    npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
-                    npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
-                })
-            );
+                    // Local dev without PostgreSQL: use in-memory DB so the API can run
+                    services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase("AppDb"));
+                    Console.WriteLine("[WARN] No connection string configured. Using InMemory database in Development.");
+                }
+                else
+                {
+                    throw new InvalidOperationException("Missing connection string. Configure ConnectionStrings:Default/AppDb/StudentGamerHub.");
+                }
+            }
+            else
+            {
+                services.AddDbContext<AppDbContext>(options =>
+                    options.UseNpgsql(connStr, npgsql =>
+                    {
+                        npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
+                        npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
+                    })
+                );
+            }
 
             // 2) Identity
             services

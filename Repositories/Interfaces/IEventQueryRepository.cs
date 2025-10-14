@@ -6,6 +6,7 @@ public interface IEventQueryRepository
     Task<Event?> GetForUpdateAsync(Guid id, CancellationToken ct = default);
     Task<int> CountConfirmedAsync(Guid eventId, CancellationToken ct = default);
     Task<int> CountPendingOrConfirmedAsync(Guid eventId, CancellationToken ct = default);
+    Task<IReadOnlyList<Event>> GetEventsStartingInRangeUtcAsync(DateTimeOffset startUtc, DateTimeOffset endUtc, CancellationToken ct = default);
     Task<(IReadOnlyList<Event> Items, int Total)> SearchAsync(
         IEnumerable<EventStatus>? statuses,
         Guid? communityId,

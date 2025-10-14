@@ -1,5 +1,3 @@
-using DTOs.Common;
-using DTOs.Events;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -7,7 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace WebAPI.Controllers;
 
 [ApiController]
-[Route("api/events")]
+[Route("api/[controller]")]
 [Authorize]
 public sealed class EventsController : ControllerBase
 {
@@ -249,7 +247,16 @@ public sealed class EventsController : ControllerBase
 
         var start = index + token.Length;
         var span = message.AsSpan(start);
-        var endIndex = span.IndexOfAny(' ', '.', ',', ';');
+        int endIndex = -1;
+        for (int i = 0; i < span.Length; i++)
+        {
+            var c = span[i];
+            if (c == ' ' || c == '.' || c == ',' || c == ';')
+            {
+                endIndex = i;
+                break;
+            }
+        }
         var numberSpan = endIndex >= 0 ? span[..endIndex] : span;
         return long.TryParse(numberSpan, out needed);
     }

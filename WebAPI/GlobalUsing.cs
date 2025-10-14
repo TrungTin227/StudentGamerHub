@@ -25,3 +25,6 @@ global using WebApi.ErrorHandling;
 global using WebApi.Extensions;
 global using WebAPI.Extensions;
 global using WebAPI.Security;
+global using BusinessObjects.Common;
+global using DTOs.Common;
+global using DTOs.Events;
