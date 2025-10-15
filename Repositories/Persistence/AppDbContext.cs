@@ -170,9 +170,13 @@ namespace Repositories.Persistence
             // ====== Communities ======
             b.Entity<Community>(e =>
             {
-                // Indexes for search/filtering
-                e.HasIndex(c => c.School);
-                e.HasIndex(c => c.IsPublic);
+                // Phase 9: Discovery & Popularity indexes
+                e.HasIndex(c => c.IsPublic).HasDatabaseName("IX_Community_IsPublic");
+                e.HasIndex(c => c.School).HasDatabaseName("IX_Community_School");
+                e.HasIndex(c => new { c.IsPublic, c.MembersCount }).HasDatabaseName("IX_Community_Public_Members");
+                e.HasIndex(c => c.CreatedAtUtc).HasDatabaseName("IX_Community_CreatedAt");
+                
+                // Keep existing single-column index for MembersCount for other queries
                 e.HasIndex(c => c.MembersCount);
             });
 
@@ -183,6 +187,10 @@ namespace Repositories.Persistence
 
                 e.HasOne(x => x.Game).WithMany()
                  .HasForeignKey(x => x.GameId).OnDelete(DeleteBehavior.Cascade);
+                
+                // Phase 9: Index for gameId filter in discovery
+                e.HasIndex(x => x.CommunityId).HasDatabaseName("IX_CommunityGame_CommunityId");
+                e.HasIndex(x => x.GameId).HasDatabaseName("IX_CommunityGame_GameId");
             });
 
             // ====== Clubs ======
@@ -244,6 +252,10 @@ namespace Repositories.Persistence
                 e.HasIndex(rm => new { rm.RoomId, rm.Status }); // Composite for filtering by room + status
                 e.HasIndex(rm => rm.Status);
                 e.HasIndex(rm => rm.UserId);
+                
+                // Phase 9: Indexes for recent activity tracking (last 48h joins)
+                e.HasIndex(rm => rm.JoinedAt).HasDatabaseName("IX_RoomMember_JoinedAt");
+                e.HasIndex(rm => new { rm.RoomId, rm.JoinedAt }).HasDatabaseName("IX_RoomMember_Room_JoinedAt");
             });
 
             // ====== Events ======
