@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using DTOs.Bugs;
+using WebApi.Common;
 
 namespace WebApi.Controllers;
 
@@ -36,10 +37,7 @@ public sealed class BugReportsController : ControllerBase
             return Unauthorized();
 
         var result = await _bugReportService.CreateAsync(userId.Value, request, ct);
-
-        return result.Match(
-            dto => CreatedAtAction(nameof(GetById), new { id = dto.Id }, dto),
-            error => error.ToHttpResult());
+        return this.ToActionResult(result, dto => dto, StatusCodes.Status201Created);
     }
 
     /// <summary>
@@ -57,10 +55,7 @@ public sealed class BugReportsController : ControllerBase
         CancellationToken ct)
     {
         var result = await _bugReportService.GetByIdAsync(id, ct);
-
-        return result.Match(
-            Ok,
-            error => error.ToHttpResult());
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -82,12 +77,9 @@ public sealed class BugReportsController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var paging = new PageRequest(page, size);
+        var paging = new PageRequest(page ?? 1, size ?? 20);
         var result = await _bugReportService.GetByUserIdAsync(userId.Value, paging, ct);
-
-        return result.Match(
-            Ok,
-            error => error.ToHttpResult());
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -106,12 +98,9 @@ public sealed class BugReportsController : ControllerBase
         [FromQuery] int? size,
         CancellationToken ct)
     {
-        var paging = new PageRequest(page, size);
+        var paging = new PageRequest(page ?? 1, size ?? 20);
         var result = await _bugReportService.ListAsync(paging, ct);
-
-        return result.Match(
-            Ok,
-            error => error.ToHttpResult());
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -133,12 +122,9 @@ public sealed class BugReportsController : ControllerBase
         [FromQuery] int? size,
         CancellationToken ct)
     {
-        var paging = new PageRequest(page, size);
+        var paging = new PageRequest(page ?? 1, size ?? 20);
         var result = await _bugReportService.GetByStatusAsync(status, paging, ct);
-
-        return result.Match(
-            Ok,
-            error => error.ToHttpResult());
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -160,9 +146,6 @@ public sealed class BugReportsController : ControllerBase
         CancellationToken ct)
     {
         var result = await _bugReportService.UpdateStatusAsync(id, request, ct);
-
-        return result.Match(
-            Ok,
-            error => error.ToHttpResult());
+        return this.ToActionResult(result);
     }
 }

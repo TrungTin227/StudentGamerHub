@@ -15,13 +15,16 @@ public sealed class CommunitiesController : ControllerBase
 {
     private readonly ICommunitySearchService _communitySearch;
     private readonly ICommunityService _communityService;
+    private readonly ICommunityDiscoveryService _communityDiscovery;
 
     public CommunitiesController(
         ICommunitySearchService communitySearch,
-        ICommunityService communityService)
+        ICommunityService communityService,
+        ICommunityDiscoveryService communityDiscovery)
     {
         _communitySearch = communitySearch ?? throw new ArgumentNullException(nameof(communitySearch));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
+        _communityDiscovery = communityDiscovery ?? throw new ArgumentNullException(nameof(communityDiscovery));
     }
 
     /// <summary>
@@ -182,5 +185,41 @@ public sealed class CommunitiesController : ControllerBase
 
         var result = await _communityService.ArchiveAsync(userId.Value, id, ct);
         return this.ToActionResult(result);
+    }
+
+    /// <summary>
+    /// Discover popular communities with filtering and stable cursor-based pagination.
+    /// Filters by IsPublic=true (default), optional school (exact match), and game.
+    /// Sorted by popularity:
+    /// 1. MembersCount DESC
+    /// 2. RecentActivity48h DESC (room joins in last 48 hours)
+    /// 3. CreatedAtUtc DESC
+    /// 4. Id ASC (for stable tie-breaking)
+    /// </summary>
+    /// <param name="school">Filter by school name (case-insensitive exact match)</param>
+    /// <param name="gameId">Filter communities that include this game</param>
+    /// <param name="cursor">Cursor token for pagination (null = first page)</param>
+    /// <param name="size">Page size (default: 20, clamped 1-100)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Discovery response with popular communities and next cursor</returns>
+    /// <response code="200">Communities discovered successfully</response>
+    /// <response code="400">Invalid request parameters</response>
+    /// <response code="401">Not authenticated</response>
+    /// <response code="429">Rate limit exceeded</response>
+    [HttpGet("discover")]
+    [AllowAnonymous] // Public endpoint for discovery
+    [EnableRateLimiting("CommunitiesRead")]
+    [ProducesResponseType(typeof(DiscoverResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult> Discover(
+        [FromQuery] string? school = null,
+        [FromQuery] Guid? gameId = null,
+        [FromQuery] string? cursor = null,
+        [FromQuery] int? size = null,
+        CancellationToken ct = default)
+    {
+        var result = await _communityDiscovery.DiscoverAsync(school, gameId, cursor, size, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
     }
 }
