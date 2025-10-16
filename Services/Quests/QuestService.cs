@@ -1,4 +1,4 @@
-using Services.Application.Quests;
+Ôªøusing Services.Application.Quests;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 
@@ -10,13 +10,13 @@ public sealed class QuestService : IQuestService
     private readonly IUnitOfWork _uow;
     private readonly AppDbContext _db;
 
-    // Quest definitions (MVP hardcode; config ho· sau)
+    // Quest definitions (MVP hardcode; config ho√° sau)
     private static readonly QuestDefinition[] _allQuests = new[]
     {
-        new QuestDefinition("CHECK_IN_DAILY", "Check-in hÙm nay", 5),
-        new QuestDefinition("JOIN_ANY_ROOM", "Tham gia b?t k? phÚng", 5),
-        new QuestDefinition("INVITE_ACCEPTED", "L?i m?i b?n ???c ch?p nh?n", 10),
-        new QuestDefinition("ATTEND_EVENT", "?i?m danh s? ki?n", 20)
+        new QuestDefinition("CHECK_IN_DAILY", "Check-in h√¥m nay", 5),
+        new QuestDefinition("JOIN_ANY_ROOM", "Tham gia b·∫•t k√¨ ph√≤ng", 5),
+        new QuestDefinition("INVITE_ACCEPTED", "L·ªùi m·ªùi b·∫°n ch·∫•p nh·∫≠n", 10),
+        new QuestDefinition("ATTEND_EVENT", "ƒêi·ªÉm danh s·ª± ki·ªán", 20)
     };
 
     // Timezone VN (Asia/Ho_Chi_Minh) = UTC+7
@@ -82,9 +82,9 @@ public sealed class QuestService : IQuestService
 
     /// <summary>
     /// Core idempotent quest completion v?i SET NX + rollback flag n?u DB fail:
-    /// 1. SET NX flag Redis (TTL ??n 00:00 VN hÙm sau)
-    /// 2. N?u FALSE ? ?„ complete hÙm nay ? return Validation error
-    /// 3. N?u TRUE ? c?ng ?i?m v‡o DB (transaction)
+    /// 1. SET NX flag Redis (TTL ??n 00:00 VN h√¥m sau)
+    /// 2. N?u FALSE ? ?√£ complete h√¥m nay ? return Validation error
+    /// 3. N?u TRUE ? c?ng ?i?m v√†o DB (transaction)
     /// 4. N?u DB commit OK ? INCR counter (dashboard analytics)
     /// 5. N?u DB commit FAIL ? best-effort DEL flag + return Unexpected
     /// </summary>
@@ -112,11 +112,11 @@ public sealed class QuestService : IQuestService
             var flagSet = await db.StringSetAsync(key, "1", ttl, When.NotExists).ConfigureAwait(false);
             if (!flagSet)
             {
-                // ?„ complete hÙm nay
+                // ?√£ complete h√¥m nay
                 return Result.Failure(new Error(Error.Codes.Validation, "Quest already completed today"));
             }
 
-            // ? STEP 2: C?ng ?i?m v‡o DB (transaction)
+            // ? STEP 2: C?ng ?i?m v√†o DB (transaction)
             var pointsResult = await _uow.ExecuteTransactionAsync(async ctk =>
             {
                 // Ki?m tra user t?n t?i + c?ng ?i?m
@@ -137,7 +137,7 @@ public sealed class QuestService : IQuestService
                 return Result.Success();
             }, ct: ct).ConfigureAwait(false);
 
-            // ? STEP 3: X? l˝ k?t qu? transaction
+            // ? STEP 3: X? l√Ω k?t qu? transaction
             if (pointsResult.IsSuccess)
             {
                 // DB commit OK ? INCR counter (best-effort)
@@ -149,7 +149,7 @@ public sealed class QuestService : IQuestService
                 }
                 catch
                 {
-                    // Best-effort: khÙng fail n?u counter l?i
+                    // Best-effort: kh√¥ng fail n?u counter l?i
                 }
 
                 return Result.Success();
@@ -178,7 +178,7 @@ public sealed class QuestService : IQuestService
     // ========================== HELPERS ==========================
 
     /// <summary>
-    /// TÌnh ng‡y VN hi?n t?i + midnight ti?p theo + minute string (cho counter).
+    /// T√≠nh ng√†y VN hi?n t?i + midnight ti?p theo + minute string (cho counter).
     /// Tr? v?: (dateStr: "yyyyMMdd", nextMidnightVN: DateTimeOffset, minuteStr: "yyyyMMddHHmm")
     /// </summary>
     private static (string dateStr, DateTimeOffset nextMidnightVN, string minuteStr) GetVnDayInfo()
@@ -194,7 +194,7 @@ public sealed class QuestService : IQuestService
     }
 
     /// <summary>
-    /// Redis key cho quest flag: q:{yyyyMMdd}:{userId}:{questCode} = "1" (TTL ??n 00:00 VN hÙm sau)
+    /// Redis key cho quest flag: q:{yyyyMMdd}:{userId}:{questCode} = "1" (TTL ??n 00:00 VN h√¥m sau)
     /// </summary>
     private static RedisKey BuildQuestKey(Guid userId, string dateStr, string questCode)
         => $"q:{dateStr}:{userId}:{questCode}";
