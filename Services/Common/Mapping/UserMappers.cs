@@ -25,7 +25,7 @@ namespace Services.Common.Mapping
                 return new FriendDto(
                     Id: link.Id,
                     User: link.Recipient.ToUserBriefDto(),
-                    BecameFriendsAtUtc: link.RespondedAt?.UtcDateTime
+                    BecameFriendsAtUtc: link.RespondedAt
                 );
             }
 
@@ -35,7 +35,7 @@ namespace Services.Common.Mapping
                 return new FriendDto(
                     Id: link.Id,
                     User: link.Sender.ToUserBriefDto(),
-                    BecameFriendsAtUtc: link.RespondedAt?.UtcDateTime
+                    BecameFriendsAtUtc: link.RespondedAt
                 );
             }
 
@@ -49,9 +49,9 @@ namespace Services.Common.Mapping
             this User u,
             ITimeZoneService tz,
             string[] roles,
-            DateTimeOffset nowUtc)
+            DateTime nowUtc)
         {
-            bool isLocked = u.LockoutEnd != null && u.LockoutEnd > nowUtc;
+            bool isLocked = u.LockoutEnd != null && u.LockoutEnd.Value.UtcDateTime > nowUtc;
 
             return new UserListItemDto(
                 Id: u.Id,
@@ -83,7 +83,7 @@ namespace Services.Common.Mapping
             var roles = await userManager.GetRolesAsync(u);
 
             DateTime? lockoutEndVnDateTime = u.LockoutEnd.HasValue
-                ? tz.ToVn(u.LockoutEnd.Value).DateTime
+                ? tz.ToVn(u.LockoutEnd.Value.UtcDateTime)
                 : null;
 
             var nowVn = tz.ToVn(DateTime.UtcNow);

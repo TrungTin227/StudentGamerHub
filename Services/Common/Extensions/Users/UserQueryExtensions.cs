@@ -20,8 +20,8 @@
 
             if (lockedOnlyUtc == true)
             {
-                var now = DateTimeOffset.UtcNow;
-                q = q.Where(u => u.LockoutEnd != null && u.LockoutEnd > now);
+                var now = DateTime.UtcNow;
+                q = q.Where(u => u.LockoutEnd != null && u.LockoutEnd.Value.UtcDateTime > now);
             }
             return q;
         }

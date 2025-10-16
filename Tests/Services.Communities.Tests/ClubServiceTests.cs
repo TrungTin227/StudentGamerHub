@@ -121,7 +121,7 @@ public sealed class ClubServiceTests
             UserId = Guid.NewGuid(),
             Status = RoomMemberStatus.Approved,
             Role = RoomRole.Member,
-            JoinedAt = DateTimeOffset.UtcNow,
+            JoinedAt = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow,
             CreatedBy = userId
         };

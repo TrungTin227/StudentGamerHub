@@ -4,6 +4,6 @@ public sealed record MyRegistrationDto(
     Guid RegistrationId,
     Guid EventId,
     string EventTitle,
-    DateTimeOffset StartsAt,
+    DateTime StartsAt,
     string? Location,
     EventRegistrationStatus Status);

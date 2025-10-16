@@ -86,7 +86,7 @@ public sealed class UserGameService : IUserGameService
                 GameId = gameId,
                 InGameName = normalizedName,
                 Skill = skill,
-                AddedAt = DateTimeOffset.UtcNow,
+                AddedAt = DateTime.UtcNow,
                 CreatedBy = currentUserId,
                 UpdatedBy = currentUserId
             };

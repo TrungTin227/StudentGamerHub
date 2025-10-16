@@ -35,7 +35,8 @@ public sealed class ChatHistoryService : IChatHistoryService
         var key = $"chat:{channel}";
 
         var db = _redis.GetDatabase();
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
+        var nowUnixMillis = ToUnixMilliseconds(now);
 
         // Try Redis Stream approach first
         try
@@ -48,7 +49,7 @@ public sealed class ChatHistoryService : IChatHistoryService
                     new NameValueEntry("toUserId", toUserId.ToString()),
                     new NameValueEntry("roomId", string.Empty),
                     new NameValueEntry("text", text),
-                    new NameValueEntry("ts", now.ToUnixTimeMilliseconds().ToString()),
+                    new NameValueEntry("ts", nowUnixMillis.ToString()),
                     new NameValueEntry("channel", channel)
                 },
                 maxLength: _options.HistoryMax,
@@ -85,7 +86,8 @@ public sealed class ChatHistoryService : IChatHistoryService
         var key = $"chat:{channel}";
 
         var db = _redis.GetDatabase();
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
+        var nowUnixMillis = ToUnixMilliseconds(now);
 
         // Try Redis Stream approach first
         try
@@ -98,7 +100,7 @@ public sealed class ChatHistoryService : IChatHistoryService
                     new NameValueEntry("toUserId", string.Empty),
                     new NameValueEntry("roomId", roomId.ToString()),
                     new NameValueEntry("text", text),
-                    new NameValueEntry("ts", now.ToUnixTimeMilliseconds().ToString()),
+                    new NameValueEntry("ts", nowUnixMillis.ToString()),
                     new NameValueEntry("channel", channel)
                 },
                 maxLength: _options.HistoryMax,
@@ -196,9 +198,10 @@ public sealed class ChatHistoryService : IChatHistoryService
         Guid? toUserId,
         Guid? roomId,
         string text,
-        DateTimeOffset timestamp)
+        DateTime timestamp)
     {
-        var messageId = $"{timestamp.ToUnixTimeMilliseconds()}-{Guid.NewGuid():N}";
+        var unixMillis = ToUnixMilliseconds(timestamp);
+        var messageId = $"{unixMillis}-{Guid.NewGuid():N}";
 
         var payload = JsonSerializer.Serialize(new
         {
@@ -207,7 +210,7 @@ public sealed class ChatHistoryService : IChatHistoryService
             toUserId = toUserId?.ToString() ?? string.Empty,
             roomId = roomId?.ToString() ?? string.Empty,
             text,
-            ts = timestamp.ToUnixTimeMilliseconds(),
+            ts = unixMillis,
             channel
         });
 
@@ -265,7 +268,7 @@ public sealed class ChatHistoryService : IChatHistoryService
                 ToUserId: string.IsNullOrEmpty(toUserIdStr) ? null : Guid.Parse(toUserIdStr),
                 RoomId: string.IsNullOrEmpty(roomIdStr) ? null : Guid.Parse(roomIdStr),
                 Text: text,
-                SentAt: DateTimeOffset.FromUnixTimeMilliseconds(ts));
+                SentAt: DateTime.UnixEpoch.AddMilliseconds(ts));
         }
         catch
         {
@@ -301,11 +304,20 @@ public sealed class ChatHistoryService : IChatHistoryService
                 ToUserId: string.IsNullOrEmpty(toUserIdStr) ? null : Guid.Parse(toUserIdStr),
                 RoomId: string.IsNullOrEmpty(roomIdStr) ? null : Guid.Parse(roomIdStr),
                 Text: text,
-                SentAt: DateTimeOffset.FromUnixTimeMilliseconds(ts));
+                SentAt: DateTime.UnixEpoch.AddMilliseconds(ts));
         }
         catch
         {
             return null;
         }
+    }
+
+    private static long ToUnixMilliseconds(DateTime utc)
+    {
+        if (utc.Kind != DateTimeKind.Utc)
+        {
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+        return (long)(utc - DateTime.UnixEpoch).TotalMilliseconds;
     }
 }

@@ -59,7 +59,7 @@ public sealed class FriendServiceTests
             Status = FriendStatus.Accepted,
             CreatedAtUtc = DateTime.UtcNow.AddDays(-2),
             CreatedBy = requester.Id,
-            RespondedAt = DateTimeOffset.UtcNow.AddDays(-2),
+            RespondedAt = DateTime.UtcNow.AddDays(-2),
         });
         await ctx.Db.SaveChangesAsync();
 
@@ -133,7 +133,7 @@ public sealed class FriendServiceTests
             Status = FriendStatus.Declined,
             CreatedAtUtc = DateTime.UtcNow.AddDays(-2),
             CreatedBy = requester.Id,
-            RespondedAt = DateTimeOffset.UtcNow.AddHours(-2),
+            RespondedAt = DateTime.UtcNow.AddHours(-2),
         });
         await ctx.Db.SaveChangesAsync();
 
@@ -158,7 +158,7 @@ public sealed class FriendServiceTests
             Status = FriendStatus.Declined,
             CreatedAtUtc = DateTime.UtcNow.AddDays(-5),
             CreatedBy = requester.Id,
-            RespondedAt = DateTimeOffset.UtcNow.AddDays(-2),
+            RespondedAt = DateTime.UtcNow.AddDays(-2),
         });
         await ctx.Db.SaveChangesAsync();
 

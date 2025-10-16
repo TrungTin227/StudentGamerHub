@@ -38,7 +38,7 @@ public sealed class CommunityDiscoveryService : ICommunityDiscoveryService
             var pageSize = Math.Clamp(size ?? 20, 1, 100);
             
             // Calculate 48h window (align with RoomMember.JoinedAt type)
-            var since = DateTimeOffset.UtcNow.AddHours(-48);
+            var since = DateTime.UtcNow.AddHours(-48);
 
             // Base query: IsPublic = true
             IQueryable<Community> baseQuery = _db.Communities

@@ -144,7 +144,7 @@ public sealed class AppSeeder : IAppSeeder
                     GameId = game.Id,
                     InGameName = inGameName,
                     Skill = (GameSkillLevel)skillIndex,
-                    AddedAt = DateTimeOffset.UtcNow.AddDays(-random.Next(0, 30)),
+                    AddedAt = DateTime.UtcNow.AddDays(-random.Next(0, 30)),
                     CreatedBy = userId,
                     UpdatedBy = userId
                 };

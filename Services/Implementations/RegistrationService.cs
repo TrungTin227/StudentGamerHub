@@ -61,7 +61,7 @@ public sealed class RegistrationService : IRegistrationService
                 EventId = eventId,
                 UserId = userId,
                 Status = EventRegistrationStatus.Pending,
-                RegisteredAt = DateTimeOffset.UtcNow,
+                RegisteredAt = DateTime.UtcNow,
                 CreatedBy = userId,
             };
 
@@ -76,7 +76,7 @@ public sealed class RegistrationService : IRegistrationService
                 EventRegistrationId = registration.Id,
                 Status = PaymentIntentStatus.RequiresPayment,
                 ClientSecret = Guid.NewGuid().ToString("N"),
-                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15),
+                ExpiresAt = DateTime.UtcNow.AddMinutes(15),
                 CreatedBy = userId,
             };
 

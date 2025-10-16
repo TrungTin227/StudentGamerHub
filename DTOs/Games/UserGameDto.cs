@@ -10,4 +10,4 @@ public sealed record UserGameDto(
     string GameName,
     string? InGameName,
     GameSkillLevel? Skill,
-    DateTimeOffset AddedAt);
+    DateTime AddedAt);

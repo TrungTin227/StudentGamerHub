@@ -81,7 +81,7 @@ public sealed class ChatHub : Hub
             ToUserId: toUserId,
             RoomId: null,
             Text: text,
-            SentAt: DateTimeOffset.UtcNow);
+            SentAt: DateTime.UtcNow);
 
         // Ensure both users are in the group
         await Groups.AddToGroupAsync(Context.ConnectionId, channel).ConfigureAwait(false);
@@ -110,7 +110,7 @@ public sealed class ChatHub : Hub
             ToUserId: null,
             RoomId: roomId,
             Text: text,
-            SentAt: DateTimeOffset.UtcNow);
+            SentAt: DateTime.UtcNow);
 
         // Ensure user is in the room group
         await Groups.AddToGroupAsync(Context.ConnectionId, channel).ConfigureAwait(false);

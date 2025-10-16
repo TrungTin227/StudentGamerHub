@@ -24,15 +24,15 @@ public sealed class EventQueryRepository : IEventQueryRepository
             .ConfigureAwait(false);
     }
 
-    public Task<IReadOnlyList<Event>> GetEventsStartingInRangeUtcAsync(DateTimeOffset startUtc, DateTimeOffset endUtc, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Event>> GetEventsStartingInRangeUtcAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct = default)
     {
-        return _context.Events
+        return await _context.Events
             .AsNoTracking()
             .Where(e => !e.IsDeleted && e.StartsAt >= startUtc && e.StartsAt < endUtc)
             .OrderBy(e => e.StartsAt)
             .ThenBy(e => e.Id)
             .ToListAsync(ct)
-            .ContinueWith<IReadOnlyList<Event>>(t => t.Result, ct);
+            .ConfigureAwait(false);
     }
 
     public Task<int> CountConfirmedAsync(Guid eventId, CancellationToken ct = default)
@@ -59,8 +59,8 @@ public sealed class EventQueryRepository : IEventQueryRepository
         IEnumerable<EventStatus>? statuses,
         Guid? communityId,
         Guid? organizerId,
-        DateTimeOffset? from,
-        DateTimeOffset? to,
+        DateTime? from,
+        DateTime? to,
         string? search,
         int page,
         int pageSize,

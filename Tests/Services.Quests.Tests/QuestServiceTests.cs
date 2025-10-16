@@ -372,13 +372,13 @@ public sealed class QuestServiceTests : IDisposable
 
     private static string GetVnDateString()
     {
-        var nowVn = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
+        var nowVn = DateTime.UtcNow + TimeSpan.FromHours(7);
         return nowVn.Date.ToString("yyyyMMdd");
     }
 
     private static string GetVnMinuteString()
     {
-        var nowVn = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7));
+        var nowVn = DateTime.UtcNow + TimeSpan.FromHours(7);
         return nowVn.ToString("yyyyMMddHHmm");
     }
 }

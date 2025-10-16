@@ -8,5 +8,5 @@ public sealed record RoomMemberBriefDto(
     string FullName,
     RoomRole Role,
     RoomMemberStatus Status,
-    DateTimeOffset JoinedAt
+    DateTime JoinedAt
 );

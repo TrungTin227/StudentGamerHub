@@ -6,5 +6,5 @@ public sealed record PaymentIntentDto(
     PaymentPurpose Purpose,
     Guid? EventRegistrationId,
     PaymentIntentStatus Status,
-    DateTimeOffset ExpiresAt,
+    DateTime ExpiresAt,
     string ClientSecret);

@@ -112,7 +112,7 @@ public sealed class UsersService : IUserService
                 .GroupBy(x => x.UserId)
                 .ToDictionaryAsync(g => g.Key, g => g.Select(x => x.Name!).ToArray(), ct);
 
-                var nowUtc = DateTimeOffset.UtcNow;
+                var nowUtc = DateTime.UtcNow;
 
                 var items = usersPage.Items.Select(u =>
                     u.ToListItemDto(
@@ -279,11 +279,15 @@ public sealed class UsersService : IUserService
 
                 await _users.SetLockoutEnabledAsync(user, true);
 
-                DateTimeOffset? until = null;
+                DateTime? until = null;
                 if (req.Enable)
-                    until = req.Minutes.HasValue ? DateTimeOffset.UtcNow.AddMinutes(req.Minutes.Value) : DateTimeOffset.MaxValue;
+                    until = req.Minutes.HasValue ? DateTime.UtcNow.AddMinutes(req.Minutes.Value) : DateTime.MaxValue;
 
-                var r = await _users.SetLockoutEndDateAsync(user, until);
+                var lockoutEnd = until.HasValue
+                    ? new DateTimeOffset(DateTime.SpecifyKind(until.Value, DateTimeKind.Utc), TimeSpan.Zero)
+                    : (DateTimeOffset?)null;
+
+                var r = await _users.SetLockoutEndDateAsync(user, lockoutEnd);
                 if (!r.Succeeded) return r.ToResult(req.Enable ? "Lockout failed" : "Unlock failed");
 
                 await _uow.SaveChangesAsync(ctk);

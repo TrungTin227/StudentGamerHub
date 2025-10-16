@@ -161,7 +161,7 @@ public sealed class RoomServiceTests
             UserId = userId,
             Role = role,
             Status = status,
-            JoinedAt = DateTimeOffset.UtcNow
+            JoinedAt = DateTime.UtcNow
         };
         ctx.Db.RoomMembers.Add(member);
     }

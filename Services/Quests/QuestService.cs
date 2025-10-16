@@ -103,10 +103,10 @@ public sealed class QuestService : IQuestService
 
         try
         {
-            var (dateStr, nextMidnightVN, minuteStr) = GetVnDayInfo();
+            var (dateStr, nextMidnightUtc, minuteStr) = GetVnDayInfo();
             var db = _redis.GetDatabase();
             var key = BuildQuestKey(userId, dateStr, questCode);
-            var ttl = nextMidnightVN - DateTimeOffset.UtcNow;
+            var ttl = nextMidnightUtc - DateTime.UtcNow;
 
             // ? STEP 1: Idempotent check v?i SET NX
             var flagSet = await db.StringSetAsync(key, "1", ttl, When.NotExists).ConfigureAwait(false);
@@ -179,18 +179,20 @@ public sealed class QuestService : IQuestService
 
     /// <summary>
     /// Tính ngày VN hi?n t?i + midnight ti?p theo + minute string (cho counter).
-    /// Tr? v?: (dateStr: "yyyyMMdd", nextMidnightVN: DateTimeOffset, minuteStr: "yyyyMMddHHmm")
+    /// Tr? v?: (dateStr: "yyyyMMdd", nextMidnightUtc: DateTime, minuteStr: "yyyyMMddHHmm")
     /// </summary>
-    private static (string dateStr, DateTimeOffset nextMidnightVN, string minuteStr) GetVnDayInfo()
+    private static (string dateStr, DateTime nextMidnightUtc, string minuteStr) GetVnDayInfo()
     {
-        var nowVN = DateTimeOffset.UtcNow.ToOffset(_vnOffset);
-        var todayVN = nowVN.Date;
-        var nextMidnightVN = new DateTimeOffset(todayVN.AddDays(1), _vnOffset);
+        var nowUtc = DateTime.UtcNow;
+        var nowVn = nowUtc + _vnOffset;
+        var todayVn = nowVn.Date;
+        var nextMidnightVn = todayVn.AddDays(1);
+        var nextMidnightUtc = DateTime.SpecifyKind(nextMidnightVn - _vnOffset, DateTimeKind.Utc);
 
-        var dateStr = todayVN.ToString("yyyyMMdd");
-        var minuteStr = nowVN.ToString("yyyyMMddHHmm");
+        var dateStr = todayVn.ToString("yyyyMMdd");
+        var minuteStr = nowVn.ToString("yyyyMMddHHmm");
 
-        return (dateStr, nextMidnightVN, minuteStr);
+        return (dateStr, nextMidnightUtc, minuteStr);
     }
 
     /// <summary>

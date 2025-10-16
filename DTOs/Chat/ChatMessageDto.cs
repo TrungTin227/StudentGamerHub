@@ -10,5 +10,5 @@ public sealed record ChatMessageDto(
     Guid? ToUserId,
     Guid? RoomId,
     string Text,
-    DateTimeOffset SentAt
+    DateTime SentAt
 );

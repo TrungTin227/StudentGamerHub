@@ -136,7 +136,7 @@ public sealed class CommunityServiceTests
             UserId = Guid.NewGuid(),
             Status = RoomMemberStatus.Approved,
             Role = RoomRole.Member,
-            JoinedAt = DateTimeOffset.UtcNow
+            JoinedAt = DateTime.UtcNow
         };
         ctx.Db.Communities.Add(community);
         ctx.Db.Clubs.Add(club);

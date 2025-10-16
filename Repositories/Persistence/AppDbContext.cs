@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using System;
 
 namespace Repositories.Persistence
@@ -493,13 +494,27 @@ namespace Repositories.Persistence
                 e.Property(x => x.Description).HasMaxLength(4000).IsRequired();
                 e.Property(x => x.ImageUrl).HasMaxLength(1024);
                 e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16).IsRequired();
-                
+
                 e.HasIndex(x => new { x.UserId, x.CreatedAtUtc }).HasDatabaseName("IX_BugReports_User_CreatedAt");
                 e.HasIndex(x => new { x.Status, x.CreatedAtUtc }).HasDatabaseName("IX_BugReports_Status_CreatedAt");
 
                 e.HasOne(x => x.User).WithMany()
                  .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
             });
+
+            if (isNpgsql)
+            {
+                foreach (var entityType in b.Model.GetEntityTypes())
+                {
+                    foreach (var property in entityType.GetProperties())
+                    {
+                        if (property.ClrType == typeof(DateTime) || property.ClrType == typeof(DateTime?))
+                        {
+                            property.SetColumnType("timestamp without time zone");
+                        }
+                    }
+                }
+            }
 
             // ====== Global Query Filters (soft-delete matching) ======
             b.Entity<Community>().HasQueryFilter(c => !c.IsDeleted);

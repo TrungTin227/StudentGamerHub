@@ -45,7 +45,7 @@ public sealed class RegistrationReadService : IRegistrationReadService
                 r.UserId,
                 r.Status,
                 r.PaidTransactionId,
-                new DateTimeOffset(DateTime.SpecifyKind(r.CreatedAtUtc, DateTimeKind.Utc))))
+                r.CreatedAtUtc))
             .ToList();
         var response = BuildPagedResponse(dtos, total, page, pageSize);
         return Result<PagedResponse<RegistrationListItemDto>>.Success(response);

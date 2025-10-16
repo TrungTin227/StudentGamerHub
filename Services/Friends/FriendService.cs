@@ -126,7 +126,7 @@ public sealed class FriendService : IFriendService
             }
 
             link.Status = FriendStatus.Accepted;
-            link.RespondedAt = TimeExtensions.UtcNowOffset();
+            link.RespondedAt = TimeExtensions.UtcNow();
             link.UpdatedAtUtc = TimeExtensions.UtcNow();
             link.UpdatedBy = requesterId;
 
@@ -179,7 +179,7 @@ public sealed class FriendService : IFriendService
             }
 
             link.Status = FriendStatus.Declined;
-            link.RespondedAt = TimeExtensions.UtcNowOffset();
+            link.RespondedAt = TimeExtensions.UtcNow();
             link.UpdatedAtUtc = TimeExtensions.UtcNow();
             link.UpdatedBy = requesterId;
 
@@ -318,7 +318,7 @@ public sealed class FriendService : IFriendService
     {
         if (existing.RespondedAt.HasValue)
         {
-            var elapsed = TimeExtensions.UtcNowOffset() - existing.RespondedAt.Value;
+            var elapsed = TimeExtensions.UtcNow() - existing.RespondedAt.Value;
             if (elapsed < ResendCooldown)
             {
                 return Result.Failure(new Error(Error.Codes.Forbidden, "Bạn chỉ có thể gửi lại sau 24 giờ."));

@@ -67,7 +67,7 @@ public sealed class PaymentService : IPaymentService
                 return Result.Failure(new Error(Error.Codes.Conflict, "Payment intent has been canceled."));
             }
 
-            if (pi.ExpiresAt <= DateTimeOffset.UtcNow)
+            if (pi.ExpiresAt <= DateTime.UtcNow)
             {
                 return Result.Failure(new Error(Error.Codes.Forbidden, "Payment intent has expired."));
             }
@@ -313,7 +313,7 @@ public sealed class PaymentService : IPaymentService
                 return Result<string>.Failure(new Error(Error.Codes.Conflict, "Payment intent is not in RequiresPayment status."));
             }
 
-            if (pi.ExpiresAt <= DateTimeOffset.UtcNow)
+            if (pi.ExpiresAt <= DateTime.UtcNow)
             {
                 return Result<string>.Failure(new Error(Error.Codes.Forbidden, "Payment intent has expired."));
             }
@@ -341,7 +341,7 @@ public sealed class PaymentService : IPaymentService
 
             // Build VNPAY request
             var vnpTxnRef = pi.Id.ToString("N"); // 32 chars without dashes
-            var createDate = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
+            var createDate = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
 
             var vnpRequest = new DTOs.Payments.VnPay.VnPayCreatePaymentRequest
             {
@@ -438,7 +438,7 @@ public sealed class PaymentService : IPaymentService
                 return Result.Failure(new Error(Error.Codes.Conflict, "Payment intent is not in RequiresPayment status."));
             }
 
-            if (pi.ExpiresAt <= DateTimeOffset.UtcNow)
+            if (pi.ExpiresAt <= DateTime.UtcNow)
             {
                 return Result.Failure(new Error(Error.Codes.Forbidden, "Payment intent has expired."));
             }
