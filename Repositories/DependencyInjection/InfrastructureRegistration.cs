@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Repositories.Interfaces;
 using Repositories.Implements;
+using Repositories.Persistence.Seeding;
 
 namespace Repositories.DependencyInjection
 {
@@ -95,6 +96,9 @@ namespace Repositories.DependencyInjection
             services.AddScoped<IWalletRepository, WalletRepository>();
             services.AddScoped<ITransactionRepository, TransactionRepository>();
             services.AddScoped<IPaymentIntentRepository, PaymentIntentRepository>();
+            services.AddScoped<IGameRepository, GameRepository>();
+            services.AddScoped<IUserGameRepository, UserGameRepository>();
+            services.AddScoped<IAppSeeder, AppSeeder>();
 
             // 6) Hosted seeding
             services.AddHostedService<DbInitializerHostedService>();

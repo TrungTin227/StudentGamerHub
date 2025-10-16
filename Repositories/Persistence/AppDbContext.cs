@@ -147,24 +147,61 @@ namespace Repositories.Persistence
             });
 
             // ====== Games & UserGames (N–N) ======
+            b.Entity<Game>(e =>
+            {
+                var nameProperty = e.Property(x => x.Name)
+                 .IsRequired()
+                 .HasMaxLength(128);
+
+                if (Database.IsNpgsql())
+                {
+                    nameProperty.HasColumnType("character varying(128)");
+                }
+                else
+                {
+                    nameProperty.HasColumnType("nvarchar(128)");
+                }
+
+                e.HasIndex(x => x.CreatedAtUtc)
+                 .HasDatabaseName("IX_Games_CreatedAtUtc");
+
+                if (Database.IsSqlServer())
+                {
+                    e.HasIndex(x => x.Name)
+                     .HasDatabaseName("IX_Games_Name_CI")
+                     .IsUnique()
+                     .HasFilter("[IsDeleted] = 0");
+                }
+            });
+
             b.Entity<UserGame>(e =>
             {
-                e.Property(x => x.Skill).HasConversion<string>();
-                e.Property(x => x.InGameName).HasMaxLength(64);
+                e.Property(x => x.InGameName)
+                 .HasMaxLength(64);
 
                 e.HasOne(x => x.User)
                  .WithMany(u => u.UserGames)
                  .HasForeignKey(x => x.UserId)
-                 .OnDelete(DeleteBehavior.Cascade);
+                 .OnDelete(DeleteBehavior.Restrict);
 
                 e.HasOne(x => x.Game)
                  .WithMany(g => g.Users)
                  .HasForeignKey(x => x.GameId)
-                 .OnDelete(DeleteBehavior.Cascade);
+                 .OnDelete(DeleteBehavior.Restrict);
 
-                e.HasIndex(x => x.GameId);
-                // Teammates search indexes
-                e.HasIndex(x => x.Skill);
+                e.HasIndex(x => x.GameId)
+                 .HasDatabaseName("IX_UserGames_GameId");
+                e.HasIndex(x => x.Skill)
+                 .HasDatabaseName("IX_UserGames_Skill");
+                e.HasIndex(x => x.UserId)
+                 .HasDatabaseName("IX_UserGames_UserId");
+
+                var skillConstraint = Database.IsNpgsql()
+                    ? "\"Skill\" IS NULL OR \"Skill\" BETWEEN 0 AND 2"
+                    : "[Skill] IS NULL OR [Skill] BETWEEN 0 AND 2";
+
+                e.ToTable(tb =>
+                    tb.HasCheckConstraint("CK_UserGames_Skill_Range", skillConstraint));
             });
 
             // ====== Communities ======

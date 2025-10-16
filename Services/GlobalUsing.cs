@@ -19,6 +19,7 @@ global using DTOs.Rooms;
 global using DTOs.Events;
 global using DTOs.Common;
 global using DTOs.Registrations;
+global using DTOs.Games;
 global using Repositories.Interfaces;
 global using Repositories.Persistence;
 global using Repositories.WorkSeeds.Extensions;

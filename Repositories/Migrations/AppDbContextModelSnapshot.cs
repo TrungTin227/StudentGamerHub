@@ -118,7 +118,8 @@ namespace Repositories.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -170,7 +171,8 @@ namespace Repositories.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("School")
                         .HasColumnType("text");
@@ -521,6 +523,9 @@ namespace Repositories.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc")
+                        .HasDatabaseName("IX_Games_CreatedAtUtc");
 
                     b.ToTable("games", (string)null);
                 });
@@ -1123,8 +1128,8 @@ namespace Repositories.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("Skill")
-                        .HasColumnType("text");
+                    b.Property<int?>("Skill")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1134,11 +1139,19 @@ namespace Repositories.Migrations
 
                     b.HasKey("UserId", "GameId");
 
-                    b.HasIndex("GameId");
+                    b.HasIndex("GameId")
+                        .HasDatabaseName("IX_UserGames_GameId");
 
-                    b.HasIndex("Skill");
+                    b.HasIndex("Skill")
+                        .HasDatabaseName("IX_UserGames_Skill");
 
-                    b.ToTable("user_games", (string)null);
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_UserGames_UserId");
+
+                    b.ToTable("user_games", null, tb =>
+                        {
+                            tb.HasCheckConstraint("CK_UserGames_Skill_Range", "\"Skill\" IS NULL OR \"Skill\" BETWEEN 0 AND 2");
+                        });
                 });
 
             modelBuilder.Entity("BusinessObjects.Wallet", b =>
@@ -1485,13 +1498,13 @@ namespace Repositories.Migrations
                     b.HasOne("BusinessObjects.Game", "Game")
                         .WithMany("Users")
                         .HasForeignKey("GameId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("BusinessObjects.User", "User")
                         .WithMany("UserGames")
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Game");

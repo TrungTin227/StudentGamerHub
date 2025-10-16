@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Repositories.Persistence.Seeding;
 
 namespace Repositories.Persistence;
 
@@ -47,6 +48,7 @@ public sealed class DbInitializerHostedService : IHostedService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+        var seeder = scope.ServiceProvider.GetService<IAppSeeder>();
 
         try
         {
@@ -58,6 +60,11 @@ public sealed class DbInitializerHostedService : IHostedService
 
             await EnsureRolesAsync(roleManager, _opt.Roles, cancellationToken);
             await EnsureAdminAsync(userManager, roleManager, _opt.Admin, cancellationToken);
+
+            if (seeder is not null)
+            {
+                await seeder.SeedAsync(cancellationToken).ConfigureAwait(false);
+            }
 
             _logger.LogInformation("Database seeding completed successfully.");
         }
