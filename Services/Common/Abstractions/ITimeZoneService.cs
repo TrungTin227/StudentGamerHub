@@ -3,6 +3,5 @@
     public interface ITimeZoneService : ISingletonService
     {
         DateTime ToVn(DateTime utc);
-        DateTimeOffset ToVn(DateTimeOffset utc);
     }
 }

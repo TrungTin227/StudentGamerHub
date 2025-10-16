@@ -49,12 +49,13 @@ public sealed class DashboardService : IDashboardService
         try
         {
             // Calculate VN date range for today
-            var nowVn = DateTimeOffset.UtcNow.ToOffset(VnOffset);
+            var nowUtc = DateTime.UtcNow;
+            var nowVn = nowUtc + VnOffset;
             var startVn = nowVn.Date; // 00:00 VN time
             var endVn = startVn.AddDays(1); // 00:00 VN time next day
-            
-            var startUtc = startVn.ToUniversalTime();
-            var endUtc = endVn.ToUniversalTime();
+
+            var startUtc = DateTime.SpecifyKind(startVn - VnOffset, DateTimeKind.Utc);
+            var endUtc = DateTime.SpecifyKind(endVn - VnOffset, DateTimeKind.Utc);
 
             // Parallel data fetching
             var pointsTask = GetUserPointsAsync(userId, ct);
@@ -113,8 +114,8 @@ public sealed class DashboardService : IDashboardService
     /// Maps Event entities to EventBriefDto
     /// </summary>
     private async Task<EventBriefDto[]> GetEventsTodayAsync(
-        DateTimeOffset startUtc, 
-        DateTimeOffset endUtc, 
+        DateTime startUtc,
+        DateTime endUtc,
         CancellationToken ct)
     {
         var events = await _eventQueries
@@ -138,8 +139,8 @@ public sealed class DashboardService : IDashboardService
     /// Get activity metrics: online friends count and quests completed in last 60 minutes
     /// </summary>
     private async Task<ActivityDto> GetActivityAsync(
-        Guid userId, 
-        DateTimeOffset nowVn, 
+        Guid userId,
+        DateTime nowVn,
         CancellationToken ct)
     {
         // Get online friends count
@@ -194,7 +195,7 @@ public sealed class DashboardService : IDashboardService
     /// Uses Redis MGET batch operation for efficiency
     /// Key format: "qc:done:{yyyyMMddHHmm}"
     /// </summary>
-    private async Task<int> GetQuestsDoneLast60MinutesAsync(DateTimeOffset nowVn, CancellationToken ct)
+    private async Task<int> GetQuestsDoneLast60MinutesAsync(DateTime nowVn, CancellationToken ct)
     {
         var db = _redis.GetDatabase();
         

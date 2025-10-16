@@ -31,7 +31,7 @@ public sealed class PresenceServiceTests
             var key = ci.Arg<RedisKey>().ToString();
             var expiry = ci.Arg<TimeSpan?>();
             var value = ci.Arg<RedisValue>().ToString();
-            _store[key] = new CacheEntry(value, expiry.HasValue ? DateTimeOffset.UtcNow.Add(expiry.Value) : null);
+            _store[key] = new CacheEntry(value, expiry.HasValue ? DateTime.UtcNow.Add(expiry.Value) : null);
             return Task.FromResult(true);
         });
 
@@ -57,7 +57,7 @@ public sealed class PresenceServiceTests
         result.IsSuccess.Should().BeTrue();
         _store.TryGetValue($"presence:{userId}", out var entry).Should().BeTrue();
         entry!.ExpiresAt.Should().NotBeNull();
-        entry.ExpiresAt!.Value.Should().BeCloseTo(DateTimeOffset.UtcNow.AddSeconds(_options.TtlSeconds), TimeSpan.FromSeconds(2));
+        entry.ExpiresAt!.Value.Should().BeCloseTo(DateTime.UtcNow.AddSeconds(_options.TtlSeconds), TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public sealed class PresenceServiceTests
         await _service.HeartbeatAsync(userId);
 
         var key = $"presence:{userId}";
-        _store[key] = _store[key] with { ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1) };
+        _store[key] = _store[key] with { ExpiresAt = DateTime.UtcNow.AddSeconds(-1) };
 
         var result = await _service.IsOnlineAsync(userId);
 
@@ -115,8 +115,8 @@ public sealed class PresenceServiceTests
             return true;
         }
 
-        return entry.ExpiresAt > DateTimeOffset.UtcNow;
+        return entry.ExpiresAt > DateTime.UtcNow;
     }
 
-    private sealed record CacheEntry(string Value, DateTimeOffset? ExpiresAt);
+    private sealed record CacheEntry(string Value, DateTime? ExpiresAt);
 }

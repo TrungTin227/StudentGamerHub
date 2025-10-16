@@ -55,7 +55,7 @@ public sealed class AuthController : ControllerBase
         // Set HttpOnly refresh cookie + CSRF cookie
         Response.SetAuthCookies(
             r.Value.RefreshToken,
-            r.Value.RefreshExpiresAtUtc, // consider passing DateTimeOffset if you already have it
+            r.Value.RefreshExpiresAtUtc, // consider passing DateTime if you already have it
             CsrfService.NewToken()
         );
 

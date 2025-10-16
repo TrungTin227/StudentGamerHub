@@ -143,7 +143,7 @@ public sealed class GamesServiceTests
     private sealed class GamesTestContext : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
-        private readonly ConcurrentDictionary<string, (RedisValue Value, DateTimeOffset? Expiration)> _cache = new();
+        private readonly ConcurrentDictionary<string, (RedisValue Value, DateTime? Expiration)> _cache = new();
 
         public required AppDbContext Db { get; init; }
         public required IGenericUnitOfWork Uow { get; init; }
@@ -198,7 +198,7 @@ public sealed class GamesServiceTests
             await _connection.DisposeAsync();
         }
 
-        private static void ConfigureRedis(IConnectionMultiplexer redis, IDatabase database, ConcurrentDictionary<string, (RedisValue Value, DateTimeOffset? Expiration)> cache)
+        private static void ConfigureRedis(IConnectionMultiplexer redis, IDatabase database, ConcurrentDictionary<string, (RedisValue Value, DateTime? Expiration)> cache)
         {
             redis.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(database);
 
@@ -212,7 +212,7 @@ public sealed class GamesServiceTests
 
                 if (cache.TryGetValue(key, out var entry))
                 {
-                    if (entry.Expiration is { } expiry && expiry <= DateTimeOffset.UtcNow)
+                    if (entry.Expiration is { } expiry && expiry <= DateTime.UtcNow)
                     {
                         cache.TryRemove(key, out _);
                         return Task.FromResult(RedisValue.Null);
@@ -235,7 +235,7 @@ public sealed class GamesServiceTests
 
                     var value = callInfo.Arg<RedisValue>();
                     var ttl = callInfo.Arg<TimeSpan?>();
-                    var expiration = ttl.HasValue ? DateTimeOffset.UtcNow.Add(ttl.Value) : null;
+                    var expiration = ttl.HasValue ? DateTime.UtcNow.Add(ttl.Value) : null;
                     cache[key] = (value, expiration);
                     return Task.FromResult(true);
                 });

@@ -47,7 +47,7 @@ public sealed class FriendLink : AuditableEntity
     public FriendStatus Status { get; set; } = FriendStatus.Pending;
 
     // Thời điểm phản hồi (ai bấm thì bạn không lưu nữa)
-    public DateTimeOffset? RespondedAt { get; set; }
+    public DateTime? RespondedAt { get; set; }
 
     // Cột tính toán (unordered pair) để unique chống trùng A<->B
     public Guid PairMinUserId { get; private set; }  // computed (stored)
@@ -77,7 +77,7 @@ public sealed class UserGame : AuditableEntity
 
     // Thông tin tuỳ chọn
     public string? InGameName { get; set; }
-    public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTime AddedAt { get; set; } = DateTime.UtcNow;
     public GameSkillLevel? Skill { get; set; }  // nếu muốn lưu “trình độ”
 }
 // COMMUNITIES (3 tables)
@@ -140,7 +140,7 @@ public sealed class RoomMember : AuditableEntity
 
     public RoomRole Role { get; set; } = RoomRole.Member;
     public RoomMemberStatus Status { get; set; } = RoomMemberStatus.Approved; // mặc định; sẽ set Pending nếu phòng cần duyệt
-    public DateTimeOffset JoinedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
 }
 
 [PrimaryKey(nameof(CommunityId), nameof(GameId))]
@@ -167,8 +167,8 @@ public sealed class Event : AuditableEntity
     public EventMode Mode { get; set; } = EventMode.Online;
     public string? Location { get; set; }
 
-    public DateTimeOffset StartsAt { get; set; }
-    public DateTimeOffset? EndsAt { get; set; }
+    public DateTime StartsAt { get; set; }
+    public DateTime? EndsAt { get; set; }
 
     public long PriceCents { get; set; } = 0;
     public int? Capacity { get; set; }
@@ -192,8 +192,8 @@ public sealed class EventRegistration : AuditableEntity
     public EventRegistrationStatus Status { get; set; } = EventRegistrationStatus.Pending;
     public Guid? PaidTransactionId { get; set; }
     public Transaction? PaidTransaction { get; set; }
-    public DateTimeOffset RegisteredAt { get; set; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset? CheckInAt { get; set; }
+    public DateTime RegisteredAt { get; set; } = DateTime.UtcNow;
+    public DateTime? CheckInAt { get; set; }
     public PaymentIntent? PaymentIntent { get; set; }
 
 }
@@ -253,7 +253,7 @@ public sealed class PaymentIntent : AuditableEntity
 
     public PaymentIntentStatus Status { get; set; } = PaymentIntentStatus.RequiresPayment;
     public string ClientSecret { get; set; } = default!;
-    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
 }
 // GIFTS (đổi quà bằng Points)
 public sealed class Gift : AuditableEntity

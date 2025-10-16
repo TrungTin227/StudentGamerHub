@@ -29,7 +29,7 @@ public sealed class PresenceService : IPresenceService
                 ct.ThrowIfCancellationRequested();
 
                 var ttl = TimeSpan.FromSeconds(_options.TtlSeconds);
-                var timestamp = DateTimeOffset.UtcNow.ToString("O");
+                var timestamp = DateTime.UtcNow.ToString("O");
                 var db = _redis.GetDatabase();
 
                 await Task

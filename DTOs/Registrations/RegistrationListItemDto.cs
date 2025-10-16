@@ -6,4 +6,4 @@ public sealed record RegistrationListItemDto(
     Guid UserId,
     EventRegistrationStatus Status,
     Guid? PaidTransactionId,
-    DateTimeOffset CreatedAt);
+    DateTime CreatedAt);

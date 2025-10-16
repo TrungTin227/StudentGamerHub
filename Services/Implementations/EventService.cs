@@ -171,7 +171,7 @@ public sealed class EventService : IEventService
                 return Result.Success();
             }
 
-            if (DateTimeOffset.UtcNow >= ev.StartsAt)
+            if (DateTime.UtcNow >= ev.StartsAt)
             {
                 return Result.Failure(new Error(Error.Codes.Forbidden, "Event cannot be canceled after it starts."));
             }

@@ -20,7 +20,7 @@ public sealed class EventReadServiceTests
         await using var ctx = await EventTestContext.CreateAsync();
         var organizerId = Guid.NewGuid();
         var attendeeId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
 
         var ev = new Event
         {
@@ -102,7 +102,7 @@ public sealed class EventReadServiceTests
         var organizerId = Guid.NewGuid();
         var communityId = Guid.NewGuid();
         var userId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
 
         var matching = new Event
         {
@@ -179,7 +179,7 @@ public sealed class EventReadServiceTests
             OrganizerId = organizerId,
             Title = "Organizer View",
             Status = EventStatus.Open,
-            StartsAt = DateTimeOffset.UtcNow.AddDays(1),
+            StartsAt = DateTime.UtcNow.AddDays(1),
             CreatedAtUtc = DateTime.UtcNow,
             CreatedBy = organizerId
         });
@@ -190,7 +190,7 @@ public sealed class EventReadServiceTests
             EventId = eventId,
             UserId = attendeeId,
             Status = EventRegistrationStatus.Pending,
-            RegisteredAt = DateTimeOffset.UtcNow,
+            RegisteredAt = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow,
             CreatedBy = attendeeId
         });
@@ -223,7 +223,7 @@ public sealed class EventReadServiceTests
                 OrganizerId = Guid.NewGuid(),
                 Title = "Event A",
                 Status = EventStatus.Open,
-                StartsAt = DateTimeOffset.UtcNow.AddDays(1),
+                StartsAt = DateTime.UtcNow.AddDays(1),
                 CreatedAtUtc = DateTime.UtcNow,
                 CreatedBy = Guid.NewGuid()
             },
@@ -233,7 +233,7 @@ public sealed class EventReadServiceTests
                 OrganizerId = Guid.NewGuid(),
                 Title = "Event B",
                 Status = EventStatus.Open,
-                StartsAt = DateTimeOffset.UtcNow.AddDays(2),
+                StartsAt = DateTime.UtcNow.AddDays(2),
                 CreatedAtUtc = DateTime.UtcNow,
                 CreatedBy = Guid.NewGuid()
             });
@@ -245,7 +245,7 @@ public sealed class EventReadServiceTests
                 EventId = event1,
                 UserId = userId,
                 Status = EventRegistrationStatus.Confirmed,
-                RegisteredAt = DateTimeOffset.UtcNow,
+                RegisteredAt = DateTime.UtcNow,
                 CreatedAtUtc = DateTime.UtcNow,
                 CreatedBy = userId
             },
@@ -255,7 +255,7 @@ public sealed class EventReadServiceTests
                 EventId = event2,
                 UserId = userId,
                 Status = EventRegistrationStatus.Pending,
-                RegisteredAt = DateTimeOffset.UtcNow,
+                RegisteredAt = DateTime.UtcNow,
                 CreatedAtUtc = DateTime.UtcNow,
                 CreatedBy = userId
             },
@@ -265,7 +265,7 @@ public sealed class EventReadServiceTests
                 EventId = event2,
                 UserId = otherUserId,
                 Status = EventRegistrationStatus.Pending,
-                RegisteredAt = DateTimeOffset.UtcNow,
+                RegisteredAt = DateTime.UtcNow,
                 CreatedAtUtc = DateTime.UtcNow,
                 CreatedBy = otherUserId
             });
@@ -295,7 +295,7 @@ public sealed class EventReadServiceTests
             Purpose = PaymentPurpose.EventTicket,
             Status = PaymentIntentStatus.RequiresPayment,
             ClientSecret = "secret",
-            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(30),
             CreatedAtUtc = DateTime.UtcNow,
             CreatedBy = ownerId
         };

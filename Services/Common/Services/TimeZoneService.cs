@@ -9,9 +9,6 @@
         public DateTime ToVn(DateTime utc) =>
             TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _vn);
 
-        public DateTimeOffset ToVn(DateTimeOffset utc) =>
-            TimeZoneInfo.ConvertTime(utc, _vn);
-
         // --- Helper: lấy TimeZone VN phù hợp theo OS, có fallback ---
         private static TimeZoneInfo GetVnTz()
         {

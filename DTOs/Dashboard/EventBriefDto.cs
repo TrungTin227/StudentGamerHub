@@ -6,8 +6,8 @@ namespace DTOs.Dashboard;
 public sealed record EventBriefDto(
     Guid Id,
     string Title,
-    DateTimeOffset StartsAt,
-    DateTimeOffset? EndsAt,
+    DateTime StartsAt,
+    DateTime? EndsAt,
     string? Location,
     string Mode
 );

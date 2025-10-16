@@ -77,7 +77,7 @@ public sealed class RoomService : IRoomService
                 UserId = currentUserId,
                 Role = RoomRole.Owner,
                 Status = RoomMemberStatus.Approved,
-                JoinedAt = DateTimeOffset.UtcNow
+                JoinedAt = DateTime.UtcNow
             };
 
             await _roomCommand.UpsertMemberAsync(ownerMember, ctk);
@@ -192,7 +192,7 @@ public sealed class RoomService : IRoomService
                 UserId = currentUserId,
                 Role = RoomRole.Member,
                 Status = status,
-                JoinedAt = DateTimeOffset.UtcNow
+                JoinedAt = DateTime.UtcNow
             };
 
             await _roomCommand.UpsertMemberAsync(member, ctk);
