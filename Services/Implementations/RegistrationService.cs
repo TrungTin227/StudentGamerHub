@@ -1,3 +1,5 @@
+using System.Data;
+
 namespace Services.Implementations;
 
 /// <summary>
@@ -29,7 +31,12 @@ public sealed class RegistrationService : IRegistrationService
     {
         return await _uow.ExecuteTransactionAsync<Guid>(async innerCt =>
         {
-            var ev = await _eventQueryRepository.GetByIdAsync(eventId, innerCt).ConfigureAwait(false);
+            var ev = await _eventQueryRepository
+                .GetForUpdateAsync(eventId, innerCt)
+                .ConfigureAwait(false)
+                ?? await _eventQueryRepository
+                    .GetByIdAsync(eventId, innerCt)
+                    .ConfigureAwait(false);
             if (ev is null)
             {
                 return Result<Guid>.Failure(new Error(Error.Codes.NotFound, "Event not found."));
@@ -92,6 +99,6 @@ public sealed class RegistrationService : IRegistrationService
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             return Result<Guid>.Success(paymentIntent.Id);
-        }, ct: ct).ConfigureAwait(false);
+        }, isolationLevel: IsolationLevel.Serializable, ct: ct).ConfigureAwait(false);
     }
 }

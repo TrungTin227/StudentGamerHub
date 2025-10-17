@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 namespace Repositories.Implements;
 
@@ -18,8 +19,16 @@ public sealed class EventQueryRepository : IEventQueryRepository
 
     public async Task<Event?> GetForUpdateAsync(Guid id, CancellationToken ct = default)
     {
-        return await _context.Events
+        var query = _context.Events
             .Where(e => e.Id == id && !e.IsDeleted)
+            .AsTracking();
+
+        if (_context.Database.IsNpgsql())
+        {
+            query = query.ForUpdate();
+        }
+
+        return await query
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
     }
