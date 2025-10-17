@@ -2,7 +2,6 @@ using DTOs.Games;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using WebApi.Common;
 
 namespace WebAPI.Controllers;
 

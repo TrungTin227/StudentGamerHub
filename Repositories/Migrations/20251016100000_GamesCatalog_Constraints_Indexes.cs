@@ -10,34 +10,10 @@ namespace Repositories.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Convert existing skill values to numeric representation before changing column type
-            if (migrationBuilder.ActiveProvider.Contains("Npgsql"))
-            {
-                migrationBuilder.Sql("""
-                    UPDATE "user_games"
-                    SET "Skill" = CASE
-                        WHEN "Skill" IN ('Casual', '0') THEN '0'
-                        WHEN "Skill" IN ('Intermediate', '1') THEN '1'
-                        WHEN "Skill" IN ('Competitive', '2') THEN '2'
-                        ELSE NULL
-                    END;
-                """);
-            }
-            else
-            {
-                migrationBuilder.Sql("""
-                    UPDATE [user_games]
-                    SET [Skill] = CASE
-                        WHEN [Skill] = 'Casual' THEN '0'
-                        WHEN [Skill] = 'Intermediate' THEN '1'
-                        WHEN [Skill] = 'Competitive' THEN '2'
-                        ELSE [Skill]
-                    END;
-                """);
-            }
+            var isNpgsql = migrationBuilder.ActiveProvider.Contains("Npgsql");
 
-            // Adjust Game.Name column length/type per provider
-            if (migrationBuilder.ActiveProvider.Contains("Npgsql"))
+            // ====== 1. Adjust Game.Name column length/type per provider ======
+            if (isNpgsql)
             {
                 migrationBuilder.AlterColumn<string>(
                     name: "Name",
@@ -60,7 +36,7 @@ namespace Repositories.Migrations
                     oldType: "nvarchar(max)");
             }
 
-            // Drop legacy indexes on user_games
+            // ====== 2. Drop legacy indexes on user_games ======
             migrationBuilder.DropIndex(
                 name: "IX_user_games_GameId",
                 table: "user_games");
@@ -69,31 +45,7 @@ namespace Repositories.Migrations
                 name: "IX_user_games_Skill",
                 table: "user_games");
 
-            // Change skill column to integer
-            if (migrationBuilder.ActiveProvider.Contains("Npgsql"))
-            {
-                migrationBuilder.AlterColumn<int>(
-                    name: "Skill",
-                    table: "user_games",
-                    type: "integer",
-                    nullable: true,
-                    oldClrType: typeof(string),
-                    oldType: "text",
-                    oldNullable: true);
-            }
-            else
-            {
-                migrationBuilder.AlterColumn<int>(
-                    name: "Skill",
-                    table: "user_games",
-                    type: "int",
-                    nullable: true,
-                    oldClrType: typeof(string),
-                    oldType: "nvarchar(max)",
-                    oldNullable: true);
-            }
-
-            // Drop existing foreign keys to replace with Restrict behavior
+            // ====== 3. Drop existing foreign keys to replace with Restrict behavior ======
             migrationBuilder.DropForeignKey(
                 name: "FK_user_games_games_GameId",
                 table: "user_games");
@@ -102,7 +54,7 @@ namespace Repositories.Migrations
                 name: "FK_user_games_users_UserId",
                 table: "user_games");
 
-            // Create updated indexes with explicit names
+            // ====== 4. Create updated indexes with explicit names ======
             migrationBuilder.CreateIndex(
                 name: "IX_UserGames_GameId",
                 table: "user_games",
@@ -123,15 +75,30 @@ namespace Repositories.Migrations
                 table: "games",
                 column: "CreatedAtUtc");
 
-            // Provider-specific unique index on Name (case-insensitive)
-            if (migrationBuilder.ActiveProvider.Contains("Npgsql"))
+            // ====== 5. Provider-specific unique index on Name (case-insensitive) ======
+            if (isNpgsql)
             {
+                // PostgreSQL: Create unique index on LOWER(Name) for case-insensitive uniqueness
                 migrationBuilder.Sql("""
                     CREATE UNIQUE INDEX IF NOT EXISTS "IX_Games_Name_Lower_UQ"
                     ON "games" (LOWER("Name"))
                     WHERE "IsDeleted" = false;
                 """);
+            }
+            else
+            {
+                // SQL Server: Use built-in case-insensitive collation
+                migrationBuilder.CreateIndex(
+                    name: "IX_Games_Name_CI",
+                    table: "games",
+                    column: "Name",
+                    unique: true,
+                    filter: "[IsDeleted] = 0");
+            }
 
+            // ====== 6. Add check constraint for Skill (string enum values) ======
+            if (isNpgsql)
+            {
                 migrationBuilder.Sql("""
                     DO $$
                     BEGIN
@@ -140,27 +107,20 @@ namespace Repositories.Migrations
                         ) THEN
                             ALTER TABLE "user_games"
                             ADD CONSTRAINT "CK_UserGames_Skill_Range"
-                            CHECK ("Skill" IS NULL OR "Skill" BETWEEN 0 AND 2);
+                            CHECK ("Skill" IS NULL OR "Skill" IN ('Casual','Intermediate','Competitive'));
                         END IF;
                     END$$;
                 """);
             }
             else
             {
-                migrationBuilder.CreateIndex(
-                    name: "IX_Games_Name_CI",
-                    table: "games",
-                    column: "Name",
-                    unique: true,
-                    filter: "[IsDeleted] = 0");
-
                 migrationBuilder.AddCheckConstraint(
                     name: "CK_UserGames_Skill_Range",
                     table: "user_games",
-                    sql: "[Skill] IS NULL OR [Skill] BETWEEN 0 AND 2");
+                    sql: "[Skill] IS NULL OR [Skill] IN ('Casual','Intermediate','Competitive')");
             }
 
-            // Re-add foreign keys with Restrict delete behavior
+            // ====== 7. Re-add foreign keys with Restrict delete behavior ======
             migrationBuilder.AddForeignKey(
                 name: "FK_user_games_games_GameId",
                 table: "user_games",
@@ -181,7 +141,9 @@ namespace Repositories.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // Remove foreign keys with Restrict behavior
+            var isNpgsql = migrationBuilder.ActiveProvider.Contains("Npgsql");
+
+            // ====== 1. Remove foreign keys with Restrict behavior ======
             migrationBuilder.DropForeignKey(
                 name: "FK_user_games_games_GameId",
                 table: "user_games");
@@ -190,7 +152,7 @@ namespace Repositories.Migrations
                 name: "FK_user_games_users_UserId",
                 table: "user_games");
 
-            // Drop new indexes
+            // ====== 2. Drop new indexes ======
             migrationBuilder.DropIndex(
                 name: "IX_UserGames_GameId",
                 table: "user_games");
@@ -207,7 +169,8 @@ namespace Repositories.Migrations
                 name: "IX_Games_CreatedAtUtc",
                 table: "games");
 
-            if (migrationBuilder.ActiveProvider.Contains("Npgsql"))
+            // ====== 3. Drop unique index and check constraint ======
+            if (isNpgsql)
             {
                 migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_Games_Name_Lower_UQ\";");
                 migrationBuilder.Sql("""
@@ -226,28 +189,9 @@ namespace Repositories.Migrations
                     table: "user_games");
             }
 
-            // Convert skill values back to string representation before altering column type
-            if (migrationBuilder.ActiveProvider.Contains("Npgsql"))
+            // ====== 4. Restore Game.Name column to unlimited length ======
+            if (isNpgsql)
             {
-                migrationBuilder.Sql("""
-                    UPDATE "user_games"
-                    SET "Skill" = CASE
-                        WHEN "Skill" = 0 THEN 'Casual'
-                        WHEN "Skill" = 1 THEN 'Intermediate'
-                        WHEN "Skill" = 2 THEN 'Competitive'
-                        ELSE NULL
-                    END;
-                """);
-
-                migrationBuilder.AlterColumn<string>(
-                    name: "Skill",
-                    table: "user_games",
-                    type: "text",
-                    nullable: true,
-                    oldClrType: typeof(int),
-                    oldType: "integer",
-                    oldNullable: true);
-
                 migrationBuilder.AlterColumn<string>(
                     name: "Name",
                     table: "games",
@@ -259,25 +203,6 @@ namespace Repositories.Migrations
             }
             else
             {
-                migrationBuilder.Sql("""
-                    UPDATE [user_games]
-                    SET [Skill] = CASE
-                        WHEN [Skill] = 0 THEN 'Casual'
-                        WHEN [Skill] = 1 THEN 'Intermediate'
-                        WHEN [Skill] = 2 THEN 'Competitive'
-                        ELSE NULL
-                    END;
-                """);
-
-                migrationBuilder.AlterColumn<string>(
-                    name: "Skill",
-                    table: "user_games",
-                    type: "nvarchar(max)",
-                    nullable: true,
-                    oldClrType: typeof(int),
-                    oldType: "int",
-                    oldNullable: true);
-
                 migrationBuilder.AlterColumn<string>(
                     name: "Name",
                     table: "games",
@@ -288,7 +213,7 @@ namespace Repositories.Migrations
                     oldMaxLength: 128);
             }
 
-            // Recreate previous indexes
+            // ====== 5. Recreate previous indexes ======
             migrationBuilder.CreateIndex(
                 name: "IX_user_games_GameId",
                 table: "user_games",
@@ -299,7 +224,7 @@ namespace Repositories.Migrations
                 table: "user_games",
                 column: "Skill");
 
-            // Restore cascading foreign keys
+            // ====== 6. Restore cascading foreign keys ======
             migrationBuilder.AddForeignKey(
                 name: "FK_user_games_games_GameId",
                 table: "user_games",
