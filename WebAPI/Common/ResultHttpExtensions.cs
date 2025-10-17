@@ -92,11 +92,11 @@ public static class ResultHttpExtensions
 
     private static (int Status, string Type) MapError(Error e) => e.Code switch
     {
-        Error.Codes.Validation => ((int)HttpStatusCode.BadRequest, "https://httpstatuses.com/400"),
-        Error.Codes.NotFound => ((int)HttpStatusCode.NotFound, "https://httpstatuses.com/404"),
-        Error.Codes.Conflict => ((int)HttpStatusCode.Conflict, "https://httpstatuses.com/409"),
-        Error.Codes.Forbidden => ((int)HttpStatusCode.Forbidden, "https://httpstatuses.com/403"),
-        Error.Codes.Unauthorized => ((int)HttpStatusCode.Unauthorized, "https://httpstatuses.com/401"),
+        "validation_error" => ((int)HttpStatusCode.BadRequest, "https://httpstatuses.com/400"),
+        "not_found" => ((int)HttpStatusCode.NotFound, "https://httpstatuses.com/404"),
+        "conflict" => ((int)HttpStatusCode.Conflict, "https://httpstatuses.com/409"),
+        "forbidden" => ((int)HttpStatusCode.Forbidden, "https://httpstatuses.com/403"),
+        "unauthorized" => ((int)HttpStatusCode.Unauthorized, "https://httpstatuses.com/401"),
         _ => ((int)HttpStatusCode.InternalServerError, "https://httpstatuses.com/500")
     };
 }

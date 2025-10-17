@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace Services.Common.Mapping
 {
@@ -75,10 +76,10 @@ namespace Services.Common.Mapping
         /// Map entity -> UserDetailDto (UTC -> VN khi hiển thị).
         /// </summary>
         public static async Task<UserDetailDto> ToDetailDtoAsync(
-            this User u,
-            UserManager<User> userManager,
-            ITimeZoneService tz,
-            CancellationToken ct = default)
+    this User u,
+    UserManager<User> userManager,
+    ITimeZoneService tz,
+    CancellationToken ct = default)
         {
             var roles = await userManager.GetRolesAsync(u);
 
@@ -88,6 +89,21 @@ namespace Services.Common.Mapping
 
             var nowVn = tz.ToVn(DateTime.UtcNow);
             bool isLocked = lockoutEndVnDateTime.HasValue && lockoutEndVnDateTime.Value > nowVn;
+
+            // 👇 Load thêm games nếu chưa được include
+            var userWithGames = await userManager.Users
+                .Include(x => x.UserGames)
+                .ThenInclude(ug => ug.Game)
+                .AsNoTracking()
+                .FirstAsync(x => x.Id == u.Id, ct);
+
+            var games = userWithGames.UserGames.Select(ug => new GameBriefDto(
+                ug.GameId,
+                ug.Game?.Name ?? string.Empty,
+                ug.InGameName,
+                ug.AddedAt,
+                ug.Skill
+            ));
 
             return new UserDetailDto(
                 Id: u.Id,
@@ -101,11 +117,12 @@ namespace Services.Common.Mapping
                 CoverUrl: u.CoverUrl,
                 PhoneNumber: u.PhoneNumber,
                 EmailConfirmed: u.EmailConfirmed,
-                LockoutEndUtc: lockoutEndVnDateTime,            
+                LockoutEndUtc: lockoutEndVnDateTime,
                 IsLocked: isLocked,
-                CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),         
+                CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),
                 UpdatedAtUtc: tz.ToVn(u.UpdatedAtUtc ?? DateTime.MinValue),
-                Roles: roles.ToArray()
+                Roles: roles.ToArray(),
+                Games: games 
             );
         }
     }

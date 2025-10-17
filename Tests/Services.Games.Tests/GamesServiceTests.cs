@@ -1,7 +1,6 @@
 using BusinessObjects.Common.Results;
 using BusinessObjects;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -11,6 +10,8 @@ using Xunit;
 using Repositories.Implements;
 using Repositories.Persistence;
 using Repositories.WorkSeeds.Implements;
+using Repositories.WorkSeeds.Interfaces;
+using Services.Implementations;
 
 namespace Services.Games.Tests;
 
@@ -142,7 +143,6 @@ public sealed class GamesServiceTests
 
     private sealed class GamesTestContext : IAsyncDisposable
     {
-        private readonly SqliteConnection _connection;
         private readonly ConcurrentDictionary<string, (RedisValue Value, DateTime? Expiration)> _cache = new();
 
         public required AppDbContext Db { get; init; }
@@ -150,22 +150,16 @@ public sealed class GamesServiceTests
         public required GameCatalogService CatalogService { get; init; }
         public required UserGameService UserGameService { get; init; }
 
-        private GamesTestContext(SqliteConnection connection)
-        {
-            _connection = connection;
-        }
+        private GamesTestContext() { }
 
         public static async Task<GamesTestContext> CreateAsync()
         {
-            var connection = new SqliteConnection("Data Source=:memory:");
-            await connection.OpenAsync();
-
             var options = new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite(connection)
+                .UseInMemoryDatabase($"GamesTests-{Guid.NewGuid()}")
                 .Options;
 
-            var db = new AppDbContext(options);
-            await db.Database.EnsureCreatedAsync();
+            var db = new TestAppDbContext(options);
+            // InMemory provider doesn't require EnsureCreated for basic CRUD in tests
 
             var services = new ServiceCollection().BuildServiceProvider();
             var factory = new RepositoryFactory(db, services);
@@ -178,7 +172,7 @@ public sealed class GamesServiceTests
             var catalogService = new GameCatalogService(uow, gameRepo, redis);
             var userGameService = new UserGameService(uow, userGameRepo, gameRepo, redis);
 
-            var ctx = new GamesTestContext(connection)
+            var ctx = new GamesTestContext()
             {
                 Db = db,
                 Uow = uow,
@@ -195,7 +189,6 @@ public sealed class GamesServiceTests
         {
             await Db.DisposeAsync();
             await Uow.DisposeAsync();
-            await _connection.DisposeAsync();
         }
 
         private static void ConfigureRedis(IConnectionMultiplexer redis, IDatabase database, ConcurrentDictionary<string, (RedisValue Value, DateTime? Expiration)> cache)
@@ -235,7 +228,7 @@ public sealed class GamesServiceTests
 
                     var value = callInfo.Arg<RedisValue>();
                     var ttl = callInfo.Arg<TimeSpan?>();
-                    var expiration = ttl.HasValue ? DateTime.UtcNow.Add(ttl.Value) : null;
+                    DateTime? expiration = ttl.HasValue ? DateTime.UtcNow.Add(ttl.Value) : null;
                     cache[key] = (value, expiration);
                     return Task.FromResult(true);
                 });
@@ -250,6 +243,30 @@ public sealed class GamesServiceTests
 
                 return Task.FromResult(cache.TryRemove(key, out _));
             });
+        }
+
+        // Minimal test DbContext to avoid provider-specific configuration in AppDbContext
+        private sealed class TestAppDbContext : AppDbContext
+        {
+            public TestAppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+            protected override void OnModelCreating(ModelBuilder b)
+            {
+                // Only map the entities used by these tests
+                b.Entity<Game>(e =>
+                {
+                    e.ToTable("games");
+                    e.HasKey(x => x.Id);
+                    e.Property(x => x.Name).IsRequired().HasMaxLength(128);
+                });
+
+                b.Entity<UserGame>(e =>
+                {
+                    e.ToTable("user_games");
+                    e.HasKey(x => new { x.UserId, x.GameId });
+                    e.Property(x => x.InGameName).HasMaxLength(64);
+                });
+            }
         }
     }
 }

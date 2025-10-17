@@ -118,8 +118,7 @@ namespace Repositories.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp without time zone");
@@ -171,8 +170,7 @@ namespace Repositories.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasColumnType("text");
 
                     b.Property<string>("School")
                         .HasColumnType("text");
@@ -514,7 +512,8 @@ namespace Repositories.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp without time zone");
@@ -1037,8 +1036,8 @@ namespace Repositories.Migrations
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<DateTime?>("LockoutEnd")
-                        .HasColumnType("timestamp without time zone");
+                    b.Property<DateTimeOffset?>("LockoutEnd")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)
@@ -1128,8 +1127,8 @@ namespace Repositories.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<int?>("Skill")
-                        .HasColumnType("integer");
+                    b.Property<string>("Skill")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp without time zone");
@@ -1148,9 +1147,9 @@ namespace Repositories.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("IX_UserGames_UserId");
 
-                    b.ToTable("user_games", null, tb =>
+                    b.ToTable("user_games", null, t =>
                         {
-                            tb.HasCheckConstraint("CK_UserGames_Skill_Range", "\"Skill\" IS NULL OR \"Skill\" BETWEEN 0 AND 2");
+                            t.HasCheckConstraint("CK_UserGames_Skill_Range", "\"Skill\" IS NULL OR \"Skill\" IN ('Casual','Intermediate','Competitive')");
                         });
                 });
 

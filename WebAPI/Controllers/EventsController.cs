@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -34,27 +34,33 @@ public sealed class EventsController : ControllerBase
     {
         if (request is null)
         {
-            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Validation, "Request body is required.")));
+            return this.ToActionResult(Result<Guid>.Failure(
+                new Error(Error.Codes.Validation, "Request body is required.")));
         }
 
         var organizerId = User.GetUserId();
         if (!organizerId.HasValue)
         {
-            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+            return this.ToActionResult(Result<Guid>.Failure(
+                new Error(Error.Codes.Unauthorized, "User identity is required.")));
         }
 
-        var result = await _eventService.CreateAsync(organizerId.Value, request, ct).ConfigureAwait(false);
+        var result = await _eventService.CreateAsync(organizerId.Value, request, ct)
+                                        .ConfigureAwait(false);
+
         if (!result.IsSuccess)
-        {
             return this.ToActionResult(result);
-        }
 
-        return this.ToCreatedAtAction(
-            result,
-            nameof(GetById),
-            new { id = result.Value },
-            id => new { eventId = id });
+        var id = result.Value;
+
+        // 201 Created + Location: /api/events/{eventId}
+        // body tuỳ bạn, ở đây trả về eventId tối giản.
+        return CreatedAtRoute(
+            routeName: "GetEventById",
+            routeValues: new { eventId = id },
+            value: new { eventId = id });
     }
+
 
     [HttpPost("{eventId:guid}/open")]
     [EnableRateLimiting("EventsWrite")]
@@ -106,7 +112,7 @@ public sealed class EventsController : ControllerBase
         return this.ToActionResult(result);
     }
 
-    [HttpGet("{eventId:guid}")]
+    [HttpGet("{eventId:guid}", Name = "GetEventById")]
     [EnableRateLimiting("ReadsLight")]
     [ProducesResponseType(typeof(EventDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -119,12 +125,17 @@ public sealed class EventsController : ControllerBase
         var currentUserId = User.GetUserId();
         if (!currentUserId.HasValue)
         {
-            return this.ToActionResult(Result<EventDetailDto>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+            return this.ToActionResult(Result<EventDetailDto>.Failure(
+                new Error(Error.Codes.Unauthorized, "User identity is required.")));
         }
 
-        var result = await _eventReadService.GetByIdAsync(currentUserId.Value, eventId, ct).ConfigureAwait(false);
+        var result = await _eventReadService
+            .GetByIdAsync(currentUserId.Value, eventId, ct)
+            .ConfigureAwait(false);
+
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
     }
+
 
     [HttpGet]
     [EnableRateLimiting("ReadsHeavy")]

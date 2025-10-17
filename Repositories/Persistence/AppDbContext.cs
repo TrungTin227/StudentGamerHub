@@ -166,7 +166,10 @@ namespace Repositories.Persistence
                 e.HasIndex(x => x.CreatedAtUtc)
                  .HasDatabaseName("IX_Games_CreatedAtUtc");
 
-                if (Database.IsSqlServer())
+                // Avoid direct dependency on SQL Server provider extensions
+                var providerNameEarly = Database.ProviderName ?? string.Empty;
+                var isSqlServerEarly = providerNameEarly.Contains("SqlServer", StringComparison.OrdinalIgnoreCase);
+                if (isSqlServerEarly)
                 {
                     e.HasIndex(x => x.Name)
                      .HasDatabaseName("IX_Games_Name_CI")
@@ -179,6 +182,9 @@ namespace Repositories.Persistence
             {
                 e.Property(x => x.InGameName)
                  .HasMaxLength(64);
+
+                // Add explicit enum conversion to string for consistency with database
+                e.Property(x => x.Skill).HasConversion<string>();
 
                 e.HasOne(x => x.User)
                  .WithMany(u => u.UserGames)
@@ -198,8 +204,8 @@ namespace Repositories.Persistence
                  .HasDatabaseName("IX_UserGames_UserId");
 
                 var skillConstraint = Database.IsNpgsql()
-                    ? "\"Skill\" IS NULL OR \"Skill\" BETWEEN 0 AND 2"
-                    : "[Skill] IS NULL OR [Skill] BETWEEN 0 AND 2";
+                    ? "\"Skill\" IS NULL OR \"Skill\" IN ('Casual','Intermediate','Competitive')"
+                    : "[Skill] IS NULL OR [Skill] IN ('Casual','Intermediate','Competitive')";
 
                 e.ToTable(tb =>
                     tb.HasCheckConstraint("CK_UserGames_Skill_Range", skillConstraint));
