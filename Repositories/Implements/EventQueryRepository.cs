@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 namespace Repositories.Implements;
@@ -19,18 +19,20 @@ public sealed class EventQueryRepository : IEventQueryRepository
 
     public async Task<Event?> GetForUpdateAsync(Guid id, CancellationToken ct = default)
     {
-        var query = _context.Events
-            .Where(e => e.Id == id && !e.IsDeleted)
-            .AsTracking();
-
+        // Chỉ lock khi chạy Postgres
         if (_context.Database.IsNpgsql())
         {
-            query = query.ForUpdate();
+            // Lấy lock hàng theo PK (FOR UPDATE) trong cùng transaction
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $@"SELECT 1 FROM ""Events"" WHERE ""Id"" = {id} AND ""IsDeleted"" = FALSE FOR UPDATE",
+                ct);
         }
 
-        return await query
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        // Sau khi lock, load entity có tracking để update
+        return await _context.Events
+            .Where(e => e.Id == id && !e.IsDeleted)
+            .AsTracking()
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<IReadOnlyList<Event>> GetEventsStartingInRangeUtcAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct = default)
