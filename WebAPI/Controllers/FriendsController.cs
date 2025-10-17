@@ -249,18 +249,18 @@ namespace WebAPI.Controllers
 
                 case FriendsFilter.Suggested:
                 {
-                    var pageNumber = 1;
-                    if (Request.Query.TryGetValue(PageQueryKey, out var rawPage) &&
-                        int.TryParse(rawPage, out var parsedPage) && parsedPage > 0)
-                    {
-                        pageNumber = parsedPage;
-                    }
+                var pageNumber = 1;
+                if (Request.Query.TryGetValue(PageQueryKey, out var rawPage) &&
+                    int.TryParse(rawPage, out var parsedPage) && parsedPage > 0)
+                {
+                    pageNumber = parsedPage;
+                }
 
-                    var pageRequest = new PageRequest(
-                        page: pageNumber,
-                        size: Math.Clamp(request.SizeSafe, 1, 20),
-                        sort: request.Sort,
-                        desc: request.Desc);
+                var pageRequest = new PageRequest(
+                    Page: pageNumber,
+                    Size: Math.Clamp(request.SizeSafe, 1, 20),
+                    Sort: request.Sort,
+                    Desc: request.Desc);
 
                     var result = await _svc
                         .GetSuggestedFriendsAsync(currentUserId.Value, pageRequest, ct)
