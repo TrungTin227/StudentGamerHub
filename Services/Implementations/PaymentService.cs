@@ -42,6 +42,46 @@ public sealed class PaymentService : IPaymentService
         _vnPayService = vnPayService ?? throw new ArgumentNullException(nameof(vnPayService));
     }
 
+    public Task<Result<Guid>> CreateTopUpIntentAsync(Guid organizerId, Guid eventId, long amountCents, CancellationToken ct = default)
+    {
+        return _uow.ExecuteTransactionAsync<Guid>(async innerCt =>
+        {
+            if (amountCents <= 0)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
+            }
+
+            var ev = await _eventQueryRepository.GetByIdAsync(eventId, innerCt).ConfigureAwait(false);
+            if (ev is null)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.NotFound, "Event not found."));
+            }
+
+            if (ev.OrganizerId != organizerId)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can top up this event escrow."));
+            }
+
+            var paymentIntent = new PaymentIntent
+            {
+                Id = Guid.NewGuid(),
+                UserId = organizerId,
+                AmountCents = amountCents,
+                Purpose = PaymentPurpose.TopUp,
+                EventId = ev.Id,
+                Status = PaymentIntentStatus.RequiresPayment,
+                ClientSecret = Guid.NewGuid().ToString("N"),
+                ExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                CreatedBy = organizerId,
+            };
+
+            await _paymentIntentRepository.CreateAsync(paymentIntent, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            return Result<Guid>.Success(paymentIntent.Id);
+        }, ct: ct);
+    }
+
     public async Task<Result> ConfirmAsync(Guid userId, Guid paymentIntentId, CancellationToken ct = default)
     {
         return await _uow.ExecuteTransactionAsync(async innerCt =>
@@ -185,14 +225,13 @@ public sealed class PaymentService : IPaymentService
 
     private async Task<Result> ConfirmTopUpAsync(Guid userId, PaymentIntent pi, CancellationToken ct)
     {
-        var eventIdResult = await ResolveTopUpEventIdAsync(pi, ct).ConfigureAwait(false);
-        if (eventIdResult.IsFailure)
+        if (!pi.EventId.HasValue)
         {
-            return Result.Failure(eventIdResult.Error);
+            return Result.Failure(new Error(Error.Codes.Validation, "Top-up intent missing EventId."));
         }
 
-        var ev = await _eventQueryRepository.GetForUpdateAsync(eventIdResult.Value, ct).ConfigureAwait(false)
-                  ?? await _eventQueryRepository.GetByIdAsync(eventIdResult.Value, ct).ConfigureAwait(false);
+        var ev = await _eventQueryRepository.GetForUpdateAsync(pi.EventId.Value, ct).ConfigureAwait(false)
+                  ?? await _eventQueryRepository.GetByIdAsync(pi.EventId.Value, ct).ConfigureAwait(false);
 
         if (ev is null)
         {
@@ -264,33 +303,6 @@ public sealed class PaymentService : IPaymentService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return Result.Success();
-    }
-
-    private async Task<Result<Guid>> ResolveTopUpEventIdAsync(PaymentIntent pi, CancellationToken ct)
-    {
-        if (pi.EventRegistrationId.HasValue)
-        {
-            var reg = await _registrationQueryRepository.GetByIdAsync(pi.EventRegistrationId.Value, ct).ConfigureAwait(false);
-            if (reg is not null)
-            {
-                return Result<Guid>.Success(reg.EventId);
-            }
-        }
-
-        var separators = new[] { ':', '|', ';', ',', ' ' };
-        foreach (var token in pi.ClientSecret.Split(separators, StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (Guid.TryParse(token, out var candidate))
-            {
-                var ev = await _eventQueryRepository.GetByIdAsync(candidate, ct).ConfigureAwait(false);
-                if (ev is not null)
-                {
-                    return Result<Guid>.Success(ev.Id);
-                }
-            }
-        }
-
-        return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Unable to resolve event for top-up payment intent."));
     }
 
     public async Task<Result<string>> CreateHostedCheckoutUrlAsync(Guid userId, Guid paymentIntentId, string? returnUrl, string clientIp, CancellationToken ct = default)
@@ -537,7 +549,7 @@ public sealed class PaymentService : IPaymentService
             EventId = ev.Id,
             AmountCents = pi.AmountCents,
             Direction = TransactionDirection.Out,
-            Method = TransactionMethod.Wallet,
+            Method = TransactionMethod.Gateway,
             Status = TransactionStatus.Succeeded,
             Provider = VnPayProvider,
             ProviderRef = providerRef,
@@ -564,14 +576,13 @@ public sealed class PaymentService : IPaymentService
 
     private async Task<Result> ConfirmTopUpViaVnPayAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
     {
-        var eventIdResult = await ResolveTopUpEventIdAsync(pi, ct).ConfigureAwait(false);
-        if (eventIdResult.IsFailure)
+        if (!pi.EventId.HasValue)
         {
-            return Result.Failure(eventIdResult.Error);
+            return Result.Failure(new Error(Error.Codes.Validation, "Top-up intent missing EventId."));
         }
 
-        var ev = await _eventQueryRepository.GetForUpdateAsync(eventIdResult.Value, ct).ConfigureAwait(false)
-                  ?? await _eventQueryRepository.GetByIdAsync(eventIdResult.Value, ct).ConfigureAwait(false);
+        var ev = await _eventQueryRepository.GetForUpdateAsync(pi.EventId.Value, ct).ConfigureAwait(false)
+                  ?? await _eventQueryRepository.GetByIdAsync(pi.EventId.Value, ct).ConfigureAwait(false);
 
         if (ev is null)
         {
@@ -622,7 +633,7 @@ public sealed class PaymentService : IPaymentService
             EventId = ev.Id,
             AmountCents = pi.AmountCents,
             Direction = TransactionDirection.In,
-            Method = TransactionMethod.Wallet,
+            Method = TransactionMethod.Gateway,
             Status = TransactionStatus.Succeeded,
             Provider = VnPayProvider,
             ProviderRef = providerRef,

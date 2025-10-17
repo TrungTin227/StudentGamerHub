@@ -5,6 +5,7 @@ public sealed record PaymentIntentDto(
     long AmountCents,
     PaymentPurpose Purpose,
     Guid? EventRegistrationId,
+    Guid? EventId,
     PaymentIntentStatus Status,
     DateTime ExpiresAt,
     string ClientSecret);

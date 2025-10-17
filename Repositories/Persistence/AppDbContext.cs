@@ -466,8 +466,14 @@ namespace Repositories.Persistence
                  .HasForeignKey(x => x.UserId)
                  .OnDelete(DeleteBehavior.Restrict);
 
+                e.HasOne(x => x.Event)
+                 .WithMany()
+                 .HasForeignKey(x => x.EventId)
+                 .OnDelete(DeleteBehavior.SetNull);
+
                 e.HasIndex(x => x.UserId);
                 e.HasIndex(x => x.EventRegistrationId).IsUnique();
+                e.HasIndex(x => x.EventId);
 
                 e.HasCheckConstraint(
                     "chk_payment_intent_amount_positive",

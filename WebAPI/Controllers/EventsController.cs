@@ -13,11 +13,13 @@ public sealed class EventsController : ControllerBase
 
     private readonly IEventService _eventService;
     private readonly IEventReadService _eventReadService;
+    private readonly IPaymentService _paymentService;
 
-    public EventsController(IEventService eventService, IEventReadService eventReadService)
+    public EventsController(IEventService eventService, IEventReadService eventReadService, IPaymentService paymentService)
     {
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
         _eventReadService = eventReadService ?? throw new ArgumentNullException(nameof(eventReadService));
+        _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
     }
 
     [HttpPost]
@@ -88,6 +90,36 @@ public sealed class EventsController : ControllerBase
         }
 
         return this.ToActionResult(result);
+    }
+
+    [HttpPost("{eventId:guid}/escrow/topups")]
+    [EnableRateLimiting("PaymentsWrite")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> CreateEscrowTopUp(Guid eventId, [FromBody] EventEscrowTopUpRequestDto? request, CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Validation, "Request body is required.")));
+        }
+
+        var organizerId = User.GetUserId();
+        if (!organizerId.HasValue)
+        {
+            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+        }
+
+        var result = await _paymentService
+            .CreateTopUpIntentAsync(organizerId.Value, eventId, request.AmountCents, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, v => new { paymentIntentId = v }, StatusCodes.Status201Created);
     }
 
     [HttpPost("{eventId:guid}/cancel")]

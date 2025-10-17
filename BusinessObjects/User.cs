@@ -240,6 +240,7 @@ public sealed class Transaction : AuditableEntity
 
 
 // PAYMENT INTENT
+[Index(nameof(EventId))]
 public sealed class PaymentIntent : AuditableEntity
 {
     public Guid UserId { get; set; }
@@ -247,9 +248,12 @@ public sealed class PaymentIntent : AuditableEntity
 
     public long AmountCents { get; set; }
     public PaymentPurpose Purpose { get; set; } // vd: TopUp = 0, EventTicket = 1
-    
+
     public Guid? EventRegistrationId { get; set; }
     public EventRegistration? EventRegistration { get; set; }
+
+    public Guid? EventId { get; set; }
+    public Event? Event { get; set; }
 
     public PaymentIntentStatus Status { get; set; } = PaymentIntentStatus.RequiresPayment;
     public string ClientSecret { get; set; } = default!;
