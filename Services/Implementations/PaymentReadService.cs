@@ -25,6 +25,7 @@ public sealed class PaymentReadService : IPaymentReadService
             pi.AmountCents,
             pi.Purpose,
             pi.EventRegistrationId,
+            pi.EventId,
             pi.Status,
             pi.ExpiresAt,
             pi.ClientSecret);

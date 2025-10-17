@@ -48,8 +48,15 @@ public sealed class RegistrationService : IRegistrationService
 
             if (ev.Capacity.HasValue)
             {
-                var count = await _eventQueryRepository.CountPendingOrConfirmedAsync(eventId, innerCt).ConfigureAwait(false);
-                if (count >= ev.Capacity.Value)
+                var nowUtc = DateTime.UtcNow;
+                var confirmedCount = await _eventQueryRepository
+                    .CountConfirmedAsync(eventId, innerCt)
+                    .ConfigureAwait(false);
+                var activePendingCount = await _paymentIntentRepository
+                    .CountActivePendingByEventAsync(eventId, nowUtc, innerCt)
+                    .ConfigureAwait(false);
+
+                if (confirmedCount + activePendingCount >= ev.Capacity.Value)
                 {
                     return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, "Event has reached capacity."));
                 }
@@ -74,6 +81,7 @@ public sealed class RegistrationService : IRegistrationService
                 AmountCents = ev.PriceCents,
                 Purpose = PaymentPurpose.EventTicket,
                 EventRegistrationId = registration.Id,
+                EventId = eventId,
                 Status = PaymentIntentStatus.RequiresPayment,
                 ClientSecret = Guid.NewGuid().ToString("N"),
                 ExpiresAt = DateTime.UtcNow.AddMinutes(15),

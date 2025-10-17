@@ -40,4 +40,20 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
         _context.PaymentIntents.Update(pi);
         return Task.CompletedTask;
     }
+
+    public Task<int> CountActivePendingByEventAsync(Guid eventId, DateTime nowUtc, CancellationToken ct = default)
+    {
+        return _context.EventRegistrations
+            .AsNoTracking()
+            .Where(r => r.EventId == eventId && r.Status == EventRegistrationStatus.Pending)
+            .Join(
+                _context.PaymentIntents.AsNoTracking(),
+                r => r.Id,
+                pi => pi.EventRegistrationId,
+                (r, pi) => new { Registration = r, Intent = pi })
+            .Where(x => x.Intent.Purpose == PaymentPurpose.EventTicket &&
+                        x.Intent.Status == PaymentIntentStatus.RequiresPayment &&
+                        x.Intent.ExpiresAt > nowUtc)
+            .CountAsync(ct);
+    }
 }

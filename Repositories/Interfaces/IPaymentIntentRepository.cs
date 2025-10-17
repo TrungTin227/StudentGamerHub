@@ -7,4 +7,5 @@ public interface IPaymentIntentRepository
     Task<PaymentIntent?> GetByProviderRefAsync(string providerRef, CancellationToken ct = default);
     Task CreateAsync(PaymentIntent pi, CancellationToken ct = default);
     Task UpdateAsync(PaymentIntent pi, CancellationToken ct = default);
+    Task<int> CountActivePendingByEventAsync(Guid eventId, DateTime nowUtc, CancellationToken ct = default);
 }
