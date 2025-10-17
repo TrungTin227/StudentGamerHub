@@ -43,6 +43,48 @@ namespace Services.Common.Mapping
             throw new InvalidOperationException("Requester must be associated with the friend link.");
         }
 
+        public static UserSearchItemDto ToUserSearchItemDto(
+            this User user,
+            bool isFriend,
+            bool isPending)
+        {
+            ArgumentNullException.ThrowIfNull(user);
+
+            return new UserSearchItemDto(
+                UserId: user.Id,
+                UserName: user.UserName ?? string.Empty,
+                FullName: user.FullName ?? string.Empty,
+                AvatarUrl: user.AvatarUrl,
+                University: user.University,
+                IsFriend: isFriend,
+                IsPending: isPending);
+        }
+
+        public static FriendRequestItemDto ToFriendRequestItemDtoFor(
+            this FriendLink link,
+            Guid currentUserId)
+        {
+            ArgumentNullException.ThrowIfNull(link);
+
+            var counterpart = link.SenderId == currentUserId
+                ? link.Recipient
+                : link.Sender;
+
+            if (counterpart is null)
+            {
+                throw new InvalidOperationException("Friend link counterpart must be loaded.");
+            }
+
+            return new FriendRequestItemDto(
+                UserId: counterpart.Id,
+                UserName: counterpart.UserName ?? string.Empty,
+                FullName: counterpart.FullName ?? string.Empty,
+                AvatarUrl: counterpart.AvatarUrl,
+                University: counterpart.University,
+                Status: link.Status.ToString(),
+                RequestedAtUtc: link.CreatedAtUtc);
+        }
+
         /// <summary>
         /// Map entity -> UserListItemDto (UTC -> VN khi hiển thị).
         /// </summary>
