@@ -1,7 +1,7 @@
-using Application.Friends;
+﻿using Application.Friends;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Services.Application.Quests;
-using Services.Common.Extensions;
 using StackExchange.Redis;
 
 namespace Services.Implementations;
@@ -9,6 +9,9 @@ namespace Services.Implementations;
 /// <summary>
 /// Dashboard service implementation
 /// Aggregates Points, Quests, Events, and Activity for today (VN timezone)
+/// NOTE:
+/// - All EF Core queries run sequentially to avoid concurrent-DbContext issues.
+/// - Redis operations are independent and can be run after EF parts.
 /// </summary>
 public sealed class DashboardService : IDashboardService
 {
@@ -18,8 +21,10 @@ public sealed class DashboardService : IDashboardService
     private readonly IPresenceService _presence;
     private readonly IQuestService _quests;
     private readonly IConnectionMultiplexer _redis;
+    private readonly TimeProvider _time;
+    private readonly ILogger<DashboardService> _logger;
 
-    // VN timezone offset
+    // VN timezone offset (UTC+7)
     private static readonly TimeSpan VnOffset = TimeSpan.FromHours(7);
 
     public DashboardService(
@@ -28,7 +33,9 @@ public sealed class DashboardService : IDashboardService
         IFriendLinkQuerRepository friendQueries,
         IPresenceService presence,
         IQuestService quests,
-        IConnectionMultiplexer redis)
+        IConnectionMultiplexer redis,
+        TimeProvider? time = null,
+        ILogger<DashboardService>? logger = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _eventQueries = eventQueries ?? throw new ArgumentNullException(nameof(eventQueries));
@@ -36,57 +43,67 @@ public sealed class DashboardService : IDashboardService
         _presence = presence ?? throw new ArgumentNullException(nameof(presence));
         _quests = quests ?? throw new ArgumentNullException(nameof(quests));
         _redis = redis ?? throw new ArgumentNullException(nameof(redis));
+        _time = time ?? TimeProvider.System;
+        _logger = logger ?? NullLogger<DashboardService>.Instance;
     }
 
     public async Task<Result<DashboardTodayDto>> GetTodayAsync(Guid userId, CancellationToken ct = default)
     {
+        if (ct.IsCancellationRequested) return Result<DashboardTodayDto>.Failure(
+            new Error(Error.Codes.Cancelled, "Request was cancelled."));
+
         if (userId == Guid.Empty)
-        {
             return Result<DashboardTodayDto>.Failure(
                 new Error(Error.Codes.Validation, "User ID is required"));
-        }
 
         try
         {
-            // Calculate VN date range for today
-            var nowUtc = DateTime.UtcNow;
-            var nowVn = nowUtc + VnOffset;
-            var startVn = nowVn.Date; // 00:00 VN time
-            var endVn = startVn.AddDays(1); // 00:00 VN time next day
+            // ===== Calculate VN day range =====
+            var nowUtc = _time.GetUtcNow().UtcDateTime;   // DateTime (UTC)
+            var nowVn = nowUtc + VnOffset;                // local VN time (no tz info)
+            var startVn = nowVn.Date;                     // 00:00 VN
+            var endVn = startVn.AddDays(1);               // 00:00 next VN day
 
             var startUtc = DateTime.SpecifyKind(startVn - VnOffset, DateTimeKind.Utc);
             var endUtc = DateTime.SpecifyKind(endVn - VnOffset, DateTimeKind.Utc);
 
-            // Parallel data fetching
-            var pointsTask = GetUserPointsAsync(userId, ct);
-            var questsTask = _quests.GetTodayAsync(userId, ct);
-            var eventsTask = GetEventsTodayAsync(startUtc, endUtc, ct);
-            var activityTask = GetActivityAsync(userId, nowVn, ct);
+            // ===== EF queries (SEQUENTIAL) =====
+            // 1) Points
+            var points = await GetUserPointsAsync(userId, ct).ConfigureAwait(false);
 
-            await Task.WhenAll(pointsTask, questsTask, eventsTask, activityTask).ConfigureAwait(false);
-
-            var points = await pointsTask;
-            var questsResult = await questsTask;
-            var events = await eventsTask;
-            var activity = await activityTask;
-
-            // Handle quest service result
+            // 2) Quests today
+            var questsResult = await _quests.GetTodayAsync(userId, ct).ConfigureAwait(false);
             if (questsResult.IsFailure)
-            {
                 return Result<DashboardTodayDto>.Failure(questsResult.Error);
-            }
 
-            var dashboard = new DashboardTodayDto(
+            // 3) Events in VN "today"
+            var events = await GetEventsTodayAsync(startUtc, endUtc, ct).ConfigureAwait(false);
+
+            // 4) Activity (split: friends = DB, questsDone = Redis)
+            var onlineFriends = await GetOnlineFriendsCountAsync(userId, ct).ConfigureAwait(false);
+
+            // ===== Redis (independent) =====
+            var questsDone = await GetQuestsDoneLast60MinutesAsync(nowVn, ct).ConfigureAwait(false);
+
+            var activity = new ActivityDto(onlineFriends, questsDone);
+
+            var dto = new DashboardTodayDto(
                 Points: points,
                 Quests: questsResult.Value!,
                 EventsToday: events,
                 Activity: activity
             );
 
-            return Result<DashboardTodayDto>.Success(dashboard);
+            return Result<DashboardTodayDto>.Success(dto);
+        }
+        catch (OperationCanceledException)
+        {
+            return Result<DashboardTodayDto>.Failure(
+                new Error(Error.Codes.Cancelled, "Request was cancelled."));
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Failed to get dashboard data for user {UserId}", userId);
             return Result<DashboardTodayDto>.Failure(
                 new Error(Error.Codes.Unexpected, $"Failed to get dashboard data: {ex.Message}"));
         }
@@ -99,14 +116,14 @@ public sealed class DashboardService : IDashboardService
     /// </summary>
     private async Task<int> GetUserPointsAsync(Guid userId, CancellationToken ct)
     {
-        var user = await _db.Users
+        var points = await _db.Users
             .AsNoTracking()
-            .Where(u => u.Id == userId)
-            .Select(u => new { u.Points })
+            .Where(u => !u.IsDeleted && u.Id == userId)
+            .Select(u => (int?)u.Points)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        return user?.Points ?? 0;
+        return points ?? 0;
     }
 
     /// <summary>
@@ -123,104 +140,78 @@ public sealed class DashboardService : IDashboardService
             .ConfigureAwait(false);
 
         // Map Event -> EventBriefDto
-        return events
-            .Select(e => new EventBriefDto(
+        return events.Select(e => new EventBriefDto(
                 Id: e.Id,
                 Title: e.Title,
                 StartsAt: e.StartsAt,
                 EndsAt: e.EndsAt,
                 Location: e.Location,
-                Mode: e.Mode.ToString() // EventMode enum -> string
-            ))
+                Mode: e.Mode.ToString()))
             .ToArray();
     }
 
     /// <summary>
-    /// Get activity metrics: online friends count and quests completed in last 60 minutes
-    /// </summary>
-    private async Task<ActivityDto> GetActivityAsync(
-        Guid userId,
-        DateTime nowVn,
-        CancellationToken ct)
-    {
-        // Get online friends count
-        var onlineFriendsTask = GetOnlineFriendsCountAsync(userId, ct);
-        
-        // Get quests done in last 60 minutes
-        var questsDone60mTask = GetQuestsDoneLast60MinutesAsync(nowVn, ct);
-
-        await Task.WhenAll(onlineFriendsTask, questsDone60mTask).ConfigureAwait(false);
-
-        var onlineFriends = await onlineFriendsTask;
-        var questsDone = await questsDone60mTask;
-
-        return new ActivityDto(
-            OnlineFriends: onlineFriends,
-            QuestsDoneLast60m: questsDone
-        );
-    }
-
-    /// <summary>
     /// Get count of online friends using batch presence check
-    /// Uses single Redis pipeline for efficiency
     /// </summary>
     private async Task<int> GetOnlineFriendsCountAsync(Guid userId, CancellationToken ct)
     {
-        // Get friend IDs
+        // Using repository (likely EF). Run sequentially relative to other EF calls.
         var friendIds = await _friendQueries
             .GetAcceptedFriendIdsAsync(userId, ct)
             .ConfigureAwait(false);
 
-        if (friendIds.Count == 0)
-        {
-            return 0;
-        }
+        if (friendIds.Count == 0) return 0;
 
-        // Batch presence check - single pipeline call
         var presenceResult = await _presence
             .BatchIsOnlineAsync(friendIds, ct)
             .ConfigureAwait(false);
 
-        if (presenceResult.IsFailure)
-        {
-            return 0; // Return 0 on error, don't fail the entire dashboard
-        }
+        if (presenceResult.IsFailure || presenceResult.Value is null) return 0;
 
-        // Count online friends
-        return presenceResult.Value!.Values.Count(isOnline => isOnline);
+        return presenceResult.Value.Values.Count(isOnline => isOnline);
     }
 
     /// <summary>
-    /// Get total quests completed in last 60 minutes
-    /// Uses Redis MGET batch operation for efficiency
-    /// Key format: "qc:done:{yyyyMMddHHmm}"
+    /// Get total quests completed in last 60 minutes (Redis MGET)
+    /// Key format: "qc:done:{yyyyMMddHHmm}" in VN time.
     /// </summary>
     private async Task<int> GetQuestsDoneLast60MinutesAsync(DateTime nowVn, CancellationToken ct)
     {
         var db = _redis.GetDatabase();
-        
-        // Generate 60 minute keys (current minute and 59 minutes back)
-        var keys = new List<RedisKey>(60);
+
+        // Build minute keys for [now .. now-59m] in VN time
+        var keys = new RedisKey[60];
         for (int i = 0; i < 60; i++)
         {
             var minuteVn = nowVn.AddMinutes(-i);
-            var minuteKey = $"qc:done:{minuteVn:yyyyMMddHHmm}";
-            keys.Add(minuteKey);
+            keys[i] = $"qc:done:{minuteVn:yyyyMMddHHmm}";
         }
 
-        // MGET batch operation - single Redis call
-        var values = await db.StringGetAsync(keys.ToArray()).ConfigureAwait(false);
+        // Single MGET
+        var values = await db.StringGetAsync(keys).ConfigureAwait(false);
 
-        // Sum all counts (null values are treated as 0)
-        int total = 0;
-        foreach (var value in values)
+        var total = 0;
+        foreach (var v in values)
         {
-            if (value.HasValue && value.TryParse(out int count))
-            {
+            if (v.HasValue && v.TryParse(out int count))
                 total += count;
-            }
         }
 
         return total;
     }
+}
+
+/// <summary>
+/// Fallback logger when ILogger isn't provided.
+/// </summary>
+file sealed class NullLogger<T> : ILogger<T>, IDisposable
+{
+    public static readonly NullLogger<T> Instance = new();
+    private NullLogger() { }
+    public IDisposable BeginScope<TState>(TState state) => this;
+    public bool IsEnabled(LogLevel logLevel) => false;
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    { }
+    public void Dispose() { }
 }
