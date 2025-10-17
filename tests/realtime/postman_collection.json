@@ -1,0 +1,177 @@
+{
+  "info": {
+    "name": "StudentGamerHub Realtime QA",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Collection covering authentication, abuse reporting, and health probes for StudentGamerHub realtime validation."
+  },
+  "item": [
+    {
+      "name": "Auth - Register Test User",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/user-register",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "user-register"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fullName\": \"Realtime QA User\",\n  \"gender\": \"Male\",\n  \"university\": \"SignalR QA Academy\",\n  \"email\": \"{{email}}\",\n  \"phoneNumber\": null,\n  \"password\": \"{{password}}\"\n}"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const json = pm.response.json();",
+              "  pm.collectionVariables.set('accessToken', json.accessToken);",
+              "  pm.collectionVariables.set('accessTokenExpiresAtUtc', json.accessExpiresAtUtc);",
+              "}",
+              "pm.test('Received access token', function () {",
+              "  pm.expect(pm.collectionVariables.get('accessToken')).to.be.a('string');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userNameOrEmail\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - Me",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/me",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "me"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Abuse - Report Chat Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/abuse/report",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "abuse", "report"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"channel\": \"dm:{{pairChannel}}\",\n  \"messageId\": \"{{messageId}}\",\n  \"text\": \"Flagging abusive language\",\n  \"offenderUserId\": \"{{offenderUserId}}\",\n  \"snapshot\": {\n    \"fromUserId\": \"{{offenderUserId}}\",\n    \"toUserId\": \"{{reporterUserId}}\",\n    \"roomId\": null,\n    \"message\": \"{{messageText}}\"\n  }\n}"
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Health - Ready",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/ready",
+          "host": ["{{baseUrl}}"],
+          "path": ["ready"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Health - Live",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/live",
+          "host": ["{{baseUrl}}"],
+          "path": ["live"]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://localhost:7227"
+    },
+    {
+      "key": "email",
+      "value": "realtime-a@studentgamerhub.local"
+    },
+    {
+      "key": "password",
+      "value": "Password123!"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "pairChannel",
+      "value": ""
+    },
+    {
+      "key": "messageId",
+      "value": ""
+    },
+    {
+      "key": "offenderUserId",
+      "value": ""
+    },
+    {
+      "key": "reporterUserId",
+      "value": ""
+    },
+    {
+      "key": "messageText",
+      "value": ""
+    }
+  ]
+}
