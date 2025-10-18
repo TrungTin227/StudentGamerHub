@@ -2,7 +2,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Repositories.Interfaces;
 using Repositories.Implements;
 using Repositories.Persistence.Seeding;
 
@@ -48,16 +47,25 @@ namespace Repositories.DependencyInjection
             }
 
             // 2) Identity
+            // 2) Identity
             services
                 .AddIdentityCore<User>(opt =>
                 {
+                    // Email
+                    opt.User.RequireUniqueEmail = true;
+
+                    // DEV: Cho phép đăng nhập chưa xác thực email
+                    // PROD/Other: yêu cầu xác thực email
+                    opt.SignIn.RequireConfirmedEmail = !isDevelopment;
+
+                    // Password
                     opt.Password.RequireDigit = true;
                     opt.Password.RequiredLength = 8;
                     opt.Password.RequireNonAlphanumeric = false;
                     opt.Password.RequireUppercase = true;
                     opt.Password.RequireLowercase = true;
-                    opt.User.RequireUniqueEmail = true;
-                    opt.SignIn.RequireConfirmedEmail = true;
+
+                    // Lockout
                     opt.Lockout.AllowedForNewUsers = true;
                     opt.Lockout.MaxFailedAccessAttempts = 5;
                     opt.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
@@ -66,6 +74,7 @@ namespace Repositories.DependencyInjection
                 .AddEntityFrameworkStores<AppDbContext>()
                 .AddSignInManager()
                 .AddDefaultTokenProviders();
+
 
             services.Configure<DataProtectionTokenProviderOptions>(o =>
             {

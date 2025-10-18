@@ -79,8 +79,12 @@ public sealed class FriendService : IFriendService
                         (l.SenderId == currentUserId && l.RecipientId == user.Id) ||
                         (l.RecipientId == currentUserId && l.SenderId == user.Id));
 
+                    // ✅ FIX: Check both directions for IsFriend (bidirectional relationship)
                     var isFriend = link?.Status == FriendStatus.Accepted;
-                    var isPending = link?.Status == FriendStatus.Pending && link.SenderId == currentUserId;
+                    
+                    // ✅ FIX: IsPending should be true for BOTH outgoing and incoming requests
+                    // This fixes the "một bên là bạn, bên kia chưa" bug
+                    var isPending = link?.Status == FriendStatus.Pending;
 
                     return user.ToUserSearchItemDto(isFriend, isPending);
                 })
