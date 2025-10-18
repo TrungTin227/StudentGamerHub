@@ -1,21 +1,18 @@
+using Application.Friends;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Options;
-using Services.Presence;
-using StackExchange.Redis;
+using Services.Common.Auth;
 
 namespace WebAPI.Hubs;
 
 [Authorize]
 public sealed class PresenceHub : Hub
 {
-    private readonly IConnectionMultiplexer _redis;
-    private readonly PresenceOptions _options;
+    private readonly IPresenceService _presence;
 
-    public PresenceHub(IConnectionMultiplexer redis, IOptions<PresenceOptions> options)
+    public PresenceHub(IPresenceService presence)
     {
-        _redis = redis;
-        _options = options.Value;
+        _presence = presence ?? throw new ArgumentNullException(nameof(presence));
     }
 
     public async Task Heartbeat()
@@ -26,12 +23,13 @@ public sealed class PresenceHub : Hub
             throw new HubException("Authenticated user required for heartbeat");
         }
 
-        var ttl = TimeSpan.FromSeconds(_options.TtlSeconds);
-        var timestamp = DateTime.UtcNow.ToString("O");
-        var db = _redis.GetDatabase();
+        var result = await _presence
+            .HeartbeatAsync(userId.Value, Context.ConnectionAborted)
+            .ConfigureAwait(false);
 
-        await Task.WhenAll(
-            db.StringSetAsync($"presence:{userId}", "1", ttl),
-            db.StringSetAsync($"lastseen:{userId}", timestamp));
+        if (!result.IsSuccess)
+        {
+            throw new HubException(result.Error.Message ?? "Failed to record heartbeat");
+        }
     }
 }

@@ -38,6 +38,10 @@ namespace Services.Common.DependencyInjection
                         .Bind(configuration.GetSection(PresenceOptions.SectionName))
                         .Validate(o => o.TtlSeconds > 0, "Presence:TtlSeconds must be positive")
                         .Validate(o => o.HeartbeatSeconds > 0, "Presence:HeartbeatSeconds must be positive")
+                        .Validate(o => o.GraceSeconds >= 0, "Presence:GraceSeconds cannot be negative")
+                        .Validate(o => o.MaxBatchSize > 0, "Presence:MaxBatchSize must be positive")
+                        .Validate(o => o.DefaultPageSize > 0, "Presence:DefaultPageSize must be positive")
+                        .Validate(o => o.MaxPageSize >= o.DefaultPageSize, "Presence:MaxPageSize must be >= DefaultPageSize")
                         .ValidateOnStart();
                 // KHÔNG đăng ký singleton .Value để giữ hot-reload
             }
@@ -60,6 +64,8 @@ namespace Services.Common.DependencyInjection
             // 5) Convention registrations
             RegisterCrudServices(services, asm);
             RegisterServiceInterfacesByConvention(services, asm);
+
+            services.AddScoped<IPresenceReader, RedisPresenceReader>();
 
             return services;
         }

@@ -9,11 +9,13 @@ public sealed class PresenceService : IPresenceService
 {
     private readonly IConnectionMultiplexer _redis;
     private readonly PresenceOptions _options;
+    private readonly string _prefix;
 
     public PresenceService(IConnectionMultiplexer redis, IOptions<PresenceOptions> options)
     {
         _redis = redis;
         _options = options.Value;
+        _prefix = PresenceKeyHelper.NormalizePrefix(_options.KeyPrefix);
     }
 
     public async Task<Result> HeartbeatAsync(Guid userId, CancellationToken ct = default)
@@ -28,14 +30,32 @@ public sealed class PresenceService : IPresenceService
             {
                 ct.ThrowIfCancellationRequested();
 
+                var now = DateTimeOffset.UtcNow;
                 var ttl = TimeSpan.FromSeconds(_options.TtlSeconds);
-                var timestamp = DateTime.UtcNow.ToString("O");
+                var expiry = now.Add(ttl);
                 var db = _redis.GetDatabase();
 
+                var batch = db.CreateBatch();
+                var presenceTask = batch.StringSetAsync(
+                    PresenceKeyHelper.GetPresenceKey(_prefix, userId),
+                    "1",
+                    ttl);
+                var lastSeenTask = batch.StringSetAsync(
+                    PresenceKeyHelper.GetLastSeenKey(_prefix, userId),
+                    now.ToString("O"));
+                var indexTask = batch.SortedSetAddAsync(
+                    PresenceKeyHelper.GetIndexKey(_prefix),
+                    PresenceKeyHelper.GetMember(userId),
+                    expiry.ToUnixTimeMilliseconds());
+                var cleanupThreshold = now.AddSeconds(-_options.GraceSeconds).ToUnixTimeMilliseconds() - 1;
+                var cleanupTask = batch.SortedSetRemoveRangeByScoreAsync(
+                    PresenceKeyHelper.GetIndexKey(_prefix),
+                    double.NegativeInfinity,
+                    cleanupThreshold);
+
+                batch.Execute();
                 await Task
-                    .WhenAll(
-                        db.StringSetAsync(GetPresenceKey(userId), "1", ttl),
-                        db.StringSetAsync(GetLastSeenKey(userId), timestamp))
+                    .WhenAll(presenceTask, lastSeenTask, indexTask, cleanupTask)
                     .ConfigureAwait(false);
 
                 return true;
@@ -61,9 +81,23 @@ public sealed class PresenceService : IPresenceService
             ct.ThrowIfCancellationRequested();
 
             var db = _redis.GetDatabase();
-            var key = GetPresenceKey(userId);
-            var exists = await db.KeyExistsAsync(key).ConfigureAwait(false);
-            return exists;
+            var now = DateTimeOffset.UtcNow;
+            var indexKey = PresenceKeyHelper.GetIndexKey(_prefix);
+            var member = PresenceKeyHelper.GetMember(userId);
+            var score = await db.SortedSetScoreAsync(indexKey, member).ConfigureAwait(false);
+            if (!score.HasValue)
+            {
+                return false;
+            }
+
+            var expiry = DateTimeOffset.FromUnixTimeMilliseconds(ToMilliseconds(score.Value));
+            if (expiry < now.AddSeconds(-_options.GraceSeconds))
+            {
+                await db.SortedSetRemoveAsync(indexKey, member).ConfigureAwait(false);
+                return false;
+            }
+
+            return true;
         });
     }
 
@@ -89,22 +123,25 @@ public sealed class PresenceService : IPresenceService
 
             var db = _redis.GetDatabase();
             var batch = db.CreateBatch();
-            var tasks = new Dictionary<Guid, Task<bool>>(distinctIds.Length);
-
+            var tasks = new Dictionary<Guid, Task<double?>>(distinctIds.Length);
+            var indexKey = PresenceKeyHelper.GetIndexKey(_prefix);
             foreach (var id in distinctIds)
             {
-                var key = GetPresenceKey(id);
-                tasks[id] = batch.KeyExistsAsync(key);
+                tasks[id] = batch.SortedSetScoreAsync(indexKey, PresenceKeyHelper.GetMember(id));
             }
 
             batch.Execute();
             await Task.WhenAll(tasks.Values).ConfigureAwait(false);
 
-            var result = tasks.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Result);
+            var threshold = DateTimeOffset.UtcNow.AddSeconds(-_options.GraceSeconds);
+            var result = tasks.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.Result.HasValue &&
+                       DateTimeOffset.FromUnixTimeMilliseconds(ToMilliseconds(kvp.Value.Result!.Value)) >= threshold);
+
             return (IReadOnlyDictionary<Guid, bool>)result;
         });
     }
 
-    private static RedisKey GetPresenceKey(Guid userId) => $"presence:{userId}";
-    private static RedisKey GetLastSeenKey(Guid userId) => $"lastseen:{userId}";
+    private static long ToMilliseconds(double score) => (long)Math.Round(score, MidpointRounding.AwayFromZero);
 }
