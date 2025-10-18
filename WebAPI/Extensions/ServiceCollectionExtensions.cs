@@ -146,6 +146,36 @@ public static class ServiceCollectionExtensions
                 });
             });
 
+            options.AddPolicy("PresenceAdminReads", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 60,
+                    TokensPerPeriod = 60,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
+            options.AddPolicy("PresenceBatchReads", httpContext =>
+            {
+                var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
+
+                return RateLimitPartition.GetTokenBucketLimiter(userKey, _ => new TokenBucketRateLimiterOptions
+                {
+                    TokenLimit = 200,
+                    TokensPerPeriod = 200,
+                    ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+            });
+
             options.AddPolicy("FriendInvite", httpContext =>
             {
                 var userKey = httpContext.User.GetUserId()?.ToString() ?? Guid.Empty.ToString();
