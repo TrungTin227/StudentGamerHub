@@ -1,0 +1,365 @@
+@page
+@model WebTestRealTime.Pages.ChatModel
+@using System.Text.Json
+@{
+    ViewData["Title"] = "Chat Test";
+    var baseUrl = (ViewData["BaseUrl"] as string) ?? string.Empty;
+    var email = (ViewData["Email"] as string) ?? string.Empty;
+    var password = (ViewData["Password"] as string) ?? string.Empty;
+}
+
+<h1>Realtime Chat Test</h1>
+
+<div class="mb-4">
+    <h2>Login</h2>
+    <form id="loginForm" class="row gy-2 gx-3 align-items-center">
+        <div class="col-sm-4">
+            <label class="form-label" for="emailInput">Email</label>
+            <input id="emailInput" class="form-control" type="email" value="@email" readonly />
+        </div>
+        <div class="col-sm-4">
+            <label class="form-label" for="passwordInput">Password</label>
+            <input id="passwordInput" class="form-control" type="password" value="@password" readonly />
+        </div>
+        <div class="col-sm-4 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary me-2">Login</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="disconnect()">Disconnect</button>
+        </div>
+    </form>
+    <p class="text-muted mt-2">Base URL: <code>@baseUrl</code></p>
+    @if (string.IsNullOrWhiteSpace(baseUrl))
+    {
+        <div class="alert alert-warning mt-2" role="alert">
+            ChatTest:BaseUrl is not configured. Update <code>appsettings.Development.json</code> before running realtime tests.
+        </div>
+    }
+</div>
+
+<div class="mb-4">
+    <h2>Direct Message</h2>
+    <div class="row gy-2 gx-3 align-items-center">
+        <div class="col-sm-4">
+            <label class="form-label" for="otherUserId">Other User Id (GUID)</label>
+            <input id="otherUserId" class="form-control" type="text" placeholder="00000000-0000-0000-0000-000000000000" />
+        </div>
+        <div class="col-sm-8 d-flex align-items-end gap-2 flex-wrap">
+            <button type="button" class="btn btn-secondary" onclick="joinDm()">Join DM</button>
+            <button type="button" class="btn btn-info" onclick="loadDmHistory()">Load DM History</button>
+            <button type="button" class="btn btn-primary" onclick="sendDm()">Send DM</button>
+        </div>
+    </div>
+    <div class="mt-3">
+        <label class="form-label" for="message">Message</label>
+        <input id="message" class="form-control" type="text" placeholder="Type a message" />
+    </div>
+</div>
+
+<div class="mb-4">
+    <h2>Room (optional)</h2>
+    <div class="row gy-2 gx-3 align-items-center">
+        <div class="col-sm-4">
+            <label class="form-label" for="roomId">Room Id</label>
+            <input id="roomId" class="form-control" type="text" placeholder="room-123" />
+        </div>
+        <div class="col-sm-8 d-flex align-items-end gap-2 flex-wrap">
+            <button type="button" class="btn btn-secondary" onclick="joinRoom()">Join Room</button>
+            <button type="button" class="btn btn-primary" onclick="sendRoom()">Send To Room</button>
+        </div>
+    </div>
+</div>
+
+<div class="mb-4">
+    <h2>Log</h2>
+    <ul id="log" class="list-unstyled border rounded p-3 bg-light" style="min-height: 200px;"></ul>
+</div>
+
+@section Scripts {
+    <script>
+        const BASE_URL = @JsonSerializer.Serialize(baseUrl);
+        const EMAIL = @JsonSerializer.Serialize(email);
+        const PASSWORD = @JsonSerializer.Serialize(password);
+
+        let accessToken = null;
+        let connection = null;
+        let currentUser = null;
+
+        const HubConnectionState = window.signalR?.HubConnectionState ?? null;
+        const Connected = HubConnectionState?.Connected ?? 2;
+
+        const LogEntryType = Object.freeze({
+            info: 'info',
+            error: 'error'
+        });
+
+        async function login() {
+            if (!BASE_URL) {
+                appendLog('ChatTest:BaseUrl is empty. Configure the BaseUrl value in appsettings.Development.json.', LogEntryType.error);
+                return;
+            }
+
+            appendLog('Logging in...', LogEntryType.info);
+            try {
+                const res = await fetch(`${BASE_URL}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userNameOrEmail: EMAIL, password: PASSWORD })
+                });
+
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error(`Login failed: ${res.status} ${res.statusText} ${errorText}`);
+                }
+
+                const json = await res.json();
+                accessToken = json.accessToken || json.AccessToken || null;
+
+                if (!accessToken) {
+                    throw new Error('No access token received from login response.');
+                }
+
+                appendLog('Login successful. Access token acquired.', LogEntryType.info);
+
+                await connect();
+            } catch (error) {
+                appendLog(`Login error: ${error.message}`, LogEntryType.error);
+            }
+        }
+
+        async function connect() {
+            if (!window.signalR) {
+                appendLog('SignalR client library not found.', LogEntryType.error);
+                return;
+            }
+
+            if (!accessToken) {
+                appendLog('Cannot connect without access token. Please login first.', LogEntryType.error);
+                return;
+            }
+
+            if (connection && connection.state === Connected) {
+                appendLog('Already connected.', LogEntryType.info);
+                return;
+            }
+
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl(`${BASE_URL}/ws/chat`, { accessTokenFactory: () => accessToken })
+                .withAutomaticReconnect()
+                .build();
+
+            connection.on('msg', (dto) => {
+                appendLog(`[MSG] ${dto?.sentAt ?? ''} ${dto?.senderId ?? ''} -> ${dto?.target ?? ''}: ${dto?.text ?? ''}`);
+            });
+
+            connection.on('history', (payload) => {
+                const count = payload?.items?.length ?? 0;
+                appendLog(`[HISTORY] ${count} items received.`);
+            });
+
+            connection.onclose((error) => {
+                appendLog(`Connection closed${error ? ': ' + error.message : ''}.`, error ? LogEntryType.error : LogEntryType.info);
+            });
+
+            connection.onreconnecting((error) => {
+                appendLog(`Reconnecting...${error ? ' ' + error.message : ''}`, LogEntryType.info);
+            });
+
+            connection.onreconnected((connectionId) => {
+                appendLog(`Reconnected. ConnectionId=${connectionId ?? 'unknown'}`, LogEntryType.info);
+            });
+
+            try {
+                appendLog('Connecting to /ws/chat...', LogEntryType.info);
+                await connection.start();
+                appendLog('Connected to /ws/chat.', LogEntryType.info);
+            } catch (error) {
+                appendLog(`Connection failed: ${error.message}`, LogEntryType.error);
+                connection = null;
+            }
+        }
+
+        async function disconnect() {
+            if (connection) {
+                try {
+                    await connection.stop();
+                    appendLog('Disconnected from /ws/chat.', LogEntryType.info);
+                } catch (error) {
+                    appendLog(`Error disconnecting: ${error.message}`, LogEntryType.error);
+                }
+            }
+        }
+
+        async function ensureMe() {
+            if (currentUser) {
+                return currentUser;
+            }
+
+            if (!accessToken) {
+                throw new Error('Access token is required. Login first.');
+            }
+
+            const res = await fetch(`${BASE_URL}/api/auth/me`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(`Failed to fetch /api/auth/me: ${res.status} ${res.statusText} ${errorText}`);
+            }
+
+            currentUser = await res.json();
+            const currentId = currentUser?.id ?? currentUser?.Id ?? '(unknown)';
+            appendLog(`Current user: ${currentId}.`, LogEntryType.info);
+            return currentUser;
+        }
+
+        function unorderedDmChannel(a, b) {
+            const values = [String(a ?? '').toLowerCase(), String(b ?? '').toLowerCase()].sort();
+            return `dm:${values[0]}_${values[1]}`;
+        }
+
+        async function joinDm() {
+            try {
+                await ensureConnected();
+                const me = await ensureMe();
+                const other = document.getElementById('otherUserId').value.trim();
+
+                if (!other) {
+                    throw new Error('Other user id is required.');
+                }
+
+                const meId = me?.id ?? me?.Id;
+                if (!meId) {
+                    throw new Error('Your user id could not be determined.');
+                }
+
+                const channel = unorderedDmChannel(meId, other);
+                await connection.invoke('JoinChannels', [channel]);
+                appendLog(`Joined ${channel}.`, LogEntryType.info);
+            } catch (error) {
+                appendLog(`Join DM error: ${error.message}`, LogEntryType.error);
+            }
+        }
+
+        async function loadDmHistory() {
+            try {
+                await ensureConnected();
+                const me = await ensureMe();
+                const other = document.getElementById('otherUserId').value.trim();
+
+                if (!other) {
+                    throw new Error('Other user id is required.');
+                }
+
+                const meId = me?.id ?? me?.Id;
+                if (!meId) {
+                    throw new Error('Your user id could not be determined.');
+                }
+
+                const channel = unorderedDmChannel(meId, other);
+                await connection.invoke('LoadHistory', channel, null, 50);
+                appendLog(`Requested history for ${channel}.`, LogEntryType.info);
+            } catch (error) {
+                appendLog(`Load history error: ${error.message}`, LogEntryType.error);
+            }
+        }
+
+        async function sendDm() {
+            try {
+                await ensureConnected();
+                const other = document.getElementById('otherUserId').value.trim();
+                const text = document.getElementById('message').value;
+
+                if (!other) {
+                    throw new Error('Other user id is required.');
+                }
+
+                if (!text) {
+                    throw new Error('Message text is required.');
+                }
+
+                await connection.invoke('SendDm', other, text);
+                appendLog(`[SEND DM] -> ${other}: ${text}`);
+            } catch (error) {
+                appendLog(`Send DM error: ${error.message}`, LogEntryType.error);
+            }
+        }
+
+        async function joinRoom() {
+            try {
+                await ensureConnected();
+                const id = document.getElementById('roomId').value.trim();
+                if (!id) {
+                    throw new Error('Room id is required.');
+                }
+
+                await connection.invoke('JoinChannels', [`room:${id}`]);
+                appendLog(`Joined room:${id}.`, LogEntryType.info);
+            } catch (error) {
+                appendLog(`Join room error: ${error.message}`, LogEntryType.error);
+            }
+        }
+
+        async function sendRoom() {
+            try {
+                await ensureConnected();
+                const id = document.getElementById('roomId').value.trim();
+                const text = document.getElementById('message').value;
+
+                if (!id) {
+                    throw new Error('Room id is required.');
+                }
+
+                if (!text) {
+                    throw new Error('Message text is required.');
+                }
+
+                await connection.invoke('SendToRoom', id, text);
+                appendLog(`[SEND ROOM] #${id}: ${text}`);
+            } catch (error) {
+                appendLog(`Send room error: ${error.message}`, LogEntryType.error);
+            }
+        }
+
+        async function ensureConnected() {
+            if (!connection || connection.state !== Connected) {
+                throw new Error('Connection is not active. Please login and connect first.');
+            }
+        }
+
+        function appendLog(message, type = LogEntryType.info) {
+            const log = document.getElementById('log');
+            const li = document.createElement('li');
+            li.textContent = message ?? '';
+            li.classList.add('small');
+            if (type === LogEntryType.error) {
+                li.classList.add('text-danger');
+            } else {
+                li.classList.add('text-dark');
+            }
+            log.appendChild(li);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        if (!BASE_URL) {
+            appendLog('ChatTest:BaseUrl is empty. Configure the BaseUrl value in appsettings.Development.json.', LogEntryType.error);
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', (event) => {
+            event.preventDefault();
+            login();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (connection) {
+                connection.stop();
+            }
+        });
+
+        window.joinDm = joinDm;
+        window.sendDm = sendDm;
+        window.loadDmHistory = loadDmHistory;
+        window.joinRoom = joinRoom;
+        window.sendRoom = sendRoom;
+        window.disconnect = disconnect;
+    </script>
+}

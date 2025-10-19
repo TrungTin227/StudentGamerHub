@@ -1,9 +1,15 @@
 {
+  "scripts": {
+    "test:chat": "playwright test tests/chat.e2e.spec.ts"
+  },
   "dependencies": {
     "@microsoft/signalr": "^9.0.6",
     "cross-fetch": "^4.1.0",
     "ioredis": "^5.8.1",
     "strip-json-comments": "^5.0.3",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.42.1"
   }
 }
