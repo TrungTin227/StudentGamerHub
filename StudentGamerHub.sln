@@ -13,8 +13,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Services", "Services\Servic
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebAPI", "WebAPI\WebAPI.csproj", "{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebTestRealTime", "WebTestRealTime\WebTestRealTime.csproj", "{F90D1CC0-AA91-4142-A525-19096BD93B49}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -40,10 +38,6 @@ Global
 		{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F90D1CC0-AA91-4142-A525-19096BD93B49}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F90D1CC0-AA91-4142-A525-19096BD93B49}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F90D1CC0-AA91-4142-A525-19096BD93B49}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F90D1CC0-AA91-4142-A525-19096BD93B49}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
