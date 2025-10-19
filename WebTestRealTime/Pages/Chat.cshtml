@@ -10,6 +10,17 @@
 
 <h1>Realtime Chat Test</h1>
 
+<div class="alert alert-info mb-4" role="alert">
+    <div class="d-flex align-items-center">
+        <div class="me-3">
+            <span id="connectionStatus" class="badge bg-secondary">Disconnected</span>
+        </div>
+        <div class="flex-grow-1">
+            <small>Connection Status: <span id="connectionState">Not initialized</span></small>
+        </div>
+    </div>
+</div>
+
 <div class="mb-4">
     <h2>Login</h2>
     <form id="loginForm" class="row gy-2 gx-3 align-items-center">
@@ -63,8 +74,11 @@
 </div>
 
 <div class="mb-4">
-    <h2>Log</h2>
-    <ul id="log" class="list-unstyled border rounded p-3 bg-light" style="min-height: 200px;"></ul>
+    <div class="d-flex justify-content-between align-items-center">
+        <h2>Log</h2>
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearLog()">Clear Log</button>
+    </div>
+    <ul id="log" class="list-unstyled border rounded p-3 bg-light" style="min-height: 200px; max-height: 400px; overflow-y: auto;"></ul>
 </div>
 
 @section Scripts {
@@ -82,21 +96,51 @@
             error: 'error'
         });
 
+        function updateConnectionStatus(state, statusText) {
+            const statusBadge = document.getElementById('connectionStatus');
+            const stateText = document.getElementById('connectionState');
+            
+            if (stateText) stateText.textContent = state;
+            
+            if (statusBadge) {
+                statusBadge.textContent = statusText || state;
+                statusBadge.className = 'badge bg-secondary';
+                
+                if (state === 'Connected') {
+                    statusBadge.className = 'badge bg-success';
+                } else if (state === 'Connecting' || state === 'Reconnecting') {
+                    statusBadge.className = 'badge bg-warning';
+                } else if (state === 'Disconnected') {
+                    statusBadge.className = 'badge bg-danger';
+                }
+            }
+        }
+
         async function login() {
+            console.log('Login button clicked!');
+            console.log('BASE_URL:', BASE_URL);
+            console.log('EMAIL:', EMAIL);
+            
             appendLog('Logging in...', LogEntryType.info);
             try {
-                const res = await fetch(`${BASE_URL}/api/auth/login`, {
+                console.log('Calling fetch...');
+                const res = await fetch(BASE_URL + '/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userNameOrEmail: EMAIL, password: PASSWORD })
                 });
 
+                console.log('Response status:', res.status);
+                console.log('Response:', res);
+
                 if (!res.ok) {
                     const errorText = await res.text();
-                    throw new Error(`Login failed: ${res.status} ${res.statusText} ${errorText}`);
+                    console.error('Login failed:', errorText);
+                    throw new Error('Login failed: ' + res.status + ' ' + res.statusText + ' ' + errorText);
                 }
 
                 const json = await res.json();
+                console.log('Login response:', json);
                 accessToken = json.accessToken || json.AccessToken || null;
 
                 if (!accessToken) {
@@ -107,7 +151,8 @@
 
                 await connect();
             } catch (error) {
-                appendLog(`Login error: ${error.message}`, LogEntryType.error);
+                console.error('Login error:', error);
+                appendLog('Login error: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -127,37 +172,48 @@
                 return;
             }
 
+            updateConnectionStatus('Connecting', 'Connecting...');
+
             connection = new signalR.HubConnectionBuilder()
-                .withUrl(`${BASE_URL}/ws/chat`, { accessTokenFactory: () => accessToken })
+                .withUrl(BASE_URL + '/ws/chat', { accessTokenFactory: () => accessToken })
                 .withAutomaticReconnect()
                 .build();
 
             connection.on('msg', (dto) => {
-                appendLog(`[MSG] ${dto?.sentAt ?? ''} ${dto?.senderId ?? ''} -> ${dto?.target ?? ''}: ${dto?.text ?? ''}`);
+                const from = dto?.fromUserId ?? '?';
+                const to = dto?.toUserId ?? dto?.roomId ?? '?';
+                const text = dto?.text ?? '';
+                const time = dto?.sentAt ? new Date(dto.sentAt).toLocaleTimeString() : '';
+                appendLog('[MSG ' + time + '] From: ' + from + ' To: ' + to + ': ' + text, LogEntryType.info);
             });
 
             connection.on('history', (payload) => {
                 const count = payload?.items?.length ?? 0;
-                appendLog(`[HISTORY] ${count} items received.`);
+                appendLog('[HISTORY] ' + count + ' items received.');
             });
 
             connection.onclose((error) => {
-                appendLog(`Connection closed${error ? ': ' + error.message : ''}.`, error ? LogEntryType.error : LogEntryType.info);
+                updateConnectionStatus('Disconnected', 'Disconnected');
+                appendLog('Connection closed' + (error ? ': ' + error.message : '') + '.', error ? LogEntryType.error : LogEntryType.info);
             });
 
             connection.onreconnecting((error) => {
-                appendLog(`Reconnecting...${error ? ' ' + error.message : ''}`, LogEntryType.info);
+                updateConnectionStatus('Reconnecting', 'Reconnecting...');
+                appendLog('Reconnecting...' + (error ? ' ' + error.message : ''), LogEntryType.info);
             });
 
             connection.onreconnected((connectionId) => {
-                appendLog(`Reconnected. ConnectionId=${connectionId ?? 'unknown'}`, LogEntryType.info);
+                updateConnectionStatus('Connected', 'Connected');
+                appendLog('Reconnected. ConnectionId=' + (connectionId ?? 'unknown'), LogEntryType.info);
             });
 
             try {
                 await connection.start();
-                appendLog('Connected to /ws/chat.', LogEntryType.info);
+                updateConnectionStatus('Connected', 'Connected');
+                appendLog('Connected to /ws/chat. State: ' + getConnectionState(), LogEntryType.info);
             } catch (error) {
-                appendLog(`Connection failed: ${error.message}`, LogEntryType.error);
+                updateConnectionStatus('Disconnected', 'Failed');
+                appendLog('Connection failed: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -165,9 +221,10 @@
             if (connection) {
                 try {
                     await connection.stop();
+                    updateConnectionStatus('Disconnected', 'Disconnected');
                     appendLog('Disconnected from /ws/chat.', LogEntryType.info);
                 } catch (error) {
-                    appendLog(`Error disconnecting: ${error.message}`, LogEntryType.error);
+                    appendLog('Error disconnecting: ' + error.message, LogEntryType.error);
                 }
             }
         }
@@ -181,24 +238,24 @@
                 throw new Error('Access token is required. Login first.');
             }
 
-            const res = await fetch(`${BASE_URL}/api/auth/me`, {
-                headers: { Authorization: `Bearer ${accessToken}` }
+            const res = await fetch(BASE_URL + '/api/auth/me', {
+                headers: { Authorization: 'Bearer ' + accessToken }
             });
 
             if (!res.ok) {
                 const errorText = await res.text();
-                throw new Error(`Failed to fetch /api/auth/me: ${res.status} ${res.statusText} ${errorText}`);
+                throw new Error('Failed to fetch /api/auth/me: ' + res.status + ' ' + res.statusText + ' ' + errorText);
             }
 
             currentUser = await res.json();
             const currentId = currentUser?.id ?? currentUser?.Id ?? '(unknown)';
-            appendLog(`Current user: ${currentId}.`, LogEntryType.info);
+            appendLog('Current user: ' + currentId + '.', LogEntryType.info);
             return currentUser;
         }
 
         function unorderedDmChannel(a, b) {
             const values = [String(a ?? '').toLowerCase(), String(b ?? '').toLowerCase()].sort();
-            return `dm:${values[0]}_${values[1]}`;
+            return 'dm:' + values[0] + '_' + values[1];
         }
 
         async function joinDm() {
@@ -218,9 +275,9 @@
 
                 const channel = unorderedDmChannel(meId, other);
                 await connection.invoke('JoinChannels', [channel]);
-                appendLog(`Joined ${channel}.`, LogEntryType.info);
+                appendLog('Joined ' + channel + '.', LogEntryType.info);
             } catch (error) {
-                appendLog(`Join DM error: ${error.message}`, LogEntryType.error);
+                appendLog('Join DM error: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -241,9 +298,9 @@
 
                 const channel = unorderedDmChannel(meId, other);
                 await connection.invoke('LoadHistory', channel, null, 50);
-                appendLog(`Requested history for ${channel}.`, LogEntryType.info);
+                appendLog('Requested history for ' + channel + '.', LogEntryType.info);
             } catch (error) {
-                appendLog(`Load history error: ${error.message}`, LogEntryType.error);
+                appendLog('Load history error: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -262,9 +319,9 @@
                 }
 
                 await connection.invoke('SendDm', other, text);
-                appendLog(`[SEND DM] -> ${other}: ${text}`);
+                appendLog('[SEND DM] -> ' + other + ': ' + text);
             } catch (error) {
-                appendLog(`Send DM error: ${error.message}`, LogEntryType.error);
+                appendLog('Send DM error: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -276,10 +333,10 @@
                     throw new Error('Room id is required.');
                 }
 
-                await connection.invoke('JoinChannels', [`room:${id}`]);
-                appendLog(`Joined room:${id}.`, LogEntryType.info);
+                await connection.invoke('JoinChannels', ['room:' + id]);
+                appendLog('Joined room:' + id + '.', LogEntryType.info);
             } catch (error) {
-                appendLog(`Join room error: ${error.message}`, LogEntryType.error);
+                appendLog('Join room error: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -298,9 +355,9 @@
                 }
 
                 await connection.invoke('SendToRoom', id, text);
-                appendLog(`[SEND ROOM] #${id}: ${text}`);
+                appendLog('[SEND ROOM] #' + id + ': ' + text);
             } catch (error) {
-                appendLog(`Send room error: ${error.message}`, LogEntryType.error);
+                appendLog('Send room error: ' + error.message, LogEntryType.error);
             }
         }
 
@@ -313,15 +370,27 @@
         function appendLog(message, type = LogEntryType.info) {
             const log = document.getElementById('log');
             const li = document.createElement('li');
-            li.textContent = message ?? '';
-            li.classList.add('small');
+            const timestamp = new Date().toLocaleTimeString();
+            li.textContent = '[' + timestamp + '] ' + (message ?? '');
+            li.classList.add('small', 'mb-1');
             if (type === LogEntryType.error) {
-                li.classList.add('text-danger');
+                li.classList.add('text-danger', 'fw-bold');
             } else {
                 li.classList.add('text-dark');
             }
             log.appendChild(li);
             log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            const log = document.getElementById('log');
+            log.innerHTML = '';
+            appendLog('Log cleared', LogEntryType.info);
+        }
+
+        function getConnectionState() {
+            if (!connection) return 'Not initialized';
+            return connection.state || 'Unknown';
         }
 
         document.getElementById('loginForm').addEventListener('submit', (event) => {
@@ -341,5 +410,6 @@
         window.joinRoom = joinRoom;
         window.sendRoom = sendRoom;
         window.disconnect = disconnect;
+        window.clearLog = clearLog;
     </script>
 }

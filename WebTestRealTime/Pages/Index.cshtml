@@ -1,10 +1,80 @@
 ﻿@page
 @model IndexModel
 @{
-    ViewData["Title"] = "Home page";
+    ViewData["Title"] = "Student Gamer Hub - Realtime Test";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<div class="container mt-5">
+    <div class="text-center mb-5">
+        <h1 class="display-4">Student Gamer Hub</h1>
+        <p class="lead">Realtime Testing Environment</p>
+        <hr class="my-4">
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-chat-dots"></i> Chat Test
+                    </h5>
+                    <p class="card-text">
+                        Test realtime chat functionality including:
+                    </p>
+                    <ul class="small">
+                        <li>Direct messaging (DM)</li>
+                        <li>Room chat</li>
+                        <li>Message history</li>
+                        <li>SignalR connection</li>
+                    </ul>
+                    <a href="/Chat" class="btn btn-primary">Go to Chat Test</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-info-circle"></i> Test Configuration
+                    </h5>
+                    <p class="card-text">Current test settings:</p>
+                    <ul class="small list-unstyled">
+                        <li><strong>API Base URL:</strong> <code>https://localhost:7227</code></li>
+                        <li><strong>Test User:</strong> <code>realtime-a@studentgamerhub.local</code></li>
+                        <li><strong>SignalR Hub:</strong> <code>/ws/chat</code></li>
+                    </ul>
+                    <p class="small text-muted mt-3">
+                        Configuration can be changed in <code>appsettings.Development.json</code>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title">Getting Started</h5>
+                    <ol class="mb-0">
+                        <li>Make sure WebAPI project is running on <code>https://localhost:7227</code></li>
+                        <li>Ensure Redis is running for chat functionality</li>
+                        <li>Go to <a href="/Chat">Chat Test</a> page</li>
+                        <li>Click "Login" to authenticate</li>
+                        <li>Test DM or Room chat features</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<style>
+    .card {
+        transition: transform 0.2s;
+    }
+    .card:hover {
+        transform: translateY(-5px);
+    }
+</style>

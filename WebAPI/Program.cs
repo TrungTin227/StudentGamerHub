@@ -33,5 +33,6 @@ app.UseOperationalPipeline(app.Environment);
 app.UseWebApi(app.Environment);
 
 app.MapHub<PresenceHub>("/ws/presence");
+app.MapHub<ChatHub>("/ws/chat");
 
 app.Run();
