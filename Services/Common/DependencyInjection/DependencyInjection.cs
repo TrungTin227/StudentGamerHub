@@ -1,6 +1,7 @@
 ﻿using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Services.Configuration;
 using Services.Presence;
 using System.Reflection;
 
@@ -42,6 +43,12 @@ namespace Services.Common.DependencyInjection
                         .Validate(o => o.MaxBatchSize > 0, "Presence:MaxBatchSize must be positive")
                         .Validate(o => o.DefaultPageSize > 0, "Presence:DefaultPageSize must be positive")
                         .Validate(o => o.MaxPageSize >= o.DefaultPageSize, "Presence:MaxPageSize must be >= DefaultPageSize")
+                        .ValidateOnStart();
+                services.AddOptions<BillingOptions>()
+                        .Bind(configuration.GetSection(BillingOptions.SectionName))
+                        .Validate(o => o.EventCreationFeeCents >= 0, "Billing:EventCreationFeeCents must be >= 0")
+                        .Validate(o => o.MaxEventEscrowTopUpAmountCents > 0, "Billing:MaxEventEscrowTopUpAmountCents must be positive")
+                        .Validate(o => o.MaxWalletTopUpAmountCents > 0, "Billing:MaxWalletTopUpAmountCents must be positive")
                         .ValidateOnStart();
                 // KHÔNG đăng ký singleton .Value để giữ hot-reload
             }

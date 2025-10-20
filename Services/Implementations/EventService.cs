@@ -1,5 +1,8 @@
 using FluentValidation;
+using Microsoft.Extensions.Options;
 using Services.Common.Results;
+using Services.Configuration;
+using System.Text.Json;
 
 namespace Services.Implementations;
 
@@ -17,6 +20,9 @@ public sealed class EventService : IEventService
     private readonly IWalletRepository _walletRepository;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IValidator<EventCreateRequestDto> _createValidator;
+    private readonly BillingOptions _billingOptions;
+    private const string SystemProvider = "SYSTEM";
+    private const string EventCreateFeeNote = "EVENT_CREATE_FEE";
 
     public EventService(
         IGenericUnitOfWork uow,
@@ -27,7 +33,8 @@ public sealed class EventService : IEventService
         IRegistrationCommandRepository registrationCommandRepository,
         IWalletRepository walletRepository,
         ITransactionRepository transactionRepository,
-        IValidator<EventCreateRequestDto> createValidator)
+        IValidator<EventCreateRequestDto> createValidator,
+        IOptionsSnapshot<BillingOptions> billingOptions)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _eventCommandRepository = eventCommandRepository ?? throw new ArgumentNullException(nameof(eventCommandRepository));
@@ -38,6 +45,7 @@ public sealed class EventService : IEventService
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _createValidator = createValidator ?? throw new ArgumentNullException(nameof(createValidator));
+        _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
     }
 
     public async Task<Result<Guid>> CreateAsync(Guid organizerId, EventCreateRequestDto req, CancellationToken ct = default)
@@ -72,6 +80,90 @@ public sealed class EventService : IEventService
 
         return await _uow.ExecuteTransactionAsync<Guid>(async innerCt =>
         {
+            var feeCents = Math.Max(0, _billingOptions.EventCreationFeeCents);
+            Guid? platformUserId = _billingOptions.PlatformUserId;
+
+            Wallet? organizerWallet = null;
+            Wallet? platformWallet = null;
+
+            if (feeCents > 0)
+            {
+                if (!platformUserId.HasValue || platformUserId.Value == Guid.Empty)
+                {
+                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet is not configured."));
+                }
+
+                await _walletRepository.CreateIfMissingAsync(organizerId, innerCt).ConfigureAwait(false);
+                await _walletRepository.CreateIfMissingAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+                organizerWallet = await _walletRepository.GetByUserIdAsync(organizerId, innerCt).ConfigureAwait(false);
+                if (organizerWallet is null)
+                {
+                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Organizer wallet could not be loaded."));
+                }
+
+                platformWallet = await _walletRepository.GetByUserIdAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
+                if (platformWallet is null)
+                {
+                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet could not be loaded."));
+                }
+
+                if (organizerWallet.BalanceCents < feeCents)
+                {
+                    var deficit = feeCents - organizerWallet.BalanceCents;
+                    return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, $"Insufficient wallet balance. deficitCents={deficit}"));
+                }
+
+                var debited = await _walletRepository.AdjustBalanceAsync(organizerId, -feeCents, innerCt).ConfigureAwait(false);
+                if (!debited)
+                {
+                    var refreshed = await _walletRepository.GetByUserIdAsync(organizerId, innerCt).ConfigureAwait(false);
+                    var balance = refreshed?.BalanceCents ?? 0;
+                    var deficit = Math.Max(0, feeCents - balance);
+                    return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, $"Insufficient wallet balance. deficitCents={deficit}"));
+                }
+
+                var credited = await _walletRepository.AdjustBalanceAsync(platformUserId.Value, feeCents, innerCt).ConfigureAwait(false);
+                if (!credited)
+                {
+                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Failed to credit platform wallet."));
+                }
+
+                var organizerTx = new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    WalletId = organizerWallet.Id,
+                    EventId = entity.Id,
+                    AmountCents = feeCents,
+                    Direction = TransactionDirection.Out,
+                    Method = TransactionMethod.Wallet,
+                    Status = TransactionStatus.Succeeded,
+                    Provider = SystemProvider,
+                    ProviderRef = entity.Id.ToString("N"),
+                    Metadata = CreateEventFeeMetadata(entity.Id, EventCreateFeeNote, platformUserId.Value),
+                    CreatedBy = organizerId,
+                };
+
+                var platformTx = new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    WalletId = platformWallet.Id,
+                    EventId = entity.Id,
+                    AmountCents = feeCents,
+                    Direction = TransactionDirection.In,
+                    Method = TransactionMethod.Wallet,
+                    Status = TransactionStatus.Succeeded,
+                    Provider = SystemProvider,
+                    ProviderRef = entity.Id.ToString("N"),
+                    Metadata = CreateEventFeeMetadata(entity.Id, EventCreateFeeNote, organizerId),
+                    CreatedBy = platformUserId.Value,
+                };
+
+                await _transactionRepository.CreateAsync(organizerTx, innerCt).ConfigureAwait(false);
+                await _transactionRepository.CreateAsync(platformTx, innerCt).ConfigureAwait(false);
+            }
+
             await _eventCommandRepository.CreateAsync(entity, innerCt).ConfigureAwait(false);
 
             var escrow = new Escrow
@@ -88,6 +180,18 @@ public sealed class EventService : IEventService
 
             return Result<Guid>.Success(entity.Id);
         }, ct: ct).ConfigureAwait(false);
+    }
+
+    private static JsonDocument CreateEventFeeMetadata(Guid eventId, string note, Guid counterpartyUserId)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["note"] = note,
+            ["eventId"] = eventId,
+            ["counterpartyUserId"] = counterpartyUserId,
+        };
+
+        return JsonSerializer.SerializeToDocument(payload);
     }
 
     public async Task<Result> OpenAsync(Guid organizerId, Guid eventId, CancellationToken ct = default)
