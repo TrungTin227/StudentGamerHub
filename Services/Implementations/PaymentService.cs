@@ -783,39 +783,26 @@ public sealed class PaymentService : IPaymentService
     private string? ResolveReturnUrl(string? requestedReturnUrl)
     {
         var defaultUrl = _vnPayConfig.ReturnUrl?.Trim();
-        if (string.IsNullOrWhiteSpace(defaultUrl))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(defaultUrl)) return null;
 
         if (string.IsNullOrWhiteSpace(requestedReturnUrl))
-        {
             return defaultUrl;
-        }
 
         var normalized = requestedReturnUrl.Trim();
         var allowed = new[]
         {
-            defaultUrl,
-            _vnPayConfig.ReturnUrlOrder?.Trim(),
-            _vnPayConfig.ReturnUrlCustomDesign?.Trim(),
-        };
+        defaultUrl,
+        _vnPayConfig.ReturnUrlOrder?.Trim(),
+        _vnPayConfig.ReturnUrlCustomDesign?.Trim(),
+    };
 
-        foreach (var allowedUrl in allowed)
-        {
-            if (!string.IsNullOrWhiteSpace(allowedUrl) &&
-                string.Equals(allowedUrl, normalized, StringComparison.OrdinalIgnoreCase))
-            {
-                return allowedUrl;
-            }
-        }
+        if (allowed.Any(u => !string.IsNullOrWhiteSpace(u) &&
+                             string.Equals(u, normalized, StringComparison.OrdinalIgnoreCase)))
+            return normalized;
 
-        if (normalized.StartsWith('/', StringComparison.Ordinal) &&
+        if (normalized.StartsWith("/", StringComparison.Ordinal) &&
             Uri.TryCreate(defaultUrl, UriKind.Absolute, out var baseUri))
-        {
-            var combined = new Uri(baseUri, normalized);
-            return combined.ToString();
-        }
+            return new Uri(baseUri, normalized).ToString();
 
         return null;
     }
