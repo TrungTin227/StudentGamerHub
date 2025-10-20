@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using System;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -19,21 +20,41 @@ namespace Services.Common.Emailing.DependencyInjection
                 .Validate(o => !(o.Smtp.UseSsl && o.Smtp.UseStartTls), "UseSsl và UseStartTls không được bật đồng thời")
                 .ValidateOnStart();
 
+            services.AddOptions<ResendOptions>()
+                .Bind(config.GetSection(ResendOptions.Section))
+                .ValidateDataAnnotations()
+                .Validate((opt, sp) =>
+                {
+                    var provider = sp.GetRequiredService<IOptionsMonitor<EmailOptions>>().CurrentValue.Provider;
+                    return !provider.Equals("Resend", StringComparison.OrdinalIgnoreCase)
+                           || !string.IsNullOrWhiteSpace(opt.ApiKey);
+                }, "Resend:ApiKey is required when Email:Provider is Resend")
+                .ValidateOnStart();
+
             // Impl senders
             services.AddTransient<SmtpEmailSender>();
             services.AddTransient<FileEmailSender>();
+            services.AddHttpClient<ResendEmailSender>(client =>
+            {
+                client.BaseAddress = new Uri("https://api.resend.com/");
+                client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            });
+
             services.AddSingleton(sp => sp.GetRequiredService<IOptions<AuthLinkOptions>>().Value);
 
             // Chọn sender theo Provider (hot-reload nhờ IOptionsMonitor)
             services.AddTransient<IEmailSender>(sp =>
             {
-                var monitor = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<EmailOptions>>();
+                var monitor = sp.GetRequiredService<IOptionsMonitor<EmailOptions>>();
                 var opt = monitor.CurrentValue;
 
-                if (opt.Provider.Equals("File", StringComparison.OrdinalIgnoreCase))
-                    return sp.GetRequiredService<FileEmailSender>();
+                if (opt.Provider.Equals("Resend", StringComparison.OrdinalIgnoreCase))
+                    return sp.GetRequiredService<ResendEmailSender>();
 
-                return sp.GetRequiredService<SmtpEmailSender>();
+                if (opt.Provider.Equals("Smtp", StringComparison.OrdinalIgnoreCase))
+                    return sp.GetRequiredService<SmtpEmailSender>();
+
+                return sp.GetRequiredService<FileEmailSender>();
             });
 
             if (useQueue)
