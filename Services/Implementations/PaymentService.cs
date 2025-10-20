@@ -1,4 +1,7 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
+using Services.Configuration;
+using System.Text.Json;
 
 namespace Services.Implementations;
 
@@ -19,6 +22,8 @@ public sealed class PaymentService : IPaymentService
     private readonly IWalletRepository _walletRepository;
     private readonly IEscrowRepository _escrowRepository;
     private readonly IVnPayService _vnPayService;
+    private readonly BillingOptions _billingOptions;
+    private readonly VnPayConfig _vnPayConfig;
 
     public PaymentService(
         IGenericUnitOfWork uow,
@@ -29,7 +34,9 @@ public sealed class PaymentService : IPaymentService
         ITransactionRepository transactionRepository,
         IWalletRepository walletRepository,
         IEscrowRepository escrowRepository,
-        IVnPayService vnPayService)
+        IVnPayService vnPayService,
+        IOptionsSnapshot<BillingOptions> billingOptions,
+        IOptionsSnapshot<VnPayConfig> vnPayOptions)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _paymentIntentRepository = paymentIntentRepository ?? throw new ArgumentNullException(nameof(paymentIntentRepository));
@@ -40,6 +47,8 @@ public sealed class PaymentService : IPaymentService
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _vnPayService = vnPayService ?? throw new ArgumentNullException(nameof(vnPayService));
+        _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
+        _vnPayConfig = vnPayOptions?.Value ?? throw new ArgumentNullException(nameof(vnPayOptions));
     }
 
     public Task<Result<Guid>> CreateTopUpIntentAsync(Guid organizerId, Guid eventId, long amountCents, CancellationToken ct = default)
@@ -49,6 +58,12 @@ public sealed class PaymentService : IPaymentService
             if (amountCents <= 0)
             {
                 return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
+            }
+
+            var maxEscrow = _billingOptions.MaxEventEscrowTopUpAmountCents;
+            if (maxEscrow > 0 && amountCents > maxEscrow)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount exceeds the allowed limit."));
             }
 
             var ev = await _eventQueryRepository.GetByIdAsync(eventId, innerCt).ConfigureAwait(false);
@@ -73,6 +88,40 @@ public sealed class PaymentService : IPaymentService
                 ClientSecret = Guid.NewGuid().ToString("N"),
                 ExpiresAt = DateTime.UtcNow.AddMinutes(15),
                 CreatedBy = organizerId,
+            };
+
+            await _paymentIntentRepository.CreateAsync(paymentIntent, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            return Result<Guid>.Success(paymentIntent.Id);
+        }, ct: ct);
+    }
+
+    public Task<Result<Guid>> CreateWalletTopUpIntentAsync(Guid userId, long amountCents, CancellationToken ct = default)
+    {
+        return _uow.ExecuteTransactionAsync<Guid>(async innerCt =>
+        {
+            if (amountCents <= 0)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
+            }
+
+            var maxWallet = _billingOptions.MaxWalletTopUpAmountCents;
+            if (maxWallet > 0 && amountCents > maxWallet)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount exceeds the allowed limit."));
+            }
+
+            var paymentIntent = new PaymentIntent
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                AmountCents = amountCents,
+                Purpose = PaymentPurpose.WalletTopUp,
+                Status = PaymentIntentStatus.RequiresPayment,
+                ClientSecret = Guid.NewGuid().ToString("N"),
+                ExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                CreatedBy = userId,
             };
 
             await _paymentIntentRepository.CreateAsync(paymentIntent, innerCt).ConfigureAwait(false);
@@ -116,6 +165,7 @@ public sealed class PaymentService : IPaymentService
             {
                 PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(userId, pi, innerCt).ConfigureAwait(false),
                 PaymentPurpose.TopUp => await ConfirmTopUpAsync(userId, pi, innerCt).ConfigureAwait(false),
+                PaymentPurpose.WalletTopUp => Result.Failure(new Error(Error.Codes.Validation, "Wallet top-ups must be completed via VNPay.")),
                 _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose.")),
             };
         }, ct: ct).ConfigureAwait(false);
@@ -202,6 +252,7 @@ public sealed class PaymentService : IPaymentService
             Method = TransactionMethod.Wallet,
             Status = TransactionStatus.Succeeded,
             Provider = LocalProvider,
+            Metadata = CreateMetadata("EVENT_TICKET", ev.Id, null),
             CreatedBy = userId,
         };
 
@@ -273,6 +324,7 @@ public sealed class PaymentService : IPaymentService
             Method = TransactionMethod.Wallet,
             Status = TransactionStatus.Succeeded,
             Provider = LocalProvider,
+            Metadata = CreateMetadata("ESCROW_TOP_UP", ev.Id, null),
             CreatedBy = userId,
         };
 
@@ -366,9 +418,13 @@ public sealed class PaymentService : IPaymentService
                 vnp_CreateDate = createDate
             };
 
-            var vnpResponse = !string.IsNullOrEmpty(returnUrl)
-                ? await _vnPayService.CreatePaymentUrlAsync(vnpRequest, returnUrl).ConfigureAwait(false)
-                : await _vnPayService.CreatePaymentUrlAsync(vnpRequest).ConfigureAwait(false);
+            var resolvedReturnUrl = ResolveReturnUrl(returnUrl);
+            if (string.IsNullOrWhiteSpace(resolvedReturnUrl))
+            {
+                return Result<string>.Failure(new Error(Error.Codes.Validation, "Return URL is not allowed."));
+            }
+
+            var vnpResponse = await _vnPayService.CreatePaymentUrlAsync(vnpRequest, resolvedReturnUrl).ConfigureAwait(false);
 
             if (!vnpResponse.Success)
             {
@@ -462,6 +518,7 @@ public sealed class PaymentService : IPaymentService
             {
                 PaymentPurpose.EventTicket => await ConfirmEventTicketViaVnPayAsync(pi, cb.vnp_TransactionNo ?? cb.vnp_TxnRef, innerCt).ConfigureAwait(false),
                 PaymentPurpose.TopUp => await ConfirmTopUpViaVnPayAsync(pi, cb.vnp_TransactionNo ?? cb.vnp_TxnRef, innerCt).ConfigureAwait(false),
+                PaymentPurpose.WalletTopUp => await ConfirmWalletTopUpViaVnPayAsync(pi, cb.vnp_TransactionNo ?? cb.vnp_TxnRef, innerCt).ConfigureAwait(false),
                 _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose.")),
             };
         }, ct: ct).ConfigureAwait(false);
@@ -548,6 +605,7 @@ public sealed class PaymentService : IPaymentService
             Status = TransactionStatus.Succeeded,
             Provider = VnPayProvider,
             ProviderRef = providerRef,
+            Metadata = CreateMetadata("EVENT_TICKET", ev.Id, null),
             CreatedBy = registration.UserId,
         };
 
@@ -632,6 +690,7 @@ public sealed class PaymentService : IPaymentService
             Status = TransactionStatus.Succeeded,
             Provider = VnPayProvider,
             ProviderRef = providerRef,
+            Metadata = CreateMetadata("ESCROW_TOP_UP", ev.Id, null),
             CreatedBy = pi.UserId,
         };
 
@@ -662,5 +721,122 @@ public sealed class PaymentService : IPaymentService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return Result.Success();
+    }
+
+    private async Task<Result> ConfirmWalletTopUpViaVnPayAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
+    {
+        if (pi.AmountCents <= 0)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
+        }
+
+        var txExists = await _transactionRepository.ExistsByProviderRefAsync(VnPayProvider, providerRef, ct).ConfigureAwait(false);
+        if (txExists)
+        {
+            pi.Status = PaymentIntentStatus.Succeeded;
+            pi.UpdatedBy = pi.UserId;
+            await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            return Result.Success();
+        }
+
+        await _walletRepository.CreateIfMissingAsync(pi.UserId, ct).ConfigureAwait(false);
+        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        var wallet = await _walletRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
+        if (wallet is null)
+        {
+            return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
+        }
+
+        var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
+        if (!credited)
+        {
+            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
+        }
+
+        var tx = new Transaction
+        {
+            Id = Guid.NewGuid(),
+            WalletId = wallet.Id,
+            AmountCents = pi.AmountCents,
+            Direction = TransactionDirection.In,
+            Method = TransactionMethod.Gateway,
+            Status = TransactionStatus.Succeeded,
+            Provider = VnPayProvider,
+            ProviderRef = providerRef,
+            Metadata = CreateMetadata("WALLET_TOP_UP", null, null),
+            CreatedBy = pi.UserId,
+        };
+
+        await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+
+        pi.Status = PaymentIntentStatus.Succeeded;
+        pi.UpdatedBy = pi.UserId;
+
+        await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return Result.Success();
+    }
+
+    private string? ResolveReturnUrl(string? requestedReturnUrl)
+    {
+        var defaultUrl = _vnPayConfig.ReturnUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(defaultUrl))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(requestedReturnUrl))
+        {
+            return defaultUrl;
+        }
+
+        var normalized = requestedReturnUrl.Trim();
+        var allowed = new[]
+        {
+            defaultUrl,
+            _vnPayConfig.ReturnUrlOrder?.Trim(),
+            _vnPayConfig.ReturnUrlCustomDesign?.Trim(),
+        };
+
+        foreach (var allowedUrl in allowed)
+        {
+            if (!string.IsNullOrWhiteSpace(allowedUrl) &&
+                string.Equals(allowedUrl, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return allowedUrl;
+            }
+        }
+
+        if (normalized.StartsWith('/', StringComparison.Ordinal) &&
+            Uri.TryCreate(defaultUrl, UriKind.Absolute, out var baseUri))
+        {
+            var combined = new Uri(baseUri, normalized);
+            return combined.ToString();
+        }
+
+        return null;
+    }
+
+    private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["note"] = note,
+        };
+
+        if (eventId.HasValue)
+        {
+            payload["eventId"] = eventId.Value;
+        }
+
+        if (counterpartyUserId.HasValue)
+        {
+            payload["counterpartyUserId"] = counterpartyUserId.Value;
+        }
+
+        return JsonSerializer.SerializeToDocument(payload);
     }
 }

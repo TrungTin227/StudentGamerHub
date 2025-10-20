@@ -51,7 +51,14 @@ public sealed class EventsController : ControllerBase
                                         .ConfigureAwait(false);
 
         if (!result.IsSuccess)
+        {
+            if (result.Error.Code == Error.Codes.Forbidden && TryParseDeficit(result.Error.Message, out var deficit))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { deficitCents = deficit });
+            }
+
             return this.ToActionResult(result);
+        }
 
         var id = result.Value;
 
@@ -302,6 +309,38 @@ public sealed class EventsController : ControllerBase
         }
         var numberSpan = endIndex >= 0 ? span[..endIndex] : span;
         return long.TryParse(numberSpan, out needed);
+    }
+
+    private static bool TryParseDeficit(string? message, out long deficit)
+    {
+        deficit = 0;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        const string token = "deficitCents=";
+        var index = message.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var start = index + token.Length;
+        var span = message.AsSpan(start);
+        int endIndex = -1;
+        for (int i = 0; i < span.Length; i++)
+        {
+            var c = span[i];
+            if (c == ' ' || c == '.' || c == ',' || c == ';')
+            {
+                endIndex = i;
+                break;
+            }
+        }
+
+        var numberSpan = endIndex >= 0 ? span[..endIndex] : span;
+        return long.TryParse(numberSpan, out deficit);
     }
 
     private static bool TryParseSort(string? sort, out bool sortAsc, out string? error)

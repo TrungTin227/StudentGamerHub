@@ -13,6 +13,7 @@ global using DTOs.Roles.Requests;
 global using DTOs.Rooms;
 global using DTOs.Users;
 global using DTOs.Users.Requests;
+global using DTOs.Wallets;
 global using Microsoft.AspNetCore.DataProtection;
 global using Repositories.DependencyInjection;
 global using Services.Common.Auth;
