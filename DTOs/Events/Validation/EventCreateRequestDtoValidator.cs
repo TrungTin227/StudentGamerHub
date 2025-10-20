@@ -11,7 +11,7 @@ public sealed class EventCreateRequestDtoValidator : AbstractValidator<EventCrea
             .MaximumLength(200);
 
         RuleFor(x => x.PriceCents)
-            .GreaterThanOrEqualTo(0);
+            .GreaterThan(0);
 
         RuleFor(x => x.EscrowMinCents)
             .GreaterThanOrEqualTo(0);

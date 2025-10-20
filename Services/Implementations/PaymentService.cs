@@ -257,10 +257,10 @@ public sealed class PaymentService : IPaymentService
             return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
         }
 
-        var credited = await _walletRepository.AdjustBalanceAsync(userId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
+        var debited = await _walletRepository.AdjustBalanceAsync(userId, -pi.AmountCents, ct).ConfigureAwait(false);
+        if (!debited)
         {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Insufficient wallet balance."));
         }
 
         var tx = new Transaction
@@ -269,7 +269,7 @@ public sealed class PaymentService : IPaymentService
             WalletId = wallet.Id,
             EventId = ev.Id,
             AmountCents = pi.AmountCents,
-            Direction = TransactionDirection.In,
+            Direction = TransactionDirection.Out,
             Method = TransactionMethod.Wallet,
             Status = TransactionStatus.Succeeded,
             Provider = LocalProvider,
@@ -448,11 +448,6 @@ public sealed class PaymentService : IPaymentService
             if (pi.Status != PaymentIntentStatus.RequiresPayment)
             {
                 return Result.Failure(new Error(Error.Codes.Conflict, "Payment intent is not in RequiresPayment status."));
-            }
-
-            if (pi.ExpiresAt <= DateTime.UtcNow)
-            {
-                return Result.Failure(new Error(Error.Codes.Forbidden, "Payment intent has expired."));
             }
 
             // Verify amount matches (vnp_Amount is in VND smallest unit * 100)
