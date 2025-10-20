@@ -6,7 +6,7 @@ public sealed class EmailOptions
 {
     public const string Section = "Email";
 
-    [Required, RegularExpression("Smtp|File")]
+    [Required, RegularExpression("Smtp|File|Resend")]
     public string Provider { get; init; } = "Smtp";
 
     [Required, EmailAddress]
