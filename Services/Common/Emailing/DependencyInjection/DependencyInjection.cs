@@ -1,4 +1,7 @@
 ﻿using System;
+using System.Net.Http.Headers;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -13,40 +16,48 @@ namespace Services.Common.Emailing.DependencyInjection
             bool useQueue = true,
             bool addIdentityAdapter = true)
         {
-            // Bind + validate options
+            // 1) EmailOptions
             services.AddOptions<EmailOptions>()
-                .Bind(config.GetSection(EmailOptions.Section))
+                .Bind(config.GetSection(EmailOptions.Section)) // giả sử EmailOptions có const Section = "Email"
                 .ValidateDataAnnotations()
-                .Validate(o => !(o.Smtp.UseSsl && o.Smtp.UseStartTls), "UseSsl và UseStartTls không được bật đồng thời")
+                .Validate(o => !(o.Smtp.UseSsl && o.Smtp.UseStartTls),
+                    "UseSsl và UseStartTls không được bật đồng thời")
                 .ValidateOnStart();
 
+            // 2) ResendOptions + validator phụ thuộc EmailOptions
             services.AddOptions<ResendOptions>()
-                .Bind(config.GetSection(ResendOptions.Section))
+                .Bind(config.GetSection(ResendOptions.Section)) // giả sử ResendOptions có const Section = "Resend"
                 .ValidateDataAnnotations()
-                .Validate((opt, sp) =>
-                {
-                    var provider = sp.GetRequiredService<IOptionsMonitor<EmailOptions>>().CurrentValue.Provider;
-                    return !provider.Equals("Resend", StringComparison.OrdinalIgnoreCase)
-                           || !string.IsNullOrWhiteSpace(opt.ApiKey);
-                }, "Resend:ApiKey is required when Email:Provider is Resend")
                 .ValidateOnStart();
 
-            // Impl senders
+            // Đăng ký validator phụ thuộc EmailOptions (không cần PostConfigure)
+            services.AddSingleton<IValidateOptions<ResendOptions>, ResendOptionsValidator>();
+
+            // 3) AuthLinkOptions (KHÔNG dùng .Section nếu class chưa có)
+            services.AddOptions<AuthLinkOptions>()
+                .Bind(config.GetSection("AuthLinks")) // đổi "AuthLinks" cho đúng tên section thực tế
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+
+            // Optionally expose Value để inject trực tiếp AuthLinkOptions thay vì IOptions<AuthLinkOptions>
+            services.AddSingleton(sp => sp.GetRequiredService<IOptions<AuthLinkOptions>>().Value);
+
+            // 4) Email sender implementations
             services.AddTransient<SmtpEmailSender>();
             services.AddTransient<FileEmailSender>();
+
             services.AddHttpClient<ResendEmailSender>(client =>
             {
                 client.BaseAddress = new Uri("https://api.resend.com/");
-                client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                // ĐỪNG gắn Authorization cố định ở đây nếu bạn muốn hot-reload ApiKey
+                // Hãy set header trong ResendEmailSender ngay trước khi gửi (lấy từ IOptionsMonitor<ResendOptions>)
             });
 
-            services.AddSingleton(sp => sp.GetRequiredService<IOptions<AuthLinkOptions>>().Value);
-
-            // Chọn sender theo Provider (hot-reload nhờ IOptionsMonitor)
+            // 5) Chọn IEmailSender theo Provider (hot-reload nhờ IOptionsMonitor)
             services.AddTransient<IEmailSender>(sp =>
             {
-                var monitor = sp.GetRequiredService<IOptionsMonitor<EmailOptions>>();
-                var opt = monitor.CurrentValue;
+                var opt = sp.GetRequiredService<IOptionsMonitor<EmailOptions>>().CurrentValue;
 
                 if (opt.Provider.Equals("Resend", StringComparison.OrdinalIgnoreCase))
                     return sp.GetRequiredService<ResendEmailSender>();
@@ -57,6 +68,7 @@ namespace Services.Common.Emailing.DependencyInjection
                 return sp.GetRequiredService<FileEmailSender>();
             });
 
+            // 6) Queue / HostedService
             if (useQueue)
             {
                 services.AddSingleton<EmailQueue>();
@@ -65,16 +77,43 @@ namespace Services.Common.Emailing.DependencyInjection
             }
             else
             {
-                // Nếu không dùng queue: chuyển IEmailQueue → gửi trực tiếp
                 services.AddSingleton<IEmailQueue, InlineEmailQueue>();
             }
 
+            // 7) Identity adapter
             if (addIdentityAdapter)
             {
-                services.AddScoped(typeof(Microsoft.AspNetCore.Identity.IEmailSender<>), typeof(IdentityEmailSenderAdapter<>));
+                services.AddScoped(
+                    typeof(Microsoft.AspNetCore.Identity.IEmailSender<>),
+                    typeof(IdentityEmailSenderAdapter<>));
             }
 
             return services;
+        }
+    }
+
+    /// <summary>
+    /// Validator cho ResendOptions: chỉ bắt buộc ApiKey khi Email:Provider = "Resend".
+    /// </summary>
+    internal sealed class ResendOptionsValidator : IValidateOptions<ResendOptions>
+    {
+        private readonly IOptionsMonitor<EmailOptions> _email;
+        public ResendOptionsValidator(IOptionsMonitor<EmailOptions> email)
+        {
+            _email = email;
+        }
+
+        public ValidateOptionsResult Validate(string name, ResendOptions options)
+        {
+            var provider = _email.CurrentValue?.Provider ?? string.Empty;
+
+            if (provider.Equals("Resend", StringComparison.OrdinalIgnoreCase) &&
+                string.IsNullOrWhiteSpace(options.ApiKey))
+            {
+                return ValidateOptionsResult.Fail("Resend:ApiKey is required when Email:Provider is Resend");
+            }
+
+            return ValidateOptionsResult.Success;
         }
     }
 
@@ -85,6 +124,7 @@ namespace Services.Common.Emailing.DependencyInjection
     {
         private readonly IEmailSender _sender;
         public InlineEmailQueue(IEmailSender sender) => _sender = sender;
+
         public async ValueTask EnqueueAsync(EmailMessage message, CancellationToken ct = default)
             => await _sender.SendAsync(message, ct);
     }
