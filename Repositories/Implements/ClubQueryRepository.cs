@@ -117,13 +117,13 @@ public sealed class ClubQueryRepository : IClubQueryRepository
                 c.MembersCount,
                 c.Rooms.Count(),
                 _context.ClubMembers
-                    .Where(cm => cm.ClubId == c.Id && cm.Role == CommunityRole.Owner)
+                    .Where(cm => cm.ClubId == c.Id && cm.Role == MemberRole.Owner)
                     .Select(cm => cm.UserId)
                     .FirstOrDefault(),
                 currentUserId.HasValue && _context.ClubMembers
                     .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value),
                 currentUserId.HasValue && _context.ClubMembers
-                    .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value && cm.Role == CommunityRole.Owner),
+                    .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value && cm.Role == MemberRole.Owner),
                 c.CreatedAtUtc,
                 c.UpdatedAtUtc
             ));

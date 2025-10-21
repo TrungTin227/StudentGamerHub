@@ -43,13 +43,13 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
                 c.MembersCount,
                 c.Clubs.Count(),
                 _context.CommunityMembers
-                    .Where(cm => cm.CommunityId == c.Id && cm.Role == CommunityRole.Owner)
+                    .Where(cm => cm.CommunityId == c.Id && cm.Role == MemberRole.Owner)
                     .Select(cm => cm.UserId)
                     .FirstOrDefault(),
                 currentUserId.HasValue && _context.CommunityMembers
                     .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value),
                 currentUserId.HasValue && _context.CommunityMembers
-                    .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value && cm.Role == CommunityRole.Owner),
+                    .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value && cm.Role == MemberRole.Owner),
                 c.CreatedAtUtc,
                 c.UpdatedAtUtc
             ));

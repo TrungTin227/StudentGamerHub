@@ -123,7 +123,7 @@ public sealed class ClubService : IClubService
         {
             ClubId = club.Id,
             UserId = currentUserId,
-            Role = CommunityRole.Owner,
+            Role = MemberRole.Owner,
             JoinedAt = now
         };
 
@@ -181,7 +181,7 @@ public sealed class ClubService : IClubService
             {
                 ClubId = clubId,
                 UserId = currentUserId,
-                Role = CommunityRole.Member,
+                Role = MemberRole.Member,
                 JoinedAt = DateTime.UtcNow
             };
 
@@ -214,7 +214,7 @@ public sealed class ClubService : IClubService
         }
 
         var actorMembership = await _clubQuery.GetMemberAsync(clubId, actorUserId, ct).ConfigureAwait(false);
-        if (actorMembership is null || actorMembership.Role != CommunityRole.Owner)
+        if (actorMembership is null || actorMembership.Role != MemberRole.Owner)
         {
             return Result.Failure(new Error(Error.Codes.Forbidden, "Only club owners can remove members."));
         }
@@ -225,7 +225,7 @@ public sealed class ClubService : IClubService
             return Result.Failure(new Error(Error.Codes.NotFound, "Member not found."));
         }
 
-        if (targetMembership.Role == CommunityRole.Owner)
+        if (targetMembership.Role == MemberRole.Owner)
         {
             return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a club owner."));
         }

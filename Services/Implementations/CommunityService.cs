@@ -65,7 +65,7 @@ public sealed class CommunityService : ICommunityService
         {
             CommunityId = community.Id,
             UserId = currentUserId,
-            Role = CommunityRole.Owner,
+            Role = MemberRole.Owner,
             JoinedAt = now
         };
 
@@ -117,7 +117,7 @@ public sealed class CommunityService : ICommunityService
             {
                 CommunityId = communityId,
                 UserId = currentUserId,
-                Role = CommunityRole.Member,
+                Role = MemberRole.Member,
                 JoinedAt = DateTime.UtcNow
             };
 
@@ -150,7 +150,7 @@ public sealed class CommunityService : ICommunityService
         }
 
         var actorMembership = await _communityQuery.GetMemberAsync(communityId, actorUserId, ct).ConfigureAwait(false);
-        if (actorMembership is null || actorMembership.Role != CommunityRole.Owner)
+        if (actorMembership is null || actorMembership.Role != MemberRole.Owner)
         {
             return Result.Failure(new Error(Error.Codes.Forbidden, "Only community owners can remove members."));
         }
@@ -161,7 +161,7 @@ public sealed class CommunityService : ICommunityService
             return Result.Failure(new Error(Error.Codes.NotFound, "Member not found."));
         }
 
-        if (targetMembership.Role == CommunityRole.Owner)
+        if (targetMembership.Role == MemberRole.Owner)
         {
             return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a community owner."));
         }
