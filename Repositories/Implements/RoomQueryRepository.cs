@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
 
 namespace Repositories.Implements;
 
@@ -47,6 +48,40 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
         return await _context.RoomMembers
             .AsNoTracking()
             .FirstOrDefaultAsync(rm => rm.RoomId == roomId && rm.UserId == userId, ct);
+    }
+
+    public async Task<RoomDetailModel?> GetDetailsAsync(Guid roomId, Guid? currentUserId, CancellationToken ct = default)
+    {
+        var query = _context.Rooms
+            .AsNoTracking()
+            .Where(r => r.Id == roomId)
+            .Select(r => new RoomDetailModel(
+                r.Id,
+                r.ClubId,
+                r.Name,
+                r.Description,
+                r.JoinPolicy,
+                r.Capacity,
+                r.MembersCount,
+                _context.RoomMembers
+                    .Where(rm => rm.RoomId == r.Id && rm.Role == RoomRole.Owner)
+                    .Select(rm => rm.UserId)
+                    .FirstOrDefault(),
+                currentUserId.HasValue && _context.RoomMembers
+                    .Any(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved),
+                currentUserId.HasValue && _context.RoomMembers
+                    .Any(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved && rm.Role == RoomRole.Owner),
+                currentUserId.HasValue
+                    ? _context.RoomMembers
+                        .Where(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value)
+                        .Select(rm => (RoomMemberStatus?)rm.Status)
+                        .FirstOrDefault()
+                    : null,
+                r.CreatedAtUtc,
+                r.UpdatedAtUtc
+            ));
+
+        return await query.FirstOrDefaultAsync(ct);
     }
 
     /// <summary>
@@ -103,4 +138,13 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
                       && rm.Room!.Club!.CommunityId == communityId)
             .AnyAsync(ct);
     }
+
+    public async Task<IReadOnlyList<RoomMember>> ListMembershipsAsync(Guid clubId, Guid userId, CancellationToken ct = default)
+    {
+        return await _context.RoomMembers
+            .AsNoTracking()
+            .Where(rm => rm.UserId == userId && rm.Room!.ClubId == clubId)
+            .ToListAsync(ct);
+    }
+
 }

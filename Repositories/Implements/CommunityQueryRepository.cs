@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
 
 namespace Repositories.Implements;
 
@@ -21,6 +22,40 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct)
             .ConfigureAwait(false);
+
+    public async Task<CommunityMember?> GetMemberAsync(Guid communityId, Guid userId, CancellationToken ct = default)
+        => await _context.CommunityMembers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cm => cm.CommunityId == communityId && cm.UserId == userId, ct)
+            .ConfigureAwait(false);
+
+    public async Task<CommunityDetailModel?> GetDetailsAsync(Guid communityId, Guid? currentUserId, CancellationToken ct = default)
+    {
+        var query = _context.Communities
+            .AsNoTracking()
+            .Where(c => c.Id == communityId)
+            .Select(c => new CommunityDetailModel(
+                c.Id,
+                c.Name,
+                c.Description,
+                c.School,
+                c.IsPublic,
+                c.MembersCount,
+                c.Clubs.Count(),
+                _context.CommunityMembers
+                    .Where(cm => cm.CommunityId == c.Id && cm.Role == CommunityRole.Owner)
+                    .Select(cm => cm.UserId)
+                    .FirstOrDefault(),
+                currentUserId.HasValue && _context.CommunityMembers
+                    .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value),
+                currentUserId.HasValue && _context.CommunityMembers
+                    .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value && cm.Role == CommunityRole.Owner),
+                c.CreatedAtUtc,
+                c.UpdatedAtUtc
+            ));
+
+        return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
 
     public async Task<bool> HasAnyApprovedRoomsAsync(Guid communityId, CancellationToken ct = default)
         => await _context.RoomMembers

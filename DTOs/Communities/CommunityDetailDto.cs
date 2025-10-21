@@ -15,5 +15,11 @@ public sealed record CommunityDetailDto(
     string? Description,
     string? School,
     bool IsPublic,
-    int MembersCount
+    int MembersCount,
+    int ClubsCount,
+    Guid OwnerId,
+    bool IsMember,
+    bool IsOwner,
+    DateTime CreatedAtUtc,
+    DateTime? UpdatedAtUtc
 );

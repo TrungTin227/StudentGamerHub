@@ -43,4 +43,21 @@ public sealed class CommunityCommandRepository : ICommunityCommandRepository
 
         _context.Communities.Update(community);
     }
+
+    public Task AddMemberAsync(CommunityMember member, CancellationToken ct = default)
+    {
+        return _context.CommunityMembers.AddAsync(member, ct).AsTask();
+    }
+
+    public async Task RemoveMemberAsync(Guid communityId, Guid userId, CancellationToken ct = default)
+    {
+        var entity = await _context.CommunityMembers
+            .FirstOrDefaultAsync(cm => cm.CommunityId == communityId && cm.UserId == userId, ct)
+            .ConfigureAwait(false);
+
+        if (entity is not null)
+        {
+            _context.CommunityMembers.Remove(entity);
+        }
+    }
 }

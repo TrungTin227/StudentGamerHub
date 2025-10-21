@@ -28,41 +28,8 @@ public interface IClubService
         CursorRequest cursor,
         CancellationToken ct = default);
 
-    /// <summary>
-    /// Create a new club within a community.
-    /// The creator is NOT automatically added as a member (Room-level membership only).
-    /// Initial MembersCount = 0.
-    /// </summary>
-    /// <param name="currentUserId">Current user ID (for audit trail)</param>
-    /// <param name="communityId">Community ID</param>
-    /// <param name="name">Club name (required, will be trimmed)</param>
-    /// <param name="description">Optional club description</param>
-    /// <param name="isPublic">Public/private flag</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Result with new club ID</returns>
-    Task<Result<Guid>> CreateClubAsync(
-        Guid currentUserId,
-        Guid communityId,
-        string name,
-        string? description,
-        bool isPublic,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Get club by ID.
-    /// </summary>
-    /// <param name="clubId">Club ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Result with club detail DTO, or NotFound if club doesn't exist</returns>
-    Task<Result<ClubDetailDto>> GetByIdAsync(Guid clubId, CancellationToken ct = default);
-
-    /// <summary>
-    /// Update club information.
-    /// </summary>
-    Task<Result> UpdateAsync(Guid currentUserId, Guid id, ClubUpdateRequestDto req, CancellationToken ct = default);
-
-    /// <summary>
-    /// Archive (soft delete) a club.
-    /// </summary>
-    Task<Result> ArchiveAsync(Guid currentUserId, Guid id, CancellationToken ct = default);
+    Task<Result<ClubDetailDto>> CreateClubAsync(ClubCreateRequestDto req, Guid currentUserId, CancellationToken ct = default);
+    Task<Result<ClubDetailDto>> JoinClubAsync(Guid clubId, Guid currentUserId, CancellationToken ct = default);
+    Task<Result> KickClubMemberAsync(Guid clubId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default);
+    Task<Result<ClubDetailDto>> GetByIdAsync(Guid clubId, Guid? currentUserId = null, CancellationToken ct = default);
 }

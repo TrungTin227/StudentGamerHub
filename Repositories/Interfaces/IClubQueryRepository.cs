@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Repositories.Interfaces;
 
 /// <summary>
@@ -40,4 +42,19 @@ public interface IClubQueryRepository
     /// <param name="ct">Cancellation token</param>
     /// <returns>Club entity or null if not found</returns>
     Task<Club?> GetByIdAsync(Guid clubId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get membership record for a specific user in the club.
+    /// </summary>
+    Task<ClubMember?> GetMemberAsync(Guid clubId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get projected detail model for API responses.
+    /// </summary>
+    Task<ClubDetailModel?> GetDetailsAsync(Guid clubId, Guid? currentUserId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List memberships for a user within a community.
+    /// </summary>
+    Task<IReadOnlyList<ClubMember>> ListMembershipsAsync(Guid communityId, Guid userId, CancellationToken ct = default);
 }

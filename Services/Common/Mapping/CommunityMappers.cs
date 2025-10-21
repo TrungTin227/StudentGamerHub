@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Services.Common.Mapping;
 
 /// <summary>
@@ -24,17 +26,23 @@ public static class CommunityMappers
     /// <summary>
     /// Maps a community entity to its detailed DTO representation.
     /// </summary>
-    public static CommunityDetailDto ToDetailDto(this Community community)
+    public static CommunityDetailDto ToDetailDto(this CommunityDetailModel model)
     {
-        ArgumentNullException.ThrowIfNull(community);
+        ArgumentNullException.ThrowIfNull(model);
 
         return new CommunityDetailDto(
-            Id: community.Id,
-            Name: community.Name,
-            Description: community.Description,
-            School: community.School,
-            IsPublic: community.IsPublic,
-            MembersCount: community.MembersCount
+            model.Id,
+            model.Name,
+            model.Description,
+            model.School,
+            model.IsPublic,
+            model.MembersCount,
+            model.ClubsCount,
+            model.OwnerId,
+            model.IsMember,
+            model.IsOwner,
+            model.CreatedAtUtc,
+            model.UpdatedAtUtc
         );
     }
 }
