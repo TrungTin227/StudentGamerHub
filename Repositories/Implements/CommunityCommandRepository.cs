@@ -51,13 +51,23 @@ public sealed class CommunityCommandRepository : ICommunityCommandRepository
 
     public async Task RemoveMemberAsync(Guid communityId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _context.CommunityMembers
-            .FirstOrDefaultAsync(cm => cm.CommunityId == communityId && cm.UserId == userId, ct)
+        await _context.CommunityMembers
+            .Where(cm => cm.CommunityId == communityId && cm.UserId == userId)
+            .ExecuteDeleteAsync(ct)
             .ConfigureAwait(false);
+    }
 
-        if (entity is not null)
+    public void Detach(CommunityMember member)
+    {
+        if (member is null)
         {
-            _context.CommunityMembers.Remove(entity);
+            return;
+        }
+
+        var entry = _context.Entry(member);
+        if (entry is not null)
+        {
+            entry.State = EntityState.Detached;
         }
     }
 }

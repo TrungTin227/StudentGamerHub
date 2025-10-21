@@ -83,4 +83,38 @@ public sealed class RoomsController : ControllerBase
         var result = await _roomService.KickRoomMemberAsync(roomId, userId, actorId.Value, ct);
         return this.ToActionResult(result);
     }
+
+    [HttpPost("{roomId:guid}/members/{userId:guid}/approve")]
+    [EnableRateLimiting("RoomsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> ApproveMember(Guid roomId, Guid userId, CancellationToken ct)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _roomService.ApproveRoomMemberAsync(roomId, userId, actorId.Value, ct);
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("{roomId:guid}/members/{userId:guid}/reject")]
+    [EnableRateLimiting("RoomsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> RejectMember(Guid roomId, Guid userId, CancellationToken ct)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _roomService.RejectRoomMemberAsync(roomId, userId, actorId.Value, ct);
+        return this.ToActionResult(result);
+    }
 }

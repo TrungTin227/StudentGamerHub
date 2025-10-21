@@ -30,18 +30,4 @@ public static class RoomMappers
             model.UpdatedAtUtc);
     }
 
-    /// <summary>
-    /// Maps <see cref="RoomMember"/> to <see cref="RoomMemberBriefDto"/>.
-    /// </summary>
-    public static RoomMemberBriefDto ToRoomMemberBriefDto(this RoomMember member)
-    {
-        ArgumentNullException.ThrowIfNull(member);
-
-        return new RoomMemberBriefDto(
-            member.UserId,
-            member.User?.FullName ?? string.Empty,
-            member.Role,
-            member.Status,
-            member.JoinedAt);
-    }
 }

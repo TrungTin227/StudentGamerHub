@@ -53,8 +53,4 @@ public interface IClubQueryRepository
     /// </summary>
     Task<ClubDetailModel?> GetDetailsAsync(Guid clubId, Guid? currentUserId, CancellationToken ct = default);
 
-    /// <summary>
-    /// List memberships for a user within a community.
-    /// </summary>
-    Task<IReadOnlyList<ClubMember>> ListMembershipsAsync(Guid communityId, Guid userId, CancellationToken ct = default);
 }
