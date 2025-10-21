@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Repositories.Interfaces;
 
 /// <summary>
@@ -9,6 +11,16 @@ public interface ICommunityQueryRepository
     /// Get a community by identifier.
     /// </summary>
     Task<Community?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get current membership record, if any.
+    /// </summary>
+    Task<CommunityMember?> GetMemberAsync(Guid communityId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Projected details for API responses.
+    /// </summary>
+    Task<CommunityDetailModel?> GetDetailsAsync(Guid communityId, Guid? currentUserId, CancellationToken ct = default);
 
     /// <summary>
     /// Determine whether the community still has any approved room members.

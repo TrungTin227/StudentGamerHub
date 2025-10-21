@@ -1,16 +1,13 @@
-namespace DTOs.Clubs;
+namespace Repositories.Models;
 
-/// <summary>
-/// Detailed club information.
-/// </summary>
-public sealed record ClubDetailDto(
+public sealed record CommunityDetailModel(
     Guid Id,
-    Guid CommunityId,
     string Name,
     string? Description,
+    string? School,
     bool IsPublic,
     int MembersCount,
-    int RoomsCount,
+    int ClubsCount,
     Guid OwnerId,
     bool IsMember,
     bool IsOwner,

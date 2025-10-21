@@ -21,8 +21,10 @@ namespace Repositories.Persistence
 
         public DbSet<Community> Communities => Set<Community>();
         public DbSet<CommunityGame> CommunityGames => Set<CommunityGame>();
+        public DbSet<CommunityMember> CommunityMembers => Set<CommunityMember>();
 
         public DbSet<Club> Clubs => Set<Club>();
+        public DbSet<ClubMember> ClubMembers => Set<ClubMember>();
         public DbSet<Room> Rooms => Set<Room>();
         public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
 
@@ -52,8 +54,10 @@ namespace Repositories.Persistence
 
             b.Entity<Community>().ToTable("communities");
             b.Entity<CommunityGame>().ToTable("community_games");
+            b.Entity<CommunityMember>().ToTable("community_members");
 
             b.Entity<Club>().ToTable("clubs");
+            b.Entity<ClubMember>().ToTable("club_members");
             b.Entity<Room>().ToTable("rooms");
             b.Entity<RoomMember>().ToTable("room_members");
 
@@ -219,9 +223,26 @@ namespace Repositories.Persistence
                 e.HasIndex(c => c.School).HasDatabaseName("IX_Community_School");
                 e.HasIndex(c => new { c.IsPublic, c.MembersCount }).HasDatabaseName("IX_Community_Public_Members");
                 e.HasIndex(c => c.CreatedAtUtc).HasDatabaseName("IX_Community_CreatedAt");
-                
+
                 // Keep existing single-column index for MembersCount for other queries
                 e.HasIndex(c => c.MembersCount);
+            });
+
+            b.Entity<CommunityMember>(e =>
+            {
+                e.Property(x => x.Role).HasConversion<string>();
+
+                e.HasOne(x => x.Community)
+                 .WithMany()
+                 .HasForeignKey(x => x.CommunityId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(x => x.User)
+                 .WithMany()
+                 .HasForeignKey(x => x.UserId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasIndex(x => x.UserId).HasDatabaseName("IX_CommunityMember_User");
             });
 
             b.Entity<CommunityGame>(e =>
@@ -245,10 +266,27 @@ namespace Repositories.Persistence
                  .OnDelete(DeleteBehavior.Cascade);
 
                 e.HasIndex(c => new { c.CommunityId, c.Name }).IsUnique();
-                
+
                 // Indexes for club queries
                 e.HasIndex(c => c.CommunityId);
                 e.HasIndex(c => c.MembersCount);
+            });
+
+            b.Entity<ClubMember>(e =>
+            {
+                e.Property(x => x.Role).HasConversion<string>();
+
+                e.HasOne(x => x.Club)
+                 .WithMany()
+                 .HasForeignKey(x => x.ClubId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(x => x.User)
+                 .WithMany()
+                 .HasForeignKey(x => x.UserId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                e.HasIndex(x => x.UserId).HasDatabaseName("IX_ClubMember_User");
             });
 
             // ====== Rooms ======
@@ -534,6 +572,8 @@ namespace Repositories.Persistence
 
             b.Entity<Club>().HasQueryFilter(cl => !cl.IsDeleted && !cl.Community!.IsDeleted);
             b.Entity<Room>().HasQueryFilter(r => !r.IsDeleted && !r.Club!.IsDeleted && !r.Club!.Community!.IsDeleted);
+            b.Entity<CommunityMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Community!.IsDeleted);
+            b.Entity<ClubMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Club!.IsDeleted && !cm.Club!.Community!.IsDeleted);
             b.Entity<RoomMember>().HasQueryFilter(rm => !rm.User!.IsDeleted && !rm.Room!.IsDeleted && !rm.Room!.Club!.IsDeleted && !rm.Room!.Club!.Community!.IsDeleted);
 
             // (Tuỳ chọn) filter cho Game/UserGame nếu bạn có soft-delete ở Game

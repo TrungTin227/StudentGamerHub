@@ -55,4 +55,20 @@ public sealed class ClubCommandRepository : IClubCommandRepository
 
         _context.Clubs.Update(club);
     }
+
+    public Task AddMemberAsync(ClubMember member, CancellationToken ct = default)
+    {
+        return _context.ClubMembers.AddAsync(member, ct).AsTask();
+    }
+
+    public async Task RemoveMemberAsync(Guid clubId, Guid userId, CancellationToken ct = default)
+    {
+        var entity = await _context.ClubMembers
+            .FirstOrDefaultAsync(cm => cm.ClubId == clubId && cm.UserId == userId, ct);
+
+        if (entity is not null)
+        {
+            _context.ClubMembers.Remove(entity);
+        }
+    }
 }

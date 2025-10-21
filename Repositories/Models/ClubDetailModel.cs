@@ -1,9 +1,6 @@
-namespace DTOs.Clubs;
+namespace Repositories.Models;
 
-/// <summary>
-/// Detailed club information.
-/// </summary>
-public sealed record ClubDetailDto(
+public sealed record ClubDetailModel(
     Guid Id,
     Guid CommunityId,
     string Name,

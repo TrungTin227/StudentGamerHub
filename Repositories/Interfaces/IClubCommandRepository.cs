@@ -28,4 +28,14 @@ public interface IClubCommandRepository
     /// <param name="deletedBy">User performing the deletion</param>
     /// <param name="ct">Cancellation token</param>
     Task SoftDeleteAsync(Guid clubId, Guid deletedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Add a club member.
+    /// </summary>
+    Task AddMemberAsync(ClubMember member, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a club member.
+    /// </summary>
+    Task RemoveMemberAsync(Guid clubId, Guid userId, CancellationToken ct = default);
 }

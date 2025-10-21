@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Services.Common.Mapping;
 
 /// <summary>
@@ -8,18 +10,24 @@ public static class RoomMappers
     /// <summary>
     /// Maps <see cref="Room"/> to <see cref="RoomDetailDto"/>.
     /// </summary>
-    public static RoomDetailDto ToRoomDetailDto(this Room room)
+    public static RoomDetailDto ToRoomDetailDto(this RoomDetailModel model)
     {
-        ArgumentNullException.ThrowIfNull(room);
+        ArgumentNullException.ThrowIfNull(model);
 
         return new RoomDetailDto(
-            room.Id,
-            room.ClubId,
-            room.Name,
-            room.Description,
-            room.JoinPolicy,
-            room.Capacity,
-            room.MembersCount);
+            model.Id,
+            model.ClubId,
+            model.Name,
+            model.Description,
+            model.JoinPolicy,
+            model.Capacity,
+            model.MembersCount,
+            model.OwnerId,
+            model.IsMember,
+            model.IsOwner,
+            model.MembershipStatus,
+            model.CreatedAtUtc,
+            model.UpdatedAtUtc);
     }
 
     /// <summary>

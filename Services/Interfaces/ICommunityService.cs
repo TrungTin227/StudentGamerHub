@@ -5,8 +5,8 @@ namespace Services.Interfaces;
 /// </summary>
 public interface ICommunityService
 {
-    Task<Result<Guid>> CreateAsync(Guid currentUserId, CommunityCreateRequestDto req, CancellationToken ct = default);
-    Task<Result<CommunityDetailDto>> GetByIdAsync(Guid id, CancellationToken ct = default);
-    Task<Result> UpdateAsync(Guid currentUserId, Guid id, CommunityUpdateRequestDto req, CancellationToken ct = default);
-    Task<Result> ArchiveAsync(Guid currentUserId, Guid id, CancellationToken ct = default);
+    Task<Result<CommunityDetailDto>> CreateCommunityAsync(CommunityCreateRequestDto req, Guid currentUserId, CancellationToken ct = default);
+    Task<Result<CommunityDetailDto>> JoinCommunityAsync(Guid communityId, Guid currentUserId, CancellationToken ct = default);
+    Task<Result> KickCommunityMemberAsync(Guid communityId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default);
+    Task<Result<CommunityDetailDto>> GetByIdAsync(Guid communityId, Guid? currentUserId = null, CancellationToken ct = default);
 }

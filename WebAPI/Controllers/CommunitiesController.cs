@@ -29,6 +29,7 @@ public sealed class CommunitiesController : ControllerBase
 
     /// <summary>
     /// Create a new community.
+    /// The authenticated user becomes the owner member in the same transaction.
     /// </summary>
     /// <param name="request">Creation payload.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -39,7 +40,7 @@ public sealed class CommunitiesController : ControllerBase
     /// <response code="429">Write rate limit exceeded.</response>
     [HttpPost]
     [EnableRateLimiting("CommunitiesWrite")]
-    [ProducesResponseType(typeof(object), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(CommunityDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
@@ -49,8 +50,46 @@ public sealed class CommunitiesController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var result = await _communityService.CreateAsync(userId.Value, request, ct);
-        return this.ToActionResult(result, value => new { communityId = value }, StatusCodes.Status201Created);
+        var result = await _communityService.CreateCommunityAsync(request, userId.Value, ct);
+        return this.ToCreatedAtAction(result, nameof(GetById), result.IsSuccess ? new { id = result.Value!.Id } : null);
+    }
+
+    /// <summary>
+    /// Join a community. Idempotent if the caller is already a member.
+    /// </summary>
+    [HttpPost("{communityId:guid}/join")]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(typeof(CommunityDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> JoinCommunity(Guid communityId, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _communityService.JoinCommunityAsync(communityId, userId.Value, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Remove a member from the community (owner only).
+    /// </summary>
+    [HttpDelete("{communityId:guid}/members/{userId:guid}")]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> RemoveCommunityMember(Guid communityId, Guid userId, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _communityService.KickCommunityMemberAsync(communityId, userId, actorId.Value, ct);
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -128,63 +167,9 @@ public sealed class CommunitiesController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult> GetById(Guid id, CancellationToken ct = default)
     {
-        var result = await _communityService.GetByIdAsync(id, ct);
+        var currentUserId = User.GetUserId();
+        var result = await _communityService.GetByIdAsync(id, currentUserId, ct);
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
-    }
-
-    /// <summary>
-    /// Update a community's metadata.
-    /// </summary>
-    /// <param name="id">Community identifier.</param>
-    /// <param name="request">Update payload.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <response code="204">Update succeeded.</response>
-    /// <response code="400">Validation failure.</response>
-    /// <response code="401">Not authenticated.</response>
-    /// <response code="404">Community not found.</response>
-    /// <response code="429">Write rate limit exceeded.</response>
-    [HttpPatch("{id:guid}")]
-    [EnableRateLimiting("CommunitiesWrite")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
-    public async Task<ActionResult> Update(Guid id, [FromBody] CommunityUpdateRequestDto request, CancellationToken ct = default)
-    {
-        var userId = User.GetUserId();
-        if (userId is null)
-            return Unauthorized();
-
-        var result = await _communityService.UpdateAsync(userId.Value, id, request, ct);
-        return this.ToActionResult(result);
-    }
-
-    /// <summary>
-    /// Archive a community (soft delete).
-    /// </summary>
-    /// <param name="id">Community identifier.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <response code="204">Archive succeeded.</response>
-    /// <response code="401">Not authenticated.</response>
-    /// <response code="403">Archive forbidden when approved rooms exist.</response>
-    /// <response code="404">Community not found.</response>
-    /// <response code="429">Write rate limit exceeded.</response>
-    [HttpDelete("{id:guid}")]
-    [EnableRateLimiting("CommunitiesWrite")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
-    public async Task<ActionResult> Archive(Guid id, CancellationToken ct = default)
-    {
-        var userId = User.GetUserId();
-        if (userId is null)
-            return Unauthorized();
-
-        var result = await _communityService.ArchiveAsync(userId.Value, id, ct);
-        return this.ToActionResult(result);
     }
 
     /// <summary>

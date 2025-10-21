@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Repositories.Interfaces;
 
 /// <summary>
@@ -22,6 +24,11 @@ public interface IRoomQueryRepository
     Task<RoomMember?> GetMemberAsync(Guid roomId, Guid userId, CancellationToken ct = default);
 
     /// <summary>
+    /// Projected room detail for API responses.
+    /// </summary>
+    Task<RoomDetailModel?> GetDetailsAsync(Guid roomId, Guid? currentUserId, CancellationToken ct = default);
+
+    /// <summary>
     /// Count approved members in a room (Status == Approved).
     /// </summary>
     Task<int> CountApprovedMembersAsync(Guid roomId, CancellationToken ct = default);
@@ -40,4 +47,10 @@ public interface IRoomQueryRepository
     /// Check if user has any approved membership in any room of any club in this community.
     /// </summary>
     Task<bool> HasAnyApprovedInCommunityAsync(Guid userId, Guid communityId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List room memberships for a user within a club.
+    /// </summary>
+    Task<IReadOnlyList<RoomMember>> ListMembershipsAsync(Guid clubId, Guid userId, CancellationToken ct = default);
+
 }

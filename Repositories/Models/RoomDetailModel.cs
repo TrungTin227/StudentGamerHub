@@ -1,9 +1,8 @@
-namespace DTOs.Rooms;
+using BusinessObjects.Common;
 
-/// <summary>
-/// Detailed information about a room.
-/// </summary>
-public sealed record RoomDetailDto(
+namespace Repositories.Models;
+
+public sealed record RoomDetailModel(
     Guid Id,
     Guid ClubId,
     string Name,

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
 
 namespace Repositories.Implements;
 
@@ -93,5 +94,48 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         return await _context.Clubs
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == clubId, ct);
+    }
+
+    public async Task<ClubMember?> GetMemberAsync(Guid clubId, Guid userId, CancellationToken ct = default)
+    {
+        return await _context.ClubMembers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cm => cm.ClubId == clubId && cm.UserId == userId, ct);
+    }
+
+    public async Task<ClubDetailModel?> GetDetailsAsync(Guid clubId, Guid? currentUserId, CancellationToken ct = default)
+    {
+        var query = _context.Clubs
+            .AsNoTracking()
+            .Where(c => c.Id == clubId)
+            .Select(c => new ClubDetailModel(
+                c.Id,
+                c.CommunityId,
+                c.Name,
+                c.Description,
+                c.IsPublic,
+                c.MembersCount,
+                c.Rooms.Count(),
+                _context.ClubMembers
+                    .Where(cm => cm.ClubId == c.Id && cm.Role == CommunityRole.Owner)
+                    .Select(cm => cm.UserId)
+                    .FirstOrDefault(),
+                currentUserId.HasValue && _context.ClubMembers
+                    .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value),
+                currentUserId.HasValue && _context.ClubMembers
+                    .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value && cm.Role == CommunityRole.Owner),
+                c.CreatedAtUtc,
+                c.UpdatedAtUtc
+            ));
+
+        return await query.FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ClubMember>> ListMembershipsAsync(Guid communityId, Guid userId, CancellationToken ct = default)
+    {
+        return await _context.ClubMembers
+            .AsNoTracking()
+            .Where(cm => cm.UserId == userId && cm.Club!.CommunityId == communityId)
+            .ToListAsync(ct);
     }
 }

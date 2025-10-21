@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Services.Common.Mapping;
 
 /// <summary>
@@ -25,17 +27,23 @@ public static class ClubMappers
     /// <summary>
     /// Maps Club entity to ClubDetailDto.
     /// </summary>
-    public static ClubDetailDto ToClubDetailDto(this Club club)
+    public static ClubDetailDto ToClubDetailDto(this ClubDetailModel model)
     {
-        ArgumentNullException.ThrowIfNull(club);
+        ArgumentNullException.ThrowIfNull(model);
 
         return new ClubDetailDto(
-            Id: club.Id,
-            CommunityId: club.CommunityId,
-            Name: club.Name,
-            Description: club.Description,
-            IsPublic: club.IsPublic,
-            MembersCount: club.MembersCount
+            model.Id,
+            model.CommunityId,
+            model.Name,
+            model.Description,
+            model.IsPublic,
+            model.MembersCount,
+            model.RoomsCount,
+            model.OwnerId,
+            model.IsMember,
+            model.IsOwner,
+            model.CreatedAtUtc,
+            model.UpdatedAtUtc
         );
     }
 }

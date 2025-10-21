@@ -81,8 +81,7 @@ public sealed class ClubsController : ControllerBase
 
     /// <summary>
     /// Create a new club within a community.
-    /// The creator is NOT automatically added as a member (Room-level membership only).
-    /// Initial MembersCount = 0.
+    /// The authenticated user must already belong to the parent community and becomes the club owner member.
     /// Rate limit: 10 requests per day per user.
     /// </summary>
     /// <param name="request">Club creation request (includes CommunityId)</param>
@@ -94,7 +93,7 @@ public sealed class ClubsController : ControllerBase
     /// <response code="429">Rate limit exceeded (10 per day)</response>
     [HttpPost]
     [EnableRateLimiting("ClubsWrite")]
-    [ProducesResponseType(typeof(Guid), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ClubDetailDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
@@ -106,15 +105,46 @@ public sealed class ClubsController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var result = await _clubService.CreateClubAsync(
-            userId.Value,
-            request.CommunityId,
-            request.Name,
-            request.Description,
-            request.IsPublic,
-            ct);
+        var result = await _clubService.CreateClubAsync(request, userId.Value, ct);
+        return this.ToCreatedAtAction(result, nameof(GetClubById), result.IsSuccess ? new { id = result.Value!.Id } : null);
+    }
 
-        return this.ToActionResult(result, successStatus: StatusCodes.Status201Created);
+    /// <summary>
+    /// Join a club. Requires community membership and is idempotent if already joined.
+    /// </summary>
+    [HttpPost("{clubId:guid}/join")]
+    [EnableRateLimiting("ClubsWrite")]
+    [ProducesResponseType(typeof(ClubDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> JoinClub(Guid clubId, CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        if (userId is null)
+            return Unauthorized();
+
+        var result = await _clubService.JoinClubAsync(clubId, userId.Value, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Remove a club member (owner only).
+    /// </summary>
+    [HttpDelete("{clubId:guid}/members/{userId:guid}")]
+    [EnableRateLimiting("ClubsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> RemoveMember(Guid clubId, Guid userId, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _clubService.KickClubMemberAsync(clubId, userId, actorId.Value, ct);
+        return this.ToActionResult(result);
     }
 
     /// <summary>
@@ -135,51 +165,8 @@ public sealed class ClubsController : ControllerBase
         Guid id,
         CancellationToken ct = default)
     {
-        var result = await _clubService.GetByIdAsync(id, ct);
+        var currentUserId = User.GetUserId();
+        var result = await _clubService.GetByIdAsync(id, currentUserId, ct);
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
-    }
-
-    /// <summary>
-    /// Update club information.
-    /// Rate limit: 10 requests per day per user (shared with create/delete).
-    /// </summary>
-    [HttpPatch("{id:guid}")]
-    [EnableRateLimiting("ClubsWrite")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult> UpdateClub(
-        Guid id,
-        [FromBody] ClubUpdateRequestDto request,
-        CancellationToken ct = default)
-    {
-        var userId = User.GetUserId();
-        if (userId is null)
-            return Unauthorized();
-
-        var result = await _clubService.UpdateAsync(userId.Value, id, request, ct);
-        return this.ToActionResult(result);
-    }
-
-    /// <summary>
-    /// Archive (soft delete) a club.
-    /// Rate limit: 10 requests per day per user (shared with create/update).
-    /// </summary>
-    [HttpDelete("{id:guid}")]
-    [EnableRateLimiting("ClubsWrite")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult> ArchiveClub(Guid id, CancellationToken ct = default)
-    {
-        var userId = User.GetUserId();
-        if (userId is null)
-            return Unauthorized();
-
-        var result = await _clubService.ArchiveAsync(userId.Value, id, ct);
-        return this.ToActionResult(result);
     }
 }

@@ -19,4 +19,14 @@ public interface ICommunityCommandRepository
     /// Soft delete (archive) a community.
     /// </summary>
     Task SoftDeleteAsync(Guid communityId, Guid deletedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Add a community member.
+    /// </summary>
+    Task AddMemberAsync(CommunityMember member, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a community member.
+    /// </summary>
+    Task RemoveMemberAsync(Guid communityId, Guid userId, CancellationToken ct = default);
 }
