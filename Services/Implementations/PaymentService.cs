@@ -1,7 +1,9 @@
+using System;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Services.Configuration;
-using System.Text.Json;
 
 namespace Services.Implementations;
 
@@ -124,8 +126,15 @@ public sealed class PaymentService : IPaymentService
                 CreatedBy = userId,
             };
 
-            await _paymentIntentRepository.CreateAsync(paymentIntent, innerCt).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            try
+            {
+                await _paymentIntentRepository.CreateAsync(paymentIntent, innerCt).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+            catch (DbUpdateException ex) when (IsWalletTopUpPurposeConstraintViolation(ex))
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "WalletTopUpNotEnabledBySchema"));
+            }
 
             return Result<Guid>.Success(paymentIntent.Id);
         }, ct: ct);
@@ -165,7 +174,7 @@ public sealed class PaymentService : IPaymentService
             {
                 PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(userId, pi, innerCt).ConfigureAwait(false),
                 PaymentPurpose.TopUp => await ConfirmTopUpAsync(userId, pi, innerCt).ConfigureAwait(false),
-                PaymentPurpose.WalletTopUp => Result.Failure(new Error(Error.Codes.Validation, "Wallet top-ups must be completed via VNPay.")),
+                PaymentPurpose.WalletTopUp => Result.Failure(new Error(Error.Codes.Validation, "WalletTopUpRequiresProviderCallback")),
                 _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose.")),
             };
         }, ct: ct).ConfigureAwait(false);
@@ -621,6 +630,11 @@ public sealed class PaymentService : IPaymentService
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
 
+        if (string.IsNullOrWhiteSpace(pi.ClientSecret))
+        {
+            pi.ClientSecret = providerRef;
+        }
+
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -647,14 +661,17 @@ public sealed class PaymentService : IPaymentService
             return Result.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can top up this event escrow."));
         }
 
-        // Check if transaction already exists (idempotency)
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(VnPayProvider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
         {
-            pi.Status = PaymentIntentStatus.Succeeded;
-            pi.UpdatedBy = pi.UserId;
-            await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
             return Result.Success();
         }
 
@@ -672,13 +689,6 @@ public sealed class PaymentService : IPaymentService
             return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
         }
 
-        // Credit wallet from external payment
-        var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
-        }
-
         var tx = new Transaction
         {
             Id = Guid.NewGuid(),
@@ -694,7 +704,29 @@ public sealed class PaymentService : IPaymentService
             CreatedBy = pi.UserId,
         };
 
-        await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+        try
+        {
+            await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            return Result.Success();
+        }
+
+        var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
+        if (!credited)
+        {
+            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
+        }
 
         var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false)
                      ?? new Escrow
@@ -717,6 +749,11 @@ public sealed class PaymentService : IPaymentService
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
 
+        if (string.IsNullOrWhiteSpace(pi.ClientSecret))
+        {
+            pi.ClientSecret = providerRef;
+        }
+
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -733,10 +770,14 @@ public sealed class PaymentService : IPaymentService
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(VnPayProvider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
         {
-            pi.Status = PaymentIntentStatus.Succeeded;
-            pi.UpdatedBy = pi.UserId;
-            await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
             return Result.Success();
         }
 
@@ -747,12 +788,6 @@ public sealed class PaymentService : IPaymentService
         if (wallet is null)
         {
             return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
-
-        var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
         }
 
         var tx = new Transaction
@@ -769,10 +804,37 @@ public sealed class PaymentService : IPaymentService
             CreatedBy = pi.UserId,
         };
 
-        await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+        try
+        {
+            await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            return Result.Success();
+        }
+
+        var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
+        if (!credited)
+        {
+            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
+        }
 
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
+
+        if (string.IsNullOrWhiteSpace(pi.ClientSecret))
+        {
+            pi.ClientSecret = providerRef;
+        }
 
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -825,5 +887,22 @@ public sealed class PaymentService : IPaymentService
         }
 
         return JsonSerializer.SerializeToDocument(payload);
+    }
+
+    private static bool IsWalletTopUpPurposeConstraintViolation(DbUpdateException exception)
+    {
+        if (exception is null)
+        {
+            return false;
+        }
+
+        var message = exception.InnerException?.Message ?? exception.Message;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("chk_payment_intent_purpose_allowed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("payment_intent_purpose_allowed", StringComparison.OrdinalIgnoreCase);
     }
 }

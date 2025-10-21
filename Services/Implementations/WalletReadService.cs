@@ -26,13 +26,19 @@ public sealed class WalletReadService : IWalletReadService
 
     public async Task<Result<WalletSummaryDto>> GetPlatformWalletAsync(CancellationToken ct = default)
     {
-        if (!_billingOptions.PlatformUserId.HasValue || _billingOptions.PlatformUserId.Value == Guid.Empty)
+        var platformUserId = _billingOptions.PlatformUserId;
+        if (!platformUserId.HasValue || platformUserId.Value == Guid.Empty)
         {
-            return Result<WalletSummaryDto>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet is not configured."));
+            return Result<WalletSummaryDto>.Failure(new Error(Error.Codes.Validation, "PlatformUserIdMissingOrInvalid"));
         }
 
-        var wallet = await _walletRepository.GetByUserIdAsync(_billingOptions.PlatformUserId.Value, ct).ConfigureAwait(false);
-        var summary = new WalletSummaryDto(wallet is not null, wallet?.BalanceCents ?? 0);
+        var wallet = await _walletRepository.GetByUserIdAsync(platformUserId.Value, ct).ConfigureAwait(false);
+        if (wallet is null)
+        {
+            return Result<WalletSummaryDto>.Failure(new Error(Error.Codes.NotFound, "Platform wallet not found."));
+        }
+
+        var summary = new WalletSummaryDto(true, wallet.BalanceCents);
         return Result<WalletSummaryDto>.Success(summary);
     }
 }

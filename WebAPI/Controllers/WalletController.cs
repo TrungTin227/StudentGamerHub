@@ -59,13 +59,8 @@ public sealed class WalletController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> CreateTopUp([FromBody] WalletTopUpRequestDto? request, CancellationToken ct)
+    public async Task<ActionResult> CreateTopUp([FromBody] WalletTopUpRequestDto request, CancellationToken ct)
     {
-        if (request is null)
-        {
-            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Validation, "Request body is required.")));
-        }
-
         var userId = User.GetUserId();
         if (!userId.HasValue)
         {
