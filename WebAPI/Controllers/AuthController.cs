@@ -12,16 +12,12 @@ public sealed class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
     private readonly IUserService _users;
-    private readonly IHostEnvironment _env;       // <-- thêm
-    private readonly UserManager<User> _userMgr;  // <-- thêm (User là entity bạn dùng cho Identity)
 
 
-    public AuthController(IAuthService auth, IUserService users, IHostEnvironment env, UserManager<User> userMgr)
+    public AuthController(IAuthService auth, IUserService users)
     {
         _auth = auth;
         _users = users;
-        _env = env;            // <-- thêm
-        _userMgr = userMgr;    // <-- thêm
     }
 
     // -------- TOKEN FLOWS --------
@@ -75,30 +71,11 @@ public sealed class AuthController : ControllerBase
         var ua = Request.Headers["User-Agent"].ToString();
 
         var r = await _auth.LoginAsync(req, ip, ua, ct);
-
-        // DEV: nếu login fail, thử auto-confirm email một lần rồi đăng nhập lại
-        if (!r.IsSuccess && _env.IsDevelopment())
-        {
-            // Tìm user theo username/email
-            var user = await _userMgr.FindByNameAsync(req.UserNameOrEmail)
-                       ?? await _userMgr.FindByEmailAsync(req.UserNameOrEmail);
-
-            if (user is not null && !user.EmailConfirmed)
-            {
-                user.EmailConfirmed = true;
-                var upd = await _userMgr.UpdateAsync(user);
-                if (upd.Succeeded)
-                {
-                    r = await _auth.LoginAsync(req, ip, ua, ct); // thử lại
-                }
-            }
-        }
-
         if (!r.IsSuccess) return this.ToActionResult(r);
 
         // Set HttpOnly refresh cookie + CSRF cookie
         Response.SetAuthCookies(
-            r.Value.RefreshToken,
+         r.Value.RefreshToken,
             r.Value.RefreshExpiresAtUtc,
             CsrfService.NewToken()
         );

@@ -47,16 +47,14 @@ namespace Repositories.DependencyInjection
             }
 
             // 2) Identity
-            // 2) Identity
             services
                 .AddIdentityCore<User>(opt =>
                 {
                     // Email
                     opt.User.RequireUniqueEmail = true;
 
-                    // DEV: Cho phép đăng nhập chưa xác thực email
-                    // PROD/Other: yêu cầu xác thực email
-                    opt.SignIn.RequireConfirmedEmail = !isDevelopment;
+                    // ✅ TẮT YÊU CẦU XÁC THỰC EMAIL
+                    opt.SignIn.RequireConfirmedEmail = false;
 
                     // Password
                     opt.Password.RequireDigit = true;
