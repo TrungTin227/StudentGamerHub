@@ -38,4 +38,14 @@ public interface IClubCommandRepository
     /// Remove a club member.
     /// </summary>
     Task RemoveMemberAsync(Guid clubId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove all club memberships of a user within a community and return affected club ids.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> RemoveMembershipsByCommunityAsync(Guid communityId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Detach a tracked club member instance (used after failed inserts).
+    /// </summary>
+    void Detach(ClubMember member);
 }

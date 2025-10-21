@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
+using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
 
 namespace Services.Implementations;
@@ -122,9 +125,19 @@ public sealed class CommunityService : ICommunityService
             };
 
             await _communityCommand.AddMemberAsync(member, innerCt).ConfigureAwait(false);
+
+            try
+            {
+                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+            {
+                _communityCommand.Detach(member);
+                return Result<bool>.Success(false);
+            }
+
             await _roomCommand.IncrementCommunityMembersAsync(communityId, 1, innerCt).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            return Result.Success();
+            return Result<bool>.Success(true);
         }, ct: ct).ConfigureAwait(false);
 
         if (!joinResult.IsSuccess)
@@ -166,30 +179,27 @@ public sealed class CommunityService : ICommunityService
             return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a community owner."));
         }
 
-        var clubMemberships = await _clubQuery.ListMembershipsAsync(communityId, targetUserId, ct).ConfigureAwait(false);
-
         var kickResult = await _uow.ExecuteTransactionAsync(async innerCt =>
         {
-            await _communityCommand.RemoveMemberAsync(communityId, targetUserId, innerCt).ConfigureAwait(false);
-            await _roomCommand.IncrementCommunityMembersAsync(communityId, -1, innerCt).ConfigureAwait(false);
+            var roomSummaries = await _roomCommand.RemoveMembershipsByCommunityAsync(communityId, targetUserId, innerCt).ConfigureAwait(false);
 
-            foreach (var clubMember in clubMemberships)
+            foreach (var summary in roomSummaries)
             {
-                await _clubCommand.RemoveMemberAsync(clubMember.ClubId, targetUserId, innerCt).ConfigureAwait(false);
-                await _roomCommand.IncrementClubMembersAsync(clubMember.ClubId, -1, innerCt).ConfigureAwait(false);
-
-                var roomMemberships = await _roomQuery.ListMembershipsAsync(clubMember.ClubId, targetUserId, innerCt).ConfigureAwait(false);
-
-                foreach (var roomMember in roomMemberships)
+                if (summary.ApprovedRemovedCount > 0)
                 {
-                    await _roomCommand.RemoveMemberAsync(roomMember.RoomId, targetUserId, innerCt).ConfigureAwait(false);
-
-                    if (roomMember.Status == RoomMemberStatus.Approved)
-                    {
-                        await _roomCommand.IncrementRoomMembersAsync(roomMember.RoomId, -1, innerCt).ConfigureAwait(false);
-                    }
+                    await _roomCommand.IncrementRoomMembersAsync(summary.RoomId, -summary.ApprovedRemovedCount, innerCt).ConfigureAwait(false);
                 }
             }
+
+            var clubIds = await _clubCommand.RemoveMembershipsByCommunityAsync(communityId, targetUserId, innerCt).ConfigureAwait(false);
+
+            foreach (var clubId in clubIds)
+            {
+                await _roomCommand.IncrementClubMembersAsync(clubId, -1, innerCt).ConfigureAwait(false);
+            }
+
+            await _communityCommand.RemoveMemberAsync(communityId, targetUserId, innerCt).ConfigureAwait(false);
+            await _roomCommand.IncrementCommunityMembersAsync(communityId, -1, innerCt).ConfigureAwait(false);
 
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result.Success();

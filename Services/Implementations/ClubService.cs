@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
+using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
 
 namespace Services.Implementations;
@@ -186,9 +189,19 @@ public sealed class ClubService : IClubService
             };
 
             await _clubCommand.AddMemberAsync(member, innerCt).ConfigureAwait(false);
+
+            try
+            {
+                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+            {
+                _clubCommand.Detach(member);
+                return Result<bool>.Success(false);
+            }
+
             await _roomCommand.IncrementClubMembersAsync(clubId, 1, innerCt).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            return Result.Success();
+            return Result<bool>.Success(true);
         }, ct: ct).ConfigureAwait(false);
 
         if (!joinResult.IsSuccess)
@@ -230,22 +243,20 @@ public sealed class ClubService : IClubService
             return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a club owner."));
         }
 
-        var roomMemberships = await _roomQuery.ListMembershipsAsync(clubId, targetUserId, ct).ConfigureAwait(false);
-
         var kickResult = await _uow.ExecuteTransactionAsync(async innerCt =>
         {
-            await _clubCommand.RemoveMemberAsync(clubId, targetUserId, innerCt).ConfigureAwait(false);
-            await _roomCommand.IncrementClubMembersAsync(clubId, -1, innerCt).ConfigureAwait(false);
+            var roomSummaries = await _roomCommand.RemoveMembershipsByClubAsync(clubId, targetUserId, innerCt).ConfigureAwait(false);
 
-            foreach (var roomMember in roomMemberships)
+            foreach (var summary in roomSummaries)
             {
-                await _roomCommand.RemoveMemberAsync(roomMember.RoomId, targetUserId, innerCt).ConfigureAwait(false);
-
-                if (roomMember.Status == RoomMemberStatus.Approved)
+                if (summary.ApprovedRemovedCount > 0)
                 {
-                    await _roomCommand.IncrementRoomMembersAsync(roomMember.RoomId, -1, innerCt).ConfigureAwait(false);
+                    await _roomCommand.IncrementRoomMembersAsync(summary.RoomId, -summary.ApprovedRemovedCount, innerCt).ConfigureAwait(false);
                 }
             }
+
+            await _clubCommand.RemoveMemberAsync(clubId, targetUserId, innerCt).ConfigureAwait(false);
+            await _roomCommand.IncrementClubMembersAsync(clubId, -1, innerCt).ConfigureAwait(false);
 
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result.Success();

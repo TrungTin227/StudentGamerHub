@@ -1,3 +1,5 @@
+using Repositories.Models;
+
 namespace Repositories.Interfaces;
 
 /// <summary>
@@ -32,9 +34,39 @@ public interface IRoomCommandRepository
     Task UpdateMemberAsync(RoomMember member, CancellationToken ct = default);
 
     /// <summary>
-    /// Remove member from room.
+    /// Remove member from room and return previous status if present.
     /// </summary>
-    Task RemoveMemberAsync(Guid roomId, Guid userId, CancellationToken ct = default);
+    Task<RoomMemberStatus?> RemoveMemberAsync(Guid roomId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Detach a tracked room member instance (used after failed inserts).
+    /// </summary>
+    void Detach(RoomMember member);
+
+    /// <summary>
+    /// Get current member status for capacity validations.
+    /// </summary>
+    Task<RoomMemberStatus?> GetMemberStatusAsync(Guid roomId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update member status and joined timestamp.
+    /// </summary>
+    Task UpdateMemberStatusAsync(Guid roomId, Guid userId, RoomMemberStatus status, DateTime joinedAt, Guid updatedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Count approved members in a room.
+    /// </summary>
+    Task<int> CountApprovedMembersAsync(Guid roomId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove all room memberships of a user in a club and return removed approved counts per room.
+    /// </summary>
+    Task<IReadOnlyList<RoomMembershipRemovalSummary>> RemoveMembershipsByClubAsync(Guid clubId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove all room memberships of a user in a community and return removed approved counts per room.
+    /// </summary>
+    Task<IReadOnlyList<RoomMembershipRemovalSummary>> RemoveMembershipsByCommunityAsync(Guid communityId, Guid userId, CancellationToken ct = default);
 
     /// <summary>
     /// Increment/decrement room members count.

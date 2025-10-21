@@ -131,11 +131,4 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         return await query.FirstOrDefaultAsync(ct);
     }
 
-    public async Task<IReadOnlyList<ClubMember>> ListMembershipsAsync(Guid communityId, Guid userId, CancellationToken ct = default)
-    {
-        return await _context.ClubMembers
-            .AsNoTracking()
-            .Where(cm => cm.UserId == userId && cm.Club!.CommunityId == communityId)
-            .ToListAsync(ct);
-    }
 }

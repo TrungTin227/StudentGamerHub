@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
 
 namespace Services.Implementations;
@@ -127,27 +129,21 @@ public sealed class RoomService : IRoomService
         var existingMember = await _roomQuery.GetMemberAsync(roomId, currentUserId, ct).ConfigureAwait(false);
         if (existingMember is not null && existingMember.Status == RoomMemberStatus.Approved)
         {
-            var detail = await _roomQuery.GetDetailsAsync(roomId, currentUserId, ct).ConfigureAwait(false);
-            if (detail is null)
+            var existingDetail = await _roomQuery.GetDetailsAsync(roomId, currentUserId, ct).ConfigureAwait(false);
+            if (existingDetail is null)
             {
                 return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load room details."));
             }
 
-            return Result<RoomDetailDto>.Success(detail.ToRoomDetailDto());
+            return Result<RoomDetailDto>.Success(existingDetail.ToRoomDetailDto());
         }
+
+        var desiredRole = existingMember?.Role ?? RoomRole.Member;
 
         RoomMemberStatus desiredStatus;
         switch (room.JoinPolicy)
         {
             case RoomJoinPolicy.Open:
-                if (room.Capacity.HasValue)
-                {
-                    var approvedCount = await _roomQuery.CountApprovedMembersAsync(roomId, ct).ConfigureAwait(false);
-                    if (approvedCount >= room.Capacity.Value)
-                    {
-                        return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Conflict, "Room is at full capacity."));
-                    }
-                }
                 desiredStatus = RoomMemberStatus.Approved;
                 break;
             case RoomJoinPolicy.RequiresApproval:
@@ -170,43 +166,112 @@ public sealed class RoomService : IRoomService
                 {
                     return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Forbidden, "Invalid password."));
                 }
-
-                if (room.Capacity.HasValue)
-                {
-                    var approvedCount = await _roomQuery.CountApprovedMembersAsync(roomId, ct).ConfigureAwait(false);
-                    if (approvedCount >= room.Capacity.Value)
-                    {
-                        return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Conflict, "Room is at full capacity."));
-                    }
-                }
-
                 desiredStatus = RoomMemberStatus.Approved;
                 break;
             default:
                 return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unsupported join policy."));
         }
 
-        var joinResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        if (existingMember is not null && existingMember.Status == desiredStatus)
         {
-            var member = new RoomMember
+            var detail = await _roomQuery.GetDetailsAsync(roomId, currentUserId, ct).ConfigureAwait(false);
+            if (detail is null)
             {
-                RoomId = roomId,
-                UserId = currentUserId,
-                Role = existingMember?.Role ?? RoomRole.Member,
-                Status = desiredStatus,
-                JoinedAt = existingMember?.JoinedAt ?? DateTime.UtcNow
-            };
-
-            await _roomCommand.UpsertMemberAsync(member, innerCt).ConfigureAwait(false);
-
-            var wasApproved = existingMember?.Status == RoomMemberStatus.Approved;
-            if (!wasApproved && desiredStatus == RoomMemberStatus.Approved)
-            {
-                await _roomCommand.IncrementRoomMembersAsync(roomId, 1, innerCt).ConfigureAwait(false);
+                return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load room details."));
             }
 
-            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            return Result.Success();
+            return Result<RoomDetailDto>.Success(detail.ToRoomDetailDto());
+        }
+
+        var joinResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            var now = DateTime.UtcNow;
+            var currentStatus = await _roomCommand.GetMemberStatusAsync(roomId, currentUserId, innerCt).ConfigureAwait(false);
+
+            if (currentStatus is null)
+            {
+                if (desiredStatus == RoomMemberStatus.Approved && room.Capacity.HasValue)
+                {
+                    var approvedCount = await _roomCommand.CountApprovedMembersAsync(roomId, innerCt).ConfigureAwait(false);
+                    if (approvedCount >= room.Capacity.Value)
+                    {
+                        return Result<RoomMemberStatus>.Failure(new Error(Error.Codes.Conflict, "RoomCapacityExceeded"));
+                    }
+                }
+
+                var newMember = new RoomMember
+                {
+                    RoomId = roomId,
+                    UserId = currentUserId,
+                    Role = desiredRole,
+                    Status = desiredStatus,
+                    JoinedAt = now
+                };
+
+                await _roomCommand.UpsertMemberAsync(newMember, innerCt).ConfigureAwait(false);
+
+                try
+                {
+                    await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                }
+                catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+                {
+                    _roomCommand.Detach(newMember);
+                    currentStatus = await _roomCommand.GetMemberStatusAsync(roomId, currentUserId, innerCt).ConfigureAwait(false);
+                    if (currentStatus is null)
+                    {
+                        return Result<RoomMemberStatus>.Failure(new Error(Error.Codes.Unexpected, "Membership reload failed."));
+                    }
+                }
+                else
+                {
+                    if (desiredStatus == RoomMemberStatus.Approved)
+                    {
+                        await _roomCommand.IncrementRoomMembersAsync(roomId, 1, innerCt).ConfigureAwait(false);
+                    }
+
+                    return Result<RoomMemberStatus>.Success(desiredStatus);
+                }
+            }
+
+            if (currentStatus is null)
+            {
+                return Result<RoomMemberStatus>.Failure(new Error(Error.Codes.Unexpected, "Membership state missing."));
+            }
+
+            var finalStatus = currentStatus.Value;
+
+            if (desiredStatus != finalStatus)
+            {
+                if (desiredStatus == RoomMemberStatus.Approved)
+                {
+                    if (room.Capacity.HasValue)
+                    {
+                        var approvedCount = await _roomCommand.CountApprovedMembersAsync(roomId, innerCt).ConfigureAwait(false);
+                        if (approvedCount >= room.Capacity.Value)
+                        {
+                            return Result<RoomMemberStatus>.Failure(new Error(Error.Codes.Conflict, "RoomCapacityExceeded"));
+                        }
+                    }
+
+                    await _roomCommand.UpdateMemberStatusAsync(roomId, currentUserId, RoomMemberStatus.Approved, now, currentUserId, innerCt).ConfigureAwait(false);
+                    await _roomCommand.IncrementRoomMembersAsync(roomId, 1, innerCt).ConfigureAwait(false);
+                    finalStatus = RoomMemberStatus.Approved;
+                }
+                else
+                {
+                    await _roomCommand.UpdateMemberStatusAsync(roomId, currentUserId, desiredStatus, now, currentUserId, innerCt).ConfigureAwait(false);
+
+                    if (finalStatus == RoomMemberStatus.Approved && desiredStatus != RoomMemberStatus.Approved)
+                    {
+                        await _roomCommand.IncrementRoomMembersAsync(roomId, -1, innerCt).ConfigureAwait(false);
+                    }
+
+                    finalStatus = desiredStatus;
+                }
+            }
+
+            return Result<RoomMemberStatus>.Success(finalStatus);
         }, ct: ct).ConfigureAwait(false);
 
         if (!joinResult.IsSuccess)
@@ -250,9 +315,9 @@ public sealed class RoomService : IRoomService
 
         var kickResult = await _uow.ExecuteTransactionAsync(async innerCt =>
         {
-            await _roomCommand.RemoveMemberAsync(roomId, targetUserId, innerCt).ConfigureAwait(false);
+            var removedStatus = await _roomCommand.RemoveMemberAsync(roomId, targetUserId, innerCt).ConfigureAwait(false);
 
-            if (targetMembership.Status == RoomMemberStatus.Approved)
+            if (removedStatus == RoomMemberStatus.Approved)
             {
                 await _roomCommand.IncrementRoomMembersAsync(roomId, -1, innerCt).ConfigureAwait(false);
             }
@@ -262,6 +327,93 @@ public sealed class RoomService : IRoomService
         }, ct: ct).ConfigureAwait(false);
 
         return kickResult;
+    }
+
+    public async Task<Result> ApproveRoomMemberAsync(Guid roomId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default)
+    {
+        var room = await _roomQuery.GetRoomWithClubCommunityAsync(roomId, ct).ConfigureAwait(false);
+        if (room is null)
+        {
+            return Result.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+        }
+
+        var actorMembership = await _roomQuery.GetMemberAsync(roomId, actorUserId, ct).ConfigureAwait(false);
+        if (actorMembership is null || actorMembership.Status != RoomMemberStatus.Approved || actorMembership.Role != RoomRole.Owner)
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "OwnerOnly"));
+        }
+
+        var approveResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            var status = await _roomCommand.GetMemberStatusAsync(roomId, targetUserId, innerCt).ConfigureAwait(false);
+            if (status is null)
+            {
+                return Result.Failure(new Error(Error.Codes.NotFound, "Member not found."));
+            }
+
+            if (status == RoomMemberStatus.Approved)
+            {
+                return Result.Success();
+            }
+
+            if (status != RoomMemberStatus.Pending)
+            {
+                return Result.Failure(new Error(Error.Codes.Conflict, "InvalidMembershipState"));
+            }
+
+            if (room.Capacity.HasValue)
+            {
+                var approvedCount = await _roomCommand.CountApprovedMembersAsync(roomId, innerCt).ConfigureAwait(false);
+                if (approvedCount >= room.Capacity.Value)
+                {
+                    return Result.Failure(new Error(Error.Codes.Conflict, "RoomCapacityExceeded"));
+                }
+            }
+
+            var now = DateTime.UtcNow;
+            await _roomCommand.UpdateMemberStatusAsync(roomId, targetUserId, RoomMemberStatus.Approved, now, actorUserId, innerCt).ConfigureAwait(false);
+            await _roomCommand.IncrementRoomMembersAsync(roomId, 1, innerCt).ConfigureAwait(false);
+
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+
+        return approveResult;
+    }
+
+    public async Task<Result> RejectRoomMemberAsync(Guid roomId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default)
+    {
+        var room = await _roomQuery.GetRoomWithClubCommunityAsync(roomId, ct).ConfigureAwait(false);
+        if (room is null)
+        {
+            return Result.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+        }
+
+        var actorMembership = await _roomQuery.GetMemberAsync(roomId, actorUserId, ct).ConfigureAwait(false);
+        if (actorMembership is null || actorMembership.Status != RoomMemberStatus.Approved || actorMembership.Role != RoomRole.Owner)
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "OwnerOnly"));
+        }
+
+        var rejectResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            var status = await _roomCommand.GetMemberStatusAsync(roomId, targetUserId, innerCt).ConfigureAwait(false);
+            if (status is null)
+            {
+                return Result.Failure(new Error(Error.Codes.NotFound, "Member not found."));
+            }
+
+            if (status == RoomMemberStatus.Approved)
+            {
+                return Result.Failure(new Error(Error.Codes.Conflict, "InvalidMembershipState"));
+            }
+
+            var now = DateTime.UtcNow;
+            await _roomCommand.UpdateMemberStatusAsync(roomId, targetUserId, RoomMemberStatus.Rejected, now, actorUserId, innerCt).ConfigureAwait(false);
+
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+
+        return rejectResult;
     }
 
     public async Task<Result<RoomDetailDto>> GetByIdAsync(Guid roomId, Guid? currentUserId = null, CancellationToken ct = default)

@@ -63,12 +63,45 @@ public sealed class ClubCommandRepository : IClubCommandRepository
 
     public async Task RemoveMemberAsync(Guid clubId, Guid userId, CancellationToken ct = default)
     {
-        var entity = await _context.ClubMembers
-            .FirstOrDefaultAsync(cm => cm.ClubId == clubId && cm.UserId == userId, ct);
+        await _context.ClubMembers
+            .Where(cm => cm.ClubId == clubId && cm.UserId == userId)
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+    }
 
-        if (entity is not null)
+    public async Task<IReadOnlyList<Guid>> RemoveMembershipsByCommunityAsync(Guid communityId, Guid userId, CancellationToken ct = default)
+    {
+        var clubIds = await _context.ClubMembers
+            .Where(cm => cm.UserId == userId && cm.Club!.CommunityId == communityId)
+            .Select(cm => cm.ClubId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (clubIds.Count == 0)
         {
-            _context.ClubMembers.Remove(entity);
+            return Array.Empty<Guid>();
+        }
+
+        await _context.ClubMembers
+            .Where(cm => cm.UserId == userId && cm.Club!.CommunityId == communityId)
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+
+        return clubIds;
+    }
+
+    public void Detach(ClubMember member)
+    {
+        if (member is null)
+        {
+            return;
+        }
+
+        var entry = _context.Entry(member);
+        if (entry is not null)
+        {
+            entry.State = EntityState.Detached;
         }
     }
 }

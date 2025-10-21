@@ -29,4 +29,9 @@ public interface ICommunityCommandRepository
     /// Remove a community member.
     /// </summary>
     Task RemoveMemberAsync(Guid communityId, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Detach a tracked community member instance (used after failed inserts).
+    /// </summary>
+    void Detach(CommunityMember member);
 }

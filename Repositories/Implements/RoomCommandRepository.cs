@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
 
 namespace Repositories.Implements;
 
@@ -57,20 +58,17 @@ public sealed class RoomCommandRepository : IRoomCommandRepository
     /// </summary>
     public async Task UpsertMemberAsync(RoomMember member, CancellationToken ct = default)
     {
-        var existing = await _context.RoomMembers
-            .FirstOrDefaultAsync(rm => rm.RoomId == member.RoomId && rm.UserId == member.UserId, ct);
+        var updated = await _context.RoomMembers
+            .Where(rm => rm.RoomId == member.RoomId && rm.UserId == member.UserId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(rm => rm.Role, _ => member.Role)
+                .SetProperty(rm => rm.Status, _ => member.Status)
+                .SetProperty(rm => rm.JoinedAt, _ => member.JoinedAt), ct)
+            .ConfigureAwait(false);
 
-        if (existing is null)
+        if (updated == 0)
         {
-            await _context.RoomMembers.AddAsync(member, ct);
-        }
-        else
-        {
-            // Update properties
-            existing.Role = member.Role;
-            existing.Status = member.Status;
-            existing.JoinedAt = member.JoinedAt;
-            _context.RoomMembers.Update(existing);
+            await _context.RoomMembers.AddAsync(member, ct).ConfigureAwait(false);
         }
     }
 
@@ -86,15 +84,116 @@ public sealed class RoomCommandRepository : IRoomCommandRepository
     /// <summary>
     /// Remove member from room.
     /// </summary>
-    public async Task RemoveMemberAsync(Guid roomId, Guid userId, CancellationToken ct = default)
+    public async Task<RoomMemberStatus?> RemoveMemberAsync(Guid roomId, Guid userId, CancellationToken ct = default)
     {
-        var member = await _context.RoomMembers
-            .FirstOrDefaultAsync(rm => rm.RoomId == roomId && rm.UserId == userId, ct);
+        var status = await _context.RoomMembers
+            .Where(rm => rm.RoomId == roomId && rm.UserId == userId)
+            .Select(rm => (RoomMemberStatus?)rm.Status)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
-        if (member is not null)
+        if (status is null)
         {
-            _context.RoomMembers.Remove(member);
+            return null;
         }
+
+        await _context.RoomMembers
+            .Where(rm => rm.RoomId == roomId && rm.UserId == userId)
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+
+        return status;
+    }
+
+    public void Detach(RoomMember member)
+    {
+        if (member is null)
+        {
+            return;
+        }
+
+        var entry = _context.Entry(member);
+        if (entry is not null)
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    public async Task<RoomMemberStatus?> GetMemberStatusAsync(Guid roomId, Guid userId, CancellationToken ct = default)
+    {
+        return await _context.RoomMembers
+            .Where(rm => rm.RoomId == roomId && rm.UserId == userId)
+            .Select(rm => (RoomMemberStatus?)rm.Status)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task UpdateMemberStatusAsync(Guid roomId, Guid userId, RoomMemberStatus status, DateTime joinedAt, Guid updatedBy, CancellationToken ct = default)
+    {
+        await _context.RoomMembers
+            .Where(rm => rm.RoomId == roomId && rm.UserId == userId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(rm => rm.Status, _ => status)
+                .SetProperty(rm => rm.JoinedAt, _ => joinedAt)
+                .SetProperty(rm => rm.UpdatedAtUtc, _ => DateTime.UtcNow)
+                .SetProperty(rm => rm.UpdatedBy, _ => updatedBy), ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<int> CountApprovedMembersAsync(Guid roomId, CancellationToken ct = default)
+    {
+        return await _context.RoomMembers
+            .Where(rm => rm.RoomId == roomId && rm.Status == RoomMemberStatus.Approved)
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<RoomMembershipRemovalSummary>> RemoveMembershipsByClubAsync(Guid clubId, Guid userId, CancellationToken ct = default)
+    {
+        var summaries = await _context.RoomMembers
+            .Where(rm => rm.UserId == userId && rm.Room!.ClubId == clubId)
+            .GroupBy(rm => rm.RoomId)
+            .Select(g => new RoomMembershipRemovalSummary(
+                g.Key,
+                g.Count(rm => rm.Status == RoomMemberStatus.Approved)))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (summaries.Count == 0)
+        {
+            return Array.Empty<RoomMembershipRemovalSummary>();
+        }
+
+        await _context.RoomMembers
+            .Where(rm => rm.UserId == userId && rm.Room!.ClubId == clubId)
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+
+        return summaries;
+    }
+
+    public async Task<IReadOnlyList<RoomMembershipRemovalSummary>> RemoveMembershipsByCommunityAsync(Guid communityId, Guid userId, CancellationToken ct = default)
+    {
+        var summaries = await _context.RoomMembers
+            .Where(rm => rm.UserId == userId && rm.Room!.Club!.CommunityId == communityId)
+            .GroupBy(rm => rm.RoomId)
+            .Select(g => new RoomMembershipRemovalSummary(
+                g.Key,
+                g.Count(rm => rm.Status == RoomMemberStatus.Approved)))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (summaries.Count == 0)
+        {
+            return Array.Empty<RoomMembershipRemovalSummary>();
+        }
+
+        await _context.RoomMembers
+            .Where(rm => rm.UserId == userId && rm.Room!.Club!.CommunityId == communityId)
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+
+        return summaries;
     }
 
     /// <summary>
