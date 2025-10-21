@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
@@ -174,13 +174,13 @@ public sealed class RoomService : IRoomService
 
         if (existingMember is not null && existingMember.Status == desiredStatus)
         {
-            var detail = await _roomQuery.GetDetailsAsync(roomId, currentUserId, ct).ConfigureAwait(false);
-            if (detail is null)
+            var detail0 = await _roomQuery.GetDetailsAsync(roomId, currentUserId, ct).ConfigureAwait(false);
+            if (detail0 is null)
             {
                 return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load room details."));
             }
 
-            return Result<RoomDetailDto>.Success(detail.ToRoomDetailDto());
+            return Result<RoomDetailDto>.Success(detail0.ToRoomDetailDto());
         }
 
         var joinResult = await _uow.ExecuteTransactionAsync(async innerCt =>
@@ -210,20 +210,25 @@ public sealed class RoomService : IRoomService
 
                 await _roomCommand.UpsertMemberAsync(newMember, innerCt).ConfigureAwait(false);
 
+                var saved = false;
                 try
                 {
                     await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                    saved = true;
                 }
                 catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
                 {
                     _roomCommand.Detach(newMember);
+
+                    // Another request inserted concurrently → treat as idempotent: reload status
                     currentStatus = await _roomCommand.GetMemberStatusAsync(roomId, currentUserId, innerCt).ConfigureAwait(false);
                     if (currentStatus is null)
                     {
                         return Result<RoomMemberStatus>.Failure(new Error(Error.Codes.Unexpected, "Membership reload failed."));
                     }
                 }
-                else
+
+                if (saved)
                 {
                     if (desiredStatus == RoomMemberStatus.Approved)
                     {
