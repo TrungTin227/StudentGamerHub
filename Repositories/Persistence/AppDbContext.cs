@@ -21,8 +21,10 @@ namespace Repositories.Persistence
 
         public DbSet<Community> Communities => Set<Community>();
         public DbSet<CommunityGame> CommunityGames => Set<CommunityGame>();
+        public DbSet<CommunityMember> CommunityMembers => Set<CommunityMember>();
 
         public DbSet<Club> Clubs => Set<Club>();
+        public DbSet<ClubMember> ClubMembers => Set<ClubMember>();
         public DbSet<Room> Rooms => Set<Room>();
         public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
 
@@ -52,8 +54,11 @@ namespace Repositories.Persistence
 
             b.Entity<Community>().ToTable("communities");
             b.Entity<CommunityGame>().ToTable("community_games");
+            b.Entity<CommunityMember>().ToTable("community_members");
 
             b.Entity<Club>().ToTable("clubs");
+            b.Entity<ClubMember>().ToTable("club_members");
+            
             b.Entity<Room>().ToTable("rooms");
             b.Entity<RoomMember>().ToTable("room_members");
 
@@ -225,84 +230,115 @@ namespace Repositories.Persistence
             });
 
             b.Entity<CommunityGame>(e =>
-            {
-                e.HasOne(x => x.Community).WithMany(x => x.Games)
-                 .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Cascade);
+       {
+  e.HasOne(x => x.Community).WithMany(x => x.Games)
+         .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Cascade);
 
-                e.HasOne(x => x.Game).WithMany()
-                 .HasForeignKey(x => x.GameId).OnDelete(DeleteBehavior.Cascade);
+          e.HasOne(x => x.Game).WithMany()
+   .HasForeignKey(x => x.GameId).OnDelete(DeleteBehavior.Cascade);
+    
+      // Phase 9: Index for gameId filter in discovery
+           e.HasIndex(x => x.CommunityId).HasDatabaseName("IX_CommunityGame_CommunityId");
+  e.HasIndex(x => x.GameId).HasDatabaseName("IX_CommunityGame_GameId");
+     });
+
+     // ====== CommunityMember ======
+            b.Entity<CommunityMember>(e =>
+            {
+         e.Property(x => x.Role).HasConversion<int>();
                 
-                // Phase 9: Index for gameId filter in discovery
-                e.HasIndex(x => x.CommunityId).HasDatabaseName("IX_CommunityGame_CommunityId");
-                e.HasIndex(x => x.GameId).HasDatabaseName("IX_CommunityGame_GameId");
+  e.HasOne(x => x.Community).WithMany(x => x.Members)
+        .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Restrict);
+
+       e.HasOne(x => x.User).WithMany()
+  .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+
+           e.HasIndex(x => new { x.CommunityId, x.UserId }).IsUnique();
+      e.HasIndex(x => x.UserId).HasDatabaseName("IX_CommunityMembers_UserId");
+     });
+
+     // ====== Clubs ======
+         b.Entity<Club>(e =>
+    {
+    e.HasOne(c => c.Community).WithMany(x => x.Clubs)
+      .HasForeignKey(c => c.CommunityId)
+.OnDelete(DeleteBehavior.Cascade);
+
+          e.HasIndex(c => new { c.CommunityId, c.Name }).IsUnique();
+     
+            // Indexes for club queries
+      e.HasIndex(c => c.CommunityId);
+       e.HasIndex(c => c.MembersCount);
             });
 
-            // ====== Clubs ======
-            b.Entity<Club>(e =>
-            {
-                e.HasOne(c => c.Community).WithMany(x => x.Clubs)
-                 .HasForeignKey(c => c.CommunityId)
-                 .OnDelete(DeleteBehavior.Cascade);
+            // ====== ClubMember ======
+ b.Entity<ClubMember>(e =>
+  {
+    e.Property(x => x.Role).HasConversion<int>();
+      
+     e.HasOne(x => x.Club).WithMany(x => x.Members)
+     .HasForeignKey(x => x.ClubId).OnDelete(DeleteBehavior.Restrict);
 
-                e.HasIndex(c => new { c.CommunityId, c.Name }).IsUnique();
-                
-                // Indexes for club queries
-                e.HasIndex(c => c.CommunityId);
-                e.HasIndex(c => c.MembersCount);
-            });
+    e.HasOne(x => x.User).WithMany()
+     .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+
+    e.HasIndex(x => new { x.ClubId, x.UserId }).IsUnique();
+   e.HasIndex(x => x.UserId).HasDatabaseName("IX_ClubMembers_UserId");
+       });
 
             // ====== Rooms ======
             b.Entity<Room>(e =>
-            {
-                e.Property(x => x.JoinPolicy).HasConversion<string>();
+         {
+         e.Property(x => x.JoinPolicy).HasConversion<string>();
                 e.Property(x => x.JoinPasswordHash).HasMaxLength(256);
 
-                e.HasOne(r => r.Club).WithMany(c => c.Rooms)
-                 .HasForeignKey(r => r.ClubId)
-                 .OnDelete(DeleteBehavior.Cascade);
+ e.HasOne(r => r.Club).WithMany(c => c.Rooms)
+             .HasForeignKey(r => r.ClubId)
+          .OnDelete(DeleteBehavior.Cascade);
 
                 e.HasIndex(r => new { r.ClubId, r.Name }).IsUnique();
                 e.HasCheckConstraint("chk_room_capacity_nonneg", "\"Capacity\" IS NULL OR \"Capacity\" >= 0");
                 
-                // Check constraint: RequiresPassword => JoinPasswordHash must not be null
-                e.HasCheckConstraint("chk_room_password_required", 
-                    "(\"JoinPolicy\" <> '2') OR (\"JoinPasswordHash\" IS NOT NULL)");
-                
+      // Check constraint: RequiresPassword => JoinPasswordHash must not be null
+      e.HasCheckConstraint("chk_room_password_required", 
+                    "(\"JoinPolicy\" <> 'RequiresPassword') OR (\"JoinPasswordHash\" IS NOT NULL)");
+     
                 // Indexes for room queries
-                e.HasIndex(r => r.ClubId);
-                e.HasIndex(r => r.JoinPolicy);
-                e.HasIndex(r => r.MembersCount);
-                e.HasIndex(r => r.Capacity);
-            });
+   e.HasIndex(r => r.ClubId);
+       e.HasIndex(r => r.JoinPolicy);
+    e.HasIndex(r => r.MembersCount);
+         e.HasIndex(r => r.Capacity);
+          });
 
-            // ====== RoomMembers ======
-            b.Entity<RoomMember>(e =>
-            {
-                e.Property(x => x.Role).HasConversion<string>();
-                e.Property(x => x.Status).HasConversion<string>();
+        // ====== RoomMembers ======
+      b.Entity<RoomMember>(e =>
+   {
+           e.Property(x => x.Role).HasConversion<string>();
+      e.Property(x => x.Status).HasConversion<string>();
 
-                e.HasOne(rm => rm.Room).WithMany(r => r.Members)
-                 .HasForeignKey(rm => rm.RoomId)
-                 .OnDelete(DeleteBehavior.Cascade);
+     e.HasOne(rm => rm.Room).WithMany(r => r.Members)
+     .HasForeignKey(rm => rm.RoomId)
+     .OnDelete(DeleteBehavior.Cascade);
 
-                e.HasOne(rm => rm.User).WithMany()
-                 .HasForeignKey(rm => rm.UserId)
-                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(rm => rm.User).WithMany()
+       .HasForeignKey(rm => rm.UserId)
+   .OnDelete(DeleteBehavior.Cascade);
 
-                // PK đã đặt qua [PrimaryKey(RoomId, UserId)]
+    // PK đã đặt qua [PrimaryKey(RoomId, UserId)]
                 e.HasIndex(rm => new { rm.RoomId, rm.UserId }).IsUnique();
-                
-                // Indexes for member queries
-                e.HasIndex(rm => new { rm.RoomId, rm.Status }); // Composite for filtering by room + status
+           
+ // Indexes for member queries
+    e.HasIndex(rm => new { rm.RoomId, rm.Status }); // Composite for filtering by room + status
                 e.HasIndex(rm => rm.Status);
-                e.HasIndex(rm => rm.UserId);
-                
+           e.HasIndex(rm => rm.UserId).HasDatabaseName("IX_RoomMembers_UserId");
+         e.HasIndex(rm => new { rm.RoomId, rm.Status }).HasDatabaseName("IX_RoomMember_RoomId_Status");
+           
                 // Phase 9: Indexes for recent activity tracking (last 48h joins)
-                e.HasIndex(rm => rm.JoinedAt).HasDatabaseName("IX_RoomMember_JoinedAt");
-                e.HasIndex(rm => new { rm.RoomId, rm.JoinedAt }).HasDatabaseName("IX_RoomMember_Room_JoinedAt");
-            });
+         e.HasIndex(rm => rm.JoinedAt).HasDatabaseName("IX_RoomMember_JoinedAt");
+ e.HasIndex(rm => new { rm.RoomId, rm.JoinedAt }).HasDatabaseName("IX_RoomMember_Room_JoinedAt");
+      });
 
-            // ====== Events ======
+    // ====== Events ======
             var providerName = Database.ProviderName ?? string.Empty;
             var isNpgsql = providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
 
@@ -531,13 +567,16 @@ namespace Repositories.Persistence
             // ====== Global Query Filters (soft-delete matching) ======
             b.Entity<Community>().HasQueryFilter(c => !c.IsDeleted);
             b.Entity<CommunityGame>().HasQueryFilter(cg => !cg.Community!.IsDeleted);
+   b.Entity<CommunityMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Community!.IsDeleted);
 
-            b.Entity<Club>().HasQueryFilter(cl => !cl.IsDeleted && !cl.Community!.IsDeleted);
+b.Entity<Club>().HasQueryFilter(cl => !cl.IsDeleted && !cl.Community!.IsDeleted);
+      b.Entity<ClubMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Club!.IsDeleted && !cm.Club!.Community!.IsDeleted);
+            
             b.Entity<Room>().HasQueryFilter(r => !r.IsDeleted && !r.Club!.IsDeleted && !r.Club!.Community!.IsDeleted);
-            b.Entity<RoomMember>().HasQueryFilter(rm => !rm.User!.IsDeleted && !rm.Room!.IsDeleted && !rm.Room!.Club!.IsDeleted && !rm.Room!.Club!.Community!.IsDeleted);
+        b.Entity<RoomMember>().HasQueryFilter(rm => !rm.User!.IsDeleted && !rm.Room!.IsDeleted && !rm.Room!.Club!.IsDeleted && !rm.Room!.Club!.Community!.IsDeleted);
 
-            // (Tuỳ chọn) filter cho Game/UserGame nếu bạn có soft-delete ở Game
-            // b.Entity<Game>().HasQueryFilter(g => !g.IsDeleted);
+      // (Tuỳ chọn) filter cho Game/UserGame nếu bạn có soft-delete ở Game
+       // b.Entity<Game>().HasQueryFilter(g => !g.IsDeleted);
             // b.Entity<UserGame>().HasQueryFilter(ug => !ug.User!.IsDeleted && !ug.Game!.IsDeleted);
 
             // Helper: tự áp cho ISoftDelete còn lại (nếu bạn đã viết extension này)

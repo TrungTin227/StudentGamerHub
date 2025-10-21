@@ -3,12 +3,21 @@
     public enum Gender { Female, Male, Custom }
     public enum FriendStatus { Pending, Accepted, Declined }
     public enum CommunityRole { Owner, Mod, Member }
+    
+  // Unified member role for Community/Club (stored as int: 0=Member, 1=Admin, 2=Owner)
+    public enum MemberRole
+    {
+        Member = 0,
+        Admin = 1,
+        Owner = 2
+    }
+    
     public enum EventMode { Online, Offline }
     public enum EventStatus { Draft, Open, Closed, Completed, Canceled }
     public enum EventRegistrationStatus { Pending, Confirmed, CheckedIn, Canceled, Refunded }
     public enum EscrowStatus { Held, Released, Applied }
     public enum GatewayFeePolicy { OrganizerPays, AttendeePays }
-    public enum TransactionDirection { In, Out }     // In: tiền vào ví, Out: tiền ra ví
+    public enum TransactionDirection { In, Out }   // In: tiền vào ví, Out: tiền ra ví
     public enum TransactionMethod { Wallet, Card, Gateway }
     public enum TransactionStatus { Pending, Succeeded, Failed, Refunded, Disputed }
     public enum PaymentPurpose { TopUp, EventTicket, WalletTopUp }
@@ -19,7 +28,7 @@
         Open = 0,            // ai cũng vào được
         RequiresApproval = 1,// cần duyệt
         RequiresPassword = 2 // cần mật khẩu
-    }
+ }
 
     public enum RoomMemberStatus
     {
@@ -32,7 +41,7 @@
     public enum RoomRole
     {
         Member = 0,
-        Moderator = 1,
+     Moderator = 1,
         Owner = 2
     }
     public enum GameSkillLevel

@@ -90,9 +90,23 @@ public sealed class Community : AuditableEntity
     public int MembersCount { get; set; } = 0;
 
     public List<CommunityGame> Games { get; set; } = new();
-
     public List<Club> Clubs { get; set; } = new();
+    public List<CommunityMember> Members { get; set; } = new();
 }
+
+[PrimaryKey(nameof(CommunityId), nameof(UserId))]
+public sealed class CommunityMember : AuditableEntity
+{
+    public Guid CommunityId { get; set; }
+    public Community? Community { get; set; }
+
+    public Guid UserId { get; set; }
+    public User? User { get; set; }
+
+    public MemberRole Role { get; set; } = MemberRole.Member;
+    public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
+}
+
 public sealed class Club : AuditableEntity
 {
     public Guid CommunityId { get; set; }
@@ -106,7 +120,22 @@ public sealed class Club : AuditableEntity
     public int MembersCount { get; set; } = 0;
 
     public List<Room> Rooms { get; set; } = new();
+    public List<ClubMember> Members { get; set; } = new();
 }
+
+[PrimaryKey(nameof(ClubId), nameof(UserId))]
+public sealed class ClubMember : AuditableEntity
+{
+    public Guid ClubId { get; set; }
+    public Club? Club { get; set; }
+
+    public Guid UserId { get; set; }
+    public User? User { get; set; }
+
+    public MemberRole Role { get; set; } = MemberRole.Member;
+    public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
+}
+
 public sealed class Room : AuditableEntity
 {
     public Guid ClubId { get; set; }
