@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using Services.Common.Abstractions;
 using Services.Configuration;
-using Services.Interfaces;
 using StackExchange.Redis;
 
 namespace WebAPI.Hubs;

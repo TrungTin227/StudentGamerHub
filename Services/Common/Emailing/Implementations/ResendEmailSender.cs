@@ -12,8 +12,8 @@ namespace Services.Common.Emailing.Implementations;
 
 public sealed class ResendEmailSender(
     HttpClient httpClient,
-    IOptions<EmailOptions> emailOptions,
-    IOptions<ResendOptions> resendOptions,
+    IOptionsMonitor<EmailOptions> emailOptions,
+    IOptionsMonitor<ResendOptions> resendOptions,
     ILogger<ResendEmailSender> logger) : IEmailSender
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
@@ -22,8 +22,8 @@ public sealed class ResendEmailSender(
     };
 
     private readonly HttpClient _httpClient = httpClient;
-    private readonly EmailOptions _emailOptions = emailOptions.Value;
-    private readonly ResendOptions _resendOptions = resendOptions.Value;
+    private readonly IOptionsMonitor<EmailOptions> _emailOptions = emailOptions;
+    private readonly IOptionsMonitor<ResendOptions> _resendOptions = resendOptions;
     private readonly ILogger<ResendEmailSender> _logger = logger;
 
     public async Task SendAsync(EmailMessage msg, CancellationToken ct = default)
@@ -34,7 +34,8 @@ public sealed class ResendEmailSender(
             Content = new StringContent(JsonSerializer.Serialize(requestBody, SerializerOptions), Encoding.UTF8, "application/json")
         };
 
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _resendOptions.ApiKey);
+        // Get fresh ApiKey for hot-reload support
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _resendOptions.CurrentValue.ApiKey);
 
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
@@ -49,7 +50,8 @@ public sealed class ResendEmailSender(
 
     private object BuildPayload(EmailMessage msg)
     {
-        var from = msg.From ?? new EmailAddress(_emailOptions.DefaultFrom, _emailOptions.DefaultFromName);
+        var emailOpts = _emailOptions.CurrentValue;
+        var from = msg.From ?? new EmailAddress(emailOpts.DefaultFrom, emailOpts.DefaultFromName);
 
         string? FormatAddress(EmailAddress address)
             => string.IsNullOrWhiteSpace(address.DisplayName)
