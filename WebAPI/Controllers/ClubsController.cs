@@ -15,10 +15,12 @@ namespace WebAPI.Controllers;
 public sealed class ClubsController : ControllerBase
 {
     private readonly IClubService _clubService;
+    private readonly IClubReadService _clubReadService;
 
-    public ClubsController(IClubService clubService)
+    public ClubsController(IClubService clubService, IClubReadService clubReadService)
     {
         _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
+        _clubReadService = clubReadService ?? throw new ArgumentNullException(nameof(clubReadService));
     }
 
     /// <summary>
@@ -201,6 +203,65 @@ public sealed class ClubsController : ControllerBase
     {
         var currentUserId = User.GetUserId();
         var result = await _clubService.GetByIdAsync(id, currentUserId, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// List members of a club with optional filtering and offset pagination.
+    /// </summary>
+    [HttpGet("{clubId:guid}/members")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(OffsetPage<ClubMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ListMembers(
+        Guid clubId,
+        [FromQuery] MemberRole? role = null,
+        [FromQuery(Name = "q")] string? query = null,
+        [FromQuery] string? sort = null,
+        [FromQuery] int? offset = null,
+        [FromQuery] int? limit = null,
+        CancellationToken ct = default)
+    {
+        var filter = new MemberListFilter
+        {
+            Role = role,
+            Query = query,
+            Sort = sort ?? MemberListSort.JoinedAtDesc
+        };
+
+        var sanitizedOffset = Math.Max(offset ?? 0, 0);
+        var sanitizedLimit = Math.Clamp(limit ?? 20, 1, 50);
+        var paging = new OffsetPaging(sanitizedOffset, sanitizedLimit, filter.Sort, false);
+        var currentUserId = User.GetUserId();
+
+        var result = await _clubReadService
+            .ListMembersAsync(clubId, filter, paging, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Get the most recent members who joined the club.
+    /// </summary>
+    [HttpGet("{clubId:guid}/members/recent")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(IReadOnlyList<ClubMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ListRecentMembers(
+        Guid clubId,
+        [FromQuery] int? limit = null,
+        CancellationToken ct = default)
+    {
+        var currentUserId = User.GetUserId();
+        var sanitizedLimit = limit ?? 20;
+
+        var result = await _clubReadService
+            .ListRecentMembersAsync(clubId, sanitizedLimit, currentUserId, ct)
+            .ConfigureAwait(false);
+
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
     }
 }

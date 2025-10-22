@@ -1,4 +1,5 @@
 using BusinessObjects.Common.Pagination;
+using DTOs.Common.Filters;
 using Repositories.Models;
 
 namespace Repositories.Interfaces;
@@ -27,6 +28,23 @@ public interface ICommunityQueryRepository
     /// Determine whether the community still has any approved room members.
     /// </summary>
     Task<bool> HasAnyApprovedRoomsAsync(Guid communityId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List community members with filtering and offset pagination.
+    /// </summary>
+    Task<OffsetPage<CommunityMemberModel>> ListMembersAsync(
+        Guid communityId,
+        MemberListFilter filter,
+        OffsetPaging paging,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetch the most recently joined members limited by <paramref name="limit"/>.
+    /// </summary>
+    Task<IReadOnlyList<CommunityMemberModel>> ListRecentMembersAsync(
+        Guid communityId,
+        int limit,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Search communities with filtering by school, game, visibility, and member count range.

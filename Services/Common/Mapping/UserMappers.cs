@@ -1,5 +1,6 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Repositories.Models;
 
 namespace Services.Common.Mapping
 {
@@ -9,11 +10,28 @@ namespace Services.Common.Mapping
         {
             ArgumentNullException.ThrowIfNull(user);
 
-            return new UserBriefDto(
-                Id: user.Id,
-                UserName: user.UserName ?? string.Empty,
-                AvatarUrl: user.AvatarUrl
-            );
+            return new UserBriefDto
+            {
+                Id = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                FullName = user.FullName,
+                AvatarUrl = user.AvatarUrl,
+                Level = user.Level
+            };
+        }
+
+        public static UserBriefDto ToUserBriefDto(this MemberUserModel model)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+
+            return new UserBriefDto
+            {
+                Id = model.UserId,
+                UserName = model.UserName,
+                FullName = model.FullName,
+                AvatarUrl = model.AvatarUrl,
+                Level = model.Level
+            };
         }
 
         public static FriendDto ToFriendDtoFor(this FriendLink link, Guid requesterId)
@@ -108,7 +126,7 @@ namespace Services.Common.Mapping
                 PhoneNumber: u.PhoneNumber,
                 EmailConfirmed: u.EmailConfirmed,
                 IsLocked: isLocked,
-                CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),                    
+                CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),
                 UpdatedAtUtc: tz.ToVn(u.UpdatedAtUtc ?? DateTime.MinValue),
                 Roles: roles
             );
@@ -163,8 +181,8 @@ namespace Services.Common.Mapping
                 IsLocked: isLocked,
                 CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),
                 UpdatedAtUtc: tz.ToVn(u.UpdatedAtUtc ?? DateTime.MinValue),
-                Roles: roles.ToArray(),
-                Games: games 
+                Roles: roles,
+                Games: games
             );
         }
     }

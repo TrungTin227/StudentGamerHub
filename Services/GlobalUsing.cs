@@ -18,6 +18,7 @@ global using DTOs.Clubs;
 global using DTOs.Rooms;
 global using DTOs.Events;
 global using DTOs.Common;
+global using DTOs.Common.Filters;
 global using DTOs.Registrations;
 global using DTOs.Wallets;
 global using DTOs.Games;

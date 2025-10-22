@@ -253,4 +253,63 @@ public sealed class CommunitiesController : ControllerBase
 
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
     }
+
+    /// <summary>
+    /// List members of a community with optional filtering and offset pagination.
+    /// </summary>
+    [HttpGet("{communityId:guid}/members")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(OffsetPage<CommunityMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ListMembers(
+        Guid communityId,
+        [FromQuery] MemberRole? role = null,
+        [FromQuery(Name = "q")] string? query = null,
+        [FromQuery] string? sort = null,
+        [FromQuery] int? offset = null,
+        [FromQuery] int? limit = null,
+        CancellationToken ct = default)
+    {
+        var filter = new MemberListFilter
+        {
+            Role = role,
+            Query = query,
+            Sort = sort ?? MemberListSort.JoinedAtDesc
+        };
+
+        var sanitizedOffset = Math.Max(offset ?? 0, 0);
+        var sanitizedLimit = Math.Clamp(limit ?? 20, 1, 50);
+        var paging = new OffsetPaging(sanitizedOffset, sanitizedLimit, filter.Sort, false);
+        var currentUserId = User.GetUserId();
+
+        var result = await _communityRead
+            .ListMembersAsync(communityId, filter, paging, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Get the most recent members who joined the community.
+    /// </summary>
+    [HttpGet("{communityId:guid}/members/recent")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(IReadOnlyList<CommunityMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ListRecentMembers(
+        Guid communityId,
+        [FromQuery] int? limit = null,
+        CancellationToken ct = default)
+    {
+        var currentUserId = User.GetUserId();
+        var sanitizedLimit = limit ?? 20;
+
+        var result = await _communityRead
+            .ListRecentMembersAsync(communityId, sanitizedLimit, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
 }
