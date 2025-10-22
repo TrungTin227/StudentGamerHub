@@ -427,6 +427,7 @@ public sealed class AppSeeder : IAppSeeder
     {
         var communities = await _db.Communities
             .AsNoTracking()
+            .Where(c => c.CreatedBy == null)
             .Select(c => c.Id)
             .ToListAsync(ct);
         var games = await _db.Games
@@ -480,6 +481,7 @@ public sealed class AppSeeder : IAppSeeder
     {
         var communities = await _db.Communities
             .AsNoTracking()
+            .Where(c => c.CreatedBy == null)
             .Select(c => new { c.Id, c.Name, c.CreatedAtUtc })
             .ToListAsync(ct);
         if (communities.Count == 0) return;
@@ -488,6 +490,7 @@ public sealed class AppSeeder : IAppSeeder
 
         var existingByCommunity = await _db.Clubs
             .AsNoTracking()
+            .Where(c => c.CreatedBy == null)
             .GroupBy(c => c.CommunityId)
             .ToDictionaryAsync(
                 g => g.Key,
@@ -538,6 +541,7 @@ public sealed class AppSeeder : IAppSeeder
     {
         var clubs = await _db.Clubs
             .AsNoTracking()
+            .Where(c => c.CreatedBy == null)
             .Select(c => new { c.Id, c.CreatedAtUtc })
             .ToListAsync(ct);
         if (clubs.Count == 0) return;
@@ -546,6 +550,7 @@ public sealed class AppSeeder : IAppSeeder
 
         var existingByClub = await _db.Rooms
             .AsNoTracking()
+            .Where(r => r.CreatedBy == null)
             .GroupBy(r => r.ClubId)
             .ToDictionaryAsync(
                 g => g.Key,
@@ -600,6 +605,7 @@ public sealed class AppSeeder : IAppSeeder
     {
         var rooms = await _db.Rooms
             .AsNoTracking()
+            .Where(r => r.CreatedBy == null)
             .Select(r => new { r.Id, r.CreatedAtUtc })
             .ToListAsync(ct);
 
