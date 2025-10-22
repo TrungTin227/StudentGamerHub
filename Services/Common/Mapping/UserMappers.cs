@@ -181,8 +181,8 @@ namespace Services.Common.Mapping
                 IsLocked: isLocked,
                 CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),
                 UpdatedAtUtc: tz.ToVn(u.UpdatedAtUtc ?? DateTime.MinValue),
-                Roles: roles,
-                Games: games
+                Roles: roles.ToArray(),
+                Games: games.ToArray()
             );
         }
     }
