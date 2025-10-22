@@ -4,5 +4,5 @@ namespace Services.Interfaces;
 
 public interface IMembershipReadService
 {
-    Task<Result<MembershipTreeHybridDto>> GetMyMembershipTreeAsync(Guid userId, CancellationToken ct = default);
+    Task<Result<ClubRoomTreeHybridDto>> GetMyClubRoomTreeAsync(Guid userId, CancellationToken ct = default);
 }

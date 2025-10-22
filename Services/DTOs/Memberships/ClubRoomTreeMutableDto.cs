@@ -1,16 +1,9 @@
 namespace Services.DTOs.Memberships;
 
-public sealed class MembershipTreeMutableDto
+public sealed class ClubRoomTreeMutableDto
 {
-    public List<CommunityNode> Communities { get; set; } = new();
+    public List<ClubNode> Clubs { get; set; } = new();
     public OverviewMutable Overview { get; set; } = new();
-
-    public sealed class CommunityNode
-    {
-        public Guid CommunityId { get; set; }
-        public string? CommunityName { get; set; }
-        public List<ClubNode> Clubs { get; set; } = new();
-    }
 
     public sealed class ClubNode
     {
@@ -27,7 +20,6 @@ public sealed class MembershipTreeMutableDto
 
     public sealed class OverviewMutable
     {
-        public int CommunityCount { get; set; }
         public int ClubCount { get; set; }
         public int RoomCount { get; set; }
     }
