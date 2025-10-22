@@ -1,4 +1,6 @@
+using BusinessObjects;
 using BusinessObjects.Common.Pagination;
+using System.Collections.Generic;
 using DTOs.Common.Filters;
 using Microsoft.EntityFrameworkCore;
 using Repositories.Models;
@@ -88,16 +90,33 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
 
     public async Task<PagedResult<RoomDetailModel>> ListByClubAsync(Guid clubId, Guid? currentUserId, PageRequest paging, CancellationToken ct = default)
     {
-        var sort = string.IsNullOrWhiteSpace(paging.Sort) ? nameof(RoomDetailModel.CreatedAtUtc) : paging.Sort!;
+        var requestedSort = string.IsNullOrWhiteSpace(paging.Sort) ? nameof(RoomDetailModel.CreatedAtUtc) : paging.Sort!;
+
+        var sortMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [nameof(RoomDetailModel.Name)] = nameof(Room.Name),
+            [nameof(RoomDetailModel.Description)] = nameof(Room.Description),
+            [nameof(RoomDetailModel.JoinPolicy)] = nameof(Room.JoinPolicy),
+            [nameof(RoomDetailModel.Capacity)] = nameof(Room.Capacity),
+            [nameof(RoomDetailModel.MembersCount)] = nameof(Room.MembersCount),
+            [nameof(RoomDetailModel.CreatedAtUtc)] = nameof(Room.CreatedAtUtc),
+            [nameof(RoomDetailModel.UpdatedAtUtc)] = nameof(Room.UpdatedAtUtc)
+        };
+
+        if (!sortMappings.TryGetValue(requestedSort, out var roomSort))
+        {
+            roomSort = nameof(Room.CreatedAtUtc);
+        }
+
         var sanitized = new PageRequest(
             Page: paging.PageSafe,
             Size: Math.Clamp(paging.SizeSafe, 1, 50),
-            Sort: sort,
+            Sort: roomSort,
             Desc: paging.Desc);
 
         var roomsQuery = _context.Rooms
             .AsNoTracking()
-            .Where(r => r.ClubId == clubId);
+            .Where(r => !r.IsDeleted && r.ClubId == clubId);
 
         var pagedRooms = await roomsQuery
             .ToPagedResultAsync(sanitized, ct)
@@ -121,7 +140,7 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
 
         var owners = await _context.RoomMembers
             .AsNoTracking()
-            .Where(rm => roomIds.Contains(rm.RoomId) && rm.Role == RoomRole.Owner)
+            .Where(rm => roomIds.Contains(rm.RoomId) && !rm.IsDeleted && rm.Role == RoomRole.Owner)
             .GroupBy(rm => rm.RoomId)
             .Select(g => new
             {
@@ -142,7 +161,7 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
         {
             var memberships = await _context.RoomMembers
                 .AsNoTracking()
-                .Where(rm => roomIds.Contains(rm.RoomId) && rm.UserId == currentUserId.Value)
+                .Where(rm => roomIds.Contains(rm.RoomId) && !rm.IsDeleted && rm.UserId == currentUserId.Value)
                 .Select(rm => new
                 {
                     rm.RoomId,
