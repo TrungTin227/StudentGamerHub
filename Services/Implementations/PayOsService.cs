@@ -1,19 +1,12 @@
-using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Net.Http.Json;
-using BusinessObjects;
-using BusinessObjects.Common;
-using BusinessObjects.Common.Results;
-using DTOs.Payments.PayOs;
+﻿using DTOs.Payments.PayOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Repositories.Interfaces;
-using Repositories.WorkSeeds.Extensions;
-using Repositories.WorkSeeds.Interfaces;
 using Services.Configuration;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace Services.Implementations;
 
@@ -59,143 +52,140 @@ public sealed class PayOsService : IPayOsService
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
     }
 
+    // =========================
+    // Create payment link (v2)
+    // =========================
     public async Task<Result<string>> CreatePaymentLinkAsync(PayOsCreatePaymentRequest req, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(req);
 
         try
         {
-            var requestPayload = new
+            var orderCode = req.OrderCode; // LONG
+            var returnUrl = string.IsNullOrWhiteSpace(req.ReturnUrl) ? _config.ReturnUrl : req.ReturnUrl!;
+            var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_config.CancelUrl ?? returnUrl) : req.CancelUrl!;
+            var description = req.Description ?? string.Empty;
+
+            // Signature khi tạo link: HMAC_SHA256 trên chuỗi "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
+            var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl);
+
+            var payload = new
             {
-                orderCode = req.OrderCode,
+                orderCode = orderCode,
                 amount = req.Amount,
-                currency = req.Currency,
-                description = req.Description,
-                returnUrl = string.IsNullOrWhiteSpace(req.ReturnUrl) ? _config.ReturnUrl : req.ReturnUrl,
-                cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_config.CancelUrl ?? req.ReturnUrl ?? _config.ReturnUrl) : req.CancelUrl,
+                description = description,
+                returnUrl = returnUrl,
+                cancelUrl = cancelUrl,
                 buyerName = req.BuyerName,
                 buyerEmail = req.BuyerEmail,
-                buyerPhone = req.BuyerPhone
+                buyerPhone = req.BuyerPhone,
+                signature = createSig
             };
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, BuildPaymentsEndpoint())
+            using var request = new HttpRequestMessage(HttpMethod.Post, BuildPaymentsEndpointV2())
             {
-                Content = JsonContent.Create(requestPayload)
+                Content = JsonContent.Create(payload)
             };
-
-            if (!string.IsNullOrWhiteSpace(_config.ClientId))
-            {
-                request.Headers.TryAddWithoutValidation("x-client-id", _config.ClientId);
-            }
-
-            if (!string.IsNullOrWhiteSpace(_config.ApiKey))
-            {
-                request.Headers.TryAddWithoutValidation("x-api-key", _config.ApiKey);
-            }
+            request.Headers.TryAddWithoutValidation("x-client-id", _config.ClientId);
+            request.Headers.TryAddWithoutValidation("x-api-key", _config.ApiKey);
 
             var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-            var responseBody = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("PayOS create payment link failed with status {StatusCode}. Body={Body}", response.StatusCode, responseBody);
+                _logger.LogWarning("payOS create link failed {Status}. Body={Body}", response.StatusCode, body);
                 return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Failed to create PayOS payment link."));
             }
 
             PayOsPaymentResponse? parsed = null;
             try
             {
-                parsed = JsonSerializer.Deserialize<PayOsPaymentResponse>(responseBody, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                parsed = JsonSerializer.Deserialize<PayOsPaymentResponse>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             }
             catch (JsonException ex)
             {
-                _logger.LogError(ex, "Failed to deserialize PayOS response for OrderCode={OrderCode}", req.OrderCode);
+                _logger.LogError(ex, "Deserialize payOS response failed. Raw={Body}", body);
             }
 
             var checkoutUrl = parsed?.Data?.CheckoutUrl;
             if (string.IsNullOrWhiteSpace(checkoutUrl))
             {
-                _logger.LogWarning("PayOS response missing checkoutUrl for OrderCode={OrderCode}. Body={Body}", req.OrderCode, responseBody);
+                _logger.LogWarning("payOS response missing checkoutUrl. Raw={Body}", body);
                 return Result<string>.Failure(new Error(Error.Codes.Unexpected, "PayOS response missing checkout url."));
             }
 
-            _logger.LogInformation("Created PayOS payment link for OrderCode={OrderCode}", req.OrderCode);
+            _logger.LogInformation("Created payOS link. OrderCode={OrderCode}", orderCode);
             return Result<string>.Success(checkoutUrl);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error when creating PayOS payment link for OrderCode={OrderCode}", req.OrderCode);
+            _logger.LogError(ex, "Unexpected error creating payOS link. OrderCode={OrderCode}", req.OrderCode);
             return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Unexpected error while creating PayOS payment link."));
         }
     }
 
+    // =====================================
+    // Webhook handler (verify + business)
+    // =====================================
     public async Task<Result> HandleWebhookAsync(PayOsWebhookPayload payload, string rawBody, string? signatureHeader, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (string.IsNullOrWhiteSpace(signatureHeader))
+        // payOS đặt signature trong BODY -> ưu tiên kiểm tra từ payload.Signature
+        if (!VerifyWebhookSignature(payload))
         {
-            return Result.Failure(new Error(Error.Codes.Forbidden, "Missing PayOS signature."));
-        }
-
-        if (!VerifyChecksum(rawBody, signatureHeader))
-        {
-            _logger.LogWarning("Invalid PayOS signature for OrderCode={OrderCode}", payload.Data?.OrderCode);
+            _logger.LogWarning("Invalid payOS signature. OrderCode={OrderCode}", payload.Data?.OrderCode);
             return Result.Failure(new Error(Error.Codes.Forbidden, "Invalid signature."));
         }
 
-        if (payload.Data is null || string.IsNullOrWhiteSpace(payload.Data.OrderCode))
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, "Webhook missing order code."));
-        }
+        if (payload.Data is null)
+            return Result.Failure(new Error(Error.Codes.Validation, "Webhook missing data."));
 
-        if (!Guid.TryParse(payload.Data.OrderCode, out var paymentIntentId))
-        {
-            if (!Guid.TryParseExact(payload.Data.OrderCode, "N", out paymentIntentId))
-            {
-                _logger.LogWarning("PayOS webhook order code not a valid GUID: {OrderCode}", payload.Data.OrderCode);
-                return Result.Failure(new Error(Error.Codes.Validation, "Invalid order code."));
-            }
-        }
+        var orderCode = payload.Data.OrderCode;
+        if (orderCode <= 0)
+            return Result.Failure(new Error(Error.Codes.Validation, "Invalid order code."));
 
-        var providerRef = payload.Data.TransactionId ?? payload.Data.PaymentLinkId ?? payload.Data.OrderCode;
-        var status = payload.Data.Status?.Trim() ?? string.Empty;
+        var providerRef = payload.Data.Reference
+                         ?? payload.Data.PaymentLinkId
+                         ?? orderCode.ToString();
+
+        // Thành công khi success==true và code=="00"
+        var isPaid = payload.Success && string.Equals(payload.Code, "00", StringComparison.OrdinalIgnoreCase);
 
         return await _uow.ExecuteTransactionAsync(async innerCt =>
         {
-            var pi = await _paymentIntentRepository.GetByIdAsync(paymentIntentId, innerCt).ConfigureAwait(false);
+            // YÊU CẦU: repo hỗ trợ tìm theo OrderCode (long)
+            var pi = await _paymentIntentRepository.GetByOrderCodeAsync(orderCode, innerCt).ConfigureAwait(false);
             if (pi is null)
             {
-                return Result.Failure(new Error(Error.Codes.NotFound, "Payment intent not found."));
+                _logger.LogInformation("Webhook for unknown OrderCode={OrderCode}. Treat as no-op (return 200).", orderCode);
+                return Result.Success(); // ping hoặc không thuộc hệ thống -> 200 no-op
             }
 
+            // đối chiếu số tiền
             if (payload.Data.Amount != pi.AmountCents)
             {
-                _logger.LogWarning(
-                    "PayOS amount mismatch for PaymentIntent={PaymentIntentId}. Expected={Expected} Actual={Actual}",
-                    paymentIntentId,
-                    pi.AmountCents,
-                    payload.Data.Amount);
+                _logger.LogWarning("Amount mismatch. PI={PI} Expect={Expect} Actual={Actual}", pi.Id, pi.AmountCents, payload.Data.Amount);
                 return Result.Failure(new Error(Error.Codes.Validation, "Amount mismatch."));
             }
 
-            if (!IsSuccessStatus(status))
+            if (!isPaid)
             {
-                pi.Status = PaymentIntentStatus.Canceled;
-                pi.UpdatedBy = pi.UserId;
-                await _paymentIntentRepository.UpdateAsync(pi, innerCt).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-                _logger.LogInformation("Marked PaymentIntent={PaymentIntentId} as canceled due to PayOS status={Status}", paymentIntentId, status);
+                // thanh toán không thành công -> mark canceled (idempotent)
+                if (pi.Status != PaymentIntentStatus.Canceled && pi.Status != PaymentIntentStatus.Succeeded)
+                {
+                    pi.Status = PaymentIntentStatus.Canceled;
+                    pi.UpdatedBy = pi.UserId;
+                    await _paymentIntentRepository.UpdateAsync(pi, innerCt).ConfigureAwait(false);
+                    await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                }
+                _logger.LogInformation("Marked PI={PI} canceled. code={Code} success={Success}", pi.Id, payload.Code, payload.Success);
                 return Result.Success();
             }
 
+            // thành công -> theo mục đích
             return pi.Purpose switch
             {
                 PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(pi, providerRef, innerCt).ConfigureAwait(false),
@@ -206,99 +196,139 @@ public sealed class PayOsService : IPayOsService
         }, ct: ct).ConfigureAwait(false);
     }
 
-    public bool VerifyChecksum(string rawBody, string signatureHeader)
+    // ================
+    // Verify helpers
+    // ================
+    private string BuildCreateSignature(long orderCode, long amount, string description, string returnUrl, string cancelUrl)
     {
-        if (string.IsNullOrWhiteSpace(signatureHeader))
+        // thứ tự alphabet: amount, cancelUrl, description, orderCode, returnUrl
+        var data = $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_config.ChecksumKey));
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLowerInvariant();
+    }
+
+    public bool VerifyWebhookSignature(PayOsWebhookPayload payload)
+    {
+        if (payload is null || payload.Data is null || string.IsNullOrWhiteSpace(payload.Signature))
+            return false;
+        if (string.IsNullOrWhiteSpace(_config.ChecksumKey))
         {
+            _logger.LogWarning("payOS checksum key is not configured.");
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(_config.SecretKey))
+        // 1) Convert Data -> Dictionary và sort theo key
+        var json = JsonSerializer.Serialize(payload.Data);
+        var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json)!;
+
+        string Normalize(object? v)
         {
-            _logger.LogWarning("PayOS secret key is not configured.");
-            return false;
+            if (v is null) return "";
+            if (v is JsonElement je)
+            {
+                if (je.ValueKind == JsonValueKind.Null) return "";
+                if (je.ValueKind == JsonValueKind.Array)
+                {
+                    // mảng -> serialize lại sau khi chuẩn hoá object con (sort key)
+                    var arr = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(je.GetRawText()) ?? new();
+                    var normalized = arr.Select(o =>
+                        o.OrderBy(x => x.Key, StringComparer.Ordinal)
+                         .ToDictionary(x => x.Key, x => x.Value));
+                    return JsonSerializer.Serialize(normalized);
+                }
+                if (je.ValueKind == JsonValueKind.Object)
+                {
+                    var obj = JsonSerializer.Deserialize<Dictionary<string, object?>>(je.GetRawText()) ?? new();
+                    var normalized = obj.OrderBy(x => x.Key, StringComparer.Ordinal)
+                                        .ToDictionary(x => x.Key, x => x.Value);
+                    return JsonSerializer.Serialize(normalized);
+                }
+                return je.ToString() ?? "";
+            }
+            return v.ToString() ?? "";
         }
 
-        var normalizedSignature = signatureHeader.Trim();
-        var payloadBytes = Encoding.UTF8.GetBytes(rawBody ?? string.Empty);
-        var keyBytes = Encoding.UTF8.GetBytes(_config.SecretKey);
+        var ordered = dict.OrderBy(kv => kv.Key, StringComparer.Ordinal);
+        var query = string.Join("&", ordered.Select(kv => $"{kv.Key}={Normalize(kv.Value)}"));
 
-        using var hmac = new HMACSHA256(keyBytes);
-        var computedBytes = hmac.ComputeHash(payloadBytes);
-        var computedSignature = Convert.ToHexString(computedBytes).ToLowerInvariant();
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_config.ChecksumKey));
+        var expectedHex = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(query))).ToLowerInvariant();
 
-        return string.Equals(computedSignature, normalizedSignature, StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expectedHex),
+                Convert.FromHexString(payload.Signature));
+        }
+        catch
+        {
+            return false;
+        }
     }
 
-    private string BuildPaymentsEndpoint()
+    private string BuildPaymentsEndpointV2()
     {
-        var baseUrl = string.IsNullOrWhiteSpace(_config.BaseUrl) ? "https://api.payos.vn/v1" : _config.BaseUrl;
-        return baseUrl.TrimEnd('/') + "/payments";
+        var baseUrl = string.IsNullOrWhiteSpace(_config.BaseUrl) ? "https://api-merchant.payos.vn" : _config.BaseUrl;
+        return baseUrl.TrimEnd('/') + "/v2/payment-requests";
     }
 
-    private static bool IsSuccessStatus(string status)
-    {
-        return status.Equals("PAID", StringComparison.OrdinalIgnoreCase)
-               || status.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase)
-               || status.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase);
-    }
+    // =========================
+    // Business confirm helpers
+    // =========================
+
+    private static bool IsSuccessStatus(string status) =>
+        status.Equals("PAID", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase);
 
     private async Task<Result> ConfirmEventTicketAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
     {
         if (!pi.EventRegistrationId.HasValue)
-        {
             return Result.Failure(new Error(Error.Codes.Validation, "Ticket payment intent missing registration."));
-        }
 
         var registration = await _registrationQueryRepository.GetByIdAsync(pi.EventRegistrationId.Value, ct).ConfigureAwait(false);
         if (registration is null)
-        {
             return Result.Failure(new Error(Error.Codes.NotFound, "Registration not found."));
-        }
 
         if (registration.Status is EventRegistrationStatus.Confirmed or EventRegistrationStatus.CheckedIn)
         {
-            pi.Status = PaymentIntentStatus.Succeeded;
-            pi.UpdatedBy = pi.UserId;
-            await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
             return Result.Success();
         }
 
         if (registration.Status is EventRegistrationStatus.Canceled or EventRegistrationStatus.Refunded)
-        {
             return Result.Failure(new Error(Error.Codes.Conflict, "Registration is no longer active."));
-        }
 
         var ev = await _eventQueryRepository.GetForUpdateAsync(registration.EventId, ct).ConfigureAwait(false)
                  ?? await _eventQueryRepository.GetByIdAsync(registration.EventId, ct).ConfigureAwait(false);
-
-        if (ev is null)
-        {
-            return Result.Failure(new Error(Error.Codes.NotFound, "Event not found."));
-        }
+        if (ev is null) return Result.Failure(new Error(Error.Codes.NotFound, "Event not found."));
 
         if (pi.AmountCents != ev.PriceCents)
-        {
             return Result.Failure(new Error(Error.Codes.Validation, "Payment amount does not match ticket price."));
-        }
 
         if (ev.Capacity.HasValue)
         {
             var confirmedCount = await _eventQueryRepository.CountConfirmedAsync(ev.Id, ct).ConfigureAwait(false);
             if (confirmedCount >= ev.Capacity.Value)
-            {
                 return Result.Failure(new Error(Error.Codes.Forbidden, "Event capacity reached."));
-            }
         }
 
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
         {
-            pi.Status = PaymentIntentStatus.Succeeded;
-            pi.UpdatedBy = pi.UserId;
-            await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
             return Result.Success();
         }
 
@@ -306,10 +336,7 @@ public sealed class PayOsService : IPayOsService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var wallet = await _walletRepository.GetByUserIdAsync(registration.UserId, ct).ConfigureAwait(false);
-        if (wallet is null)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
+        if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
 
         var tx = new Transaction
         {
@@ -325,19 +352,16 @@ public sealed class PayOsService : IPayOsService
             Metadata = CreateMetadata("EVENT_TICKET", ev.Id, null),
             CreatedBy = registration.UserId,
         };
-
         await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
 
         registration.Status = EventRegistrationStatus.Confirmed;
         registration.PaidTransactionId = tx.Id;
         registration.UpdatedBy = registration.UserId;
         registration.UpdatedAtUtc = DateTime.UtcNow;
-
         await _registrationCommandRepository.UpdateAsync(registration, ct).ConfigureAwait(false);
 
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
-
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -347,31 +371,18 @@ public sealed class PayOsService : IPayOsService
     private async Task<Result> ConfirmEscrowTopUpAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
     {
         if (!pi.EventId.HasValue)
-        {
             return Result.Failure(new Error(Error.Codes.Validation, "Top-up intent missing EventId."));
-        }
 
         var ev = await _eventQueryRepository.GetForUpdateAsync(pi.EventId.Value, ct).ConfigureAwait(false)
                  ?? await _eventQueryRepository.GetByIdAsync(pi.EventId.Value, ct).ConfigureAwait(false);
-
-        if (ev is null)
-        {
-            return Result.Failure(new Error(Error.Codes.NotFound, "Event not found for top-up."));
-        }
+        if (ev is null) return Result.Failure(new Error(Error.Codes.NotFound, "Event not found for top-up."));
 
         await _walletRepository.CreateIfMissingAsync(pi.UserId, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var wallet = await _walletRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
-        if (wallet is null)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
-
-        if (pi.AmountCents <= 0)
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
-        }
+        if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
+        if (pi.AmountCents <= 0) return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
 
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
@@ -383,7 +394,6 @@ public sealed class PayOsService : IPayOsService
                 await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
                 await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
             }
-
             return Result.Success();
         }
 
@@ -401,14 +411,10 @@ public sealed class PayOsService : IPayOsService
             Metadata = CreateMetadata("EVENT_ESCROW_TOP_UP", ev.Id, null),
             CreatedBy = pi.UserId,
         };
-
         await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
 
         var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
-        }
+        if (!credited) return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
 
         var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false)
                      ?? new Escrow
@@ -419,18 +425,12 @@ public sealed class PayOsService : IPayOsService
                          Status = EscrowStatus.Held,
                          CreatedBy = pi.UserId,
                      };
-
         escrow.AmountHoldCents += pi.AmountCents;
-        if (escrow.Status != EscrowStatus.Held)
-        {
-            escrow.Status = EscrowStatus.Held;
-        }
-
+        if (escrow.Status != EscrowStatus.Held) escrow.Status = EscrowStatus.Held;
         await _escrowRepository.UpsertAsync(escrow, ct).ConfigureAwait(false);
 
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
-
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -440,9 +440,7 @@ public sealed class PayOsService : IPayOsService
     private async Task<Result> ConfirmWalletTopUpAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
     {
         if (pi.AmountCents <= 0)
-        {
             return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
-        }
 
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
@@ -454,7 +452,6 @@ public sealed class PayOsService : IPayOsService
                 await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
                 await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
             }
-
             return Result.Success();
         }
 
@@ -462,10 +459,7 @@ public sealed class PayOsService : IPayOsService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var wallet = await _walletRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
-        if (wallet is null)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
+        if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
 
         var tx = new Transaction
         {
@@ -488,7 +482,7 @@ public sealed class PayOsService : IPayOsService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            _logger.LogWarning(ex, "Duplicate PayOS transaction detected for ProviderRef={ProviderRef}", providerRef);
+            _logger.LogWarning(ex, "Duplicate payOS tx detected. ProviderRef={ProviderRef}", providerRef);
             if (pi.Status != PaymentIntentStatus.Succeeded)
             {
                 pi.Status = PaymentIntentStatus.Succeeded;
@@ -496,19 +490,14 @@ public sealed class PayOsService : IPayOsService
                 await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
                 await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
             }
-
             return Result.Success();
         }
 
         var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
-        }
+        if (!credited) return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
 
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
-
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -517,21 +506,9 @@ public sealed class PayOsService : IPayOsService
 
     private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)
     {
-        var payload = new Dictionary<string, object?>
-        {
-            ["note"] = note,
-        };
-
-        if (eventId.HasValue)
-        {
-            payload["eventId"] = eventId.Value;
-        }
-
-        if (counterpartyUserId.HasValue)
-        {
-            payload["counterpartyUserId"] = counterpartyUserId.Value;
-        }
-
+        var payload = new Dictionary<string, object?> { ["note"] = note };
+        if (eventId.HasValue) payload["eventId"] = eventId.Value;
+        if (counterpartyUserId.HasValue) payload["counterpartyUserId"] = counterpartyUserId.Value;
         return JsonSerializer.SerializeToDocument(payload);
     }
 }

@@ -287,6 +287,7 @@ public sealed class PaymentIntent : AuditableEntity
     public PaymentIntentStatus Status { get; set; } = PaymentIntentStatus.RequiresPayment;
     public string ClientSecret { get; set; } = default!;
     public DateTime ExpiresAt { get; set; }
+    public long? OrderCode { get; set; } // nullable để migrate dần (sau có thể chuyển sang NOT NULL)
 }
 // GIFTS (đổi quà bằng Points)
 public sealed class Gift : AuditableEntity

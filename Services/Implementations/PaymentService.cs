@@ -1,11 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.Text.Json;
-using DTOs.Payments.PayOs;
+﻿using DTOs.Payments.PayOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Services.Configuration;
 using Services.Interfaces;
+using System;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Services.Implementations;
 
@@ -421,16 +422,18 @@ public sealed class PaymentService : IPaymentService
             }
 
             var cancelUrl = ResolveCancelUrl(returnUrl);
-            var orderCode = pi.Id.ToString();
             var description = BuildDescription(pi);
+
+            // 🔑 đảm bảo có OrderCode số và gán vào PI (TrySetOrderCodeAsync)
+            var orderCode = await EnsureOrderCodeAsync(pi, innerCt).ConfigureAwait(false);
 
             var request = new PayOsCreatePaymentRequest
             {
-                OrderCode = orderCode,
+                OrderCode = orderCode,         // long ✅
                 Amount = pi.AmountCents,
                 Description = description,
                 ReturnUrl = resolvedReturnUrl,
-                CancelUrl = cancelUrl ?? resolvedReturnUrl,
+                CancelUrl = cancelUrl,
             };
 
             var linkResult = await _payOsService.CreatePaymentLinkAsync(request, innerCt).ConfigureAwait(false);
@@ -447,6 +450,25 @@ public sealed class PaymentService : IPaymentService
 
             return Result<string>.Success(linkResult.Value!);
         }, ct: ct).ConfigureAwait(false);
+    }
+    private async Task<long> EnsureOrderCodeAsync(PaymentIntent pi, CancellationToken ct)
+    {
+        if (pi.OrderCode.HasValue && pi.OrderCode.Value > 0) return pi.OrderCode.Value;
+
+        for (var i = 0; i < 5; i++)
+        {
+            var candidate = NewOrderCode();
+            if (await _paymentIntentRepository.TrySetOrderCodeAsync(pi.Id, candidate, ct))
+                return candidate;
+        }
+        throw new InvalidOperationException("Could not reserve unique order code.");
+    }
+
+    private static long NewOrderCode()
+    {
+        var ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() % 1_000_000_000_000L; // 12 digits
+        var rnd = RandomNumberGenerator.GetInt32(100, 1000); // 3 digits
+        return ms * 1000 + rnd; // 15 digits
     }
 
     private string? ResolveReturnUrl(string? requestedReturnUrl)

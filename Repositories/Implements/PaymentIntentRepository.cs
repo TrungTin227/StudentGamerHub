@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
 namespace Repositories.Implements;
 
@@ -55,5 +55,31 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
                         x.Intent.Status == PaymentIntentStatus.RequiresPayment &&
                         x.Intent.ExpiresAt > nowUtc)
             .CountAsync(ct);
+    }
+    public async Task<PaymentIntent?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default)
+    {
+        return await _context.PaymentIntents
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.OrderCode == orderCode, ct);
+    }
+
+    public async Task<bool> TrySetOrderCodeAsync(Guid id, long orderCode, CancellationToken ct = default)
+    {
+        var pi = await _context.PaymentIntents.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (pi is null) return false;
+        if (pi.OrderCode.HasValue) return true; // đã có -> coi như ok (idempotent)
+
+        pi.OrderCode = orderCode;
+        try
+        {
+            await _context.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            // race hoặc trùng số -> revert state, báo false để caller thử số khác
+            _context.Entry(pi).State = EntityState.Unchanged;
+            return false;
+        }
     }
 }
