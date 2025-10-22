@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 using System.Threading.RateLimiting;
+using Services.Implementations.Memberships;
 using Services.Interfaces;
 
 namespace WebApi.Extensions;
@@ -427,6 +428,8 @@ public static class ServiceCollectionExtensions
 
         services.AddProblemDetails();
         services.AddExceptionHandler<AppExceptionHandler>();
+
+        services.AddScoped<IMembershipReadService, MembershipReadService>();
 
         // PayOS configuration and service
         services.Configure<Services.Configuration.PayOsConfig>(configuration.GetSection("PayOS"));
