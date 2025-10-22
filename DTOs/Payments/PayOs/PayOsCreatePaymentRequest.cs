@@ -2,9 +2,8 @@ namespace DTOs.Payments.PayOs;
 
 public sealed record PayOsCreatePaymentRequest
 {
-    public required string OrderCode { get; init; }
-    public required long Amount { get; init; }
-    public string Currency { get; init; } = "VND";
+    public required long OrderCode { get; init; }   // LONG (not Guid/string)
+    public required long Amount { get; init; }      // VND (integer)
     public string Description { get; init; } = string.Empty;
     public string ReturnUrl { get; init; } = string.Empty;
     public string CancelUrl { get; init; } = string.Empty;
