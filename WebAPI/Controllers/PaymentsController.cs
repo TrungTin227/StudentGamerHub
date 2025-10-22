@@ -1,7 +1,10 @@
+using DTOs.Payments.PayOs;
 using DTOs.Registrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using System.Text;
+using System.Text.Json;
 
 namespace WebAPI.Controllers;
 
@@ -12,11 +15,13 @@ public sealed class PaymentsController : ControllerBase
 {
     private readonly IPaymentService _paymentService;
     private readonly IPaymentReadService _paymentReadService;
+    private readonly IPayOsService _payOsService;
 
-    public PaymentsController(IPaymentService paymentService, IPaymentReadService paymentReadService)
+    public PaymentsController(IPaymentService paymentService, IPaymentReadService paymentReadService, IPayOsService payOsService)
     {
         _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
         _paymentReadService = paymentReadService ?? throw new ArgumentNullException(nameof(paymentReadService));
+        _payOsService = payOsService ?? throw new ArgumentNullException(nameof(payOsService));
     }
 
     [HttpPost("{intentId:guid}/confirm")]
@@ -61,9 +66,11 @@ public sealed class PaymentsController : ControllerBase
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
     }
 
-    [HttpPost("{intentId:guid}/vnpay/checkout")]
+
+
+    [HttpPost("payos/create")]
     [EnableRateLimiting("PaymentsWrite")]
-    [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -71,8 +78,13 @@ public sealed class PaymentsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> CreateVnPayCheckout(Guid intentId, [FromBody] VnPayCheckoutRequest? request, CancellationToken ct)
+    public async Task<ActionResult> CreatePayOsCheckout([FromBody] PayOsCheckoutRequest? request, CancellationToken ct)
     {
+        if (request is null || request.IntentId == Guid.Empty)
+        {
+            return this.ToActionResult(Result<string>.Failure(new Error(Error.Codes.Validation, "A valid payment intent is required.")));
+        }
+
         var currentUserId = User.GetUserId();
         if (!currentUserId.HasValue)
         {
@@ -80,65 +92,95 @@ public sealed class PaymentsController : ControllerBase
         }
 
         var clientIp = HttpContext.Connection.RemoteIpAddress?.MapToIPv4().ToString() ?? "127.0.0.1";
-        var returnUrl = request?.ReturnUrl;
-
-        var result = await _paymentService.CreateHostedCheckoutUrlAsync(currentUserId.Value, intentId, returnUrl, clientIp, ct).ConfigureAwait(false);
-        return this.ToActionResult(result, v => new { paymentUrl = v }, StatusCodes.Status200OK);
+        var result = await _paymentService.CreateHostedCheckoutUrlAsync(currentUserId.Value, request.IntentId, request.ReturnUrl, clientIp, ct).ConfigureAwait(false);
+        return this.ToActionResult(result, url => new { checkoutUrl = url }, StatusCodes.Status200OK);
     }
 
-    [HttpPost("webhooks/vnpay")]
+    [HttpPost("payos/webhook")]
     [AllowAnonymous]
     [IgnoreAntiforgeryToken]
     [EnableRateLimiting("PaymentsWebhook")]
-    [ProducesResponseType(typeof(VnPayWebhookResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult> VnPayWebhook(CancellationToken ct)
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<ActionResult> PayOsWebhook(CancellationToken ct)
     {
-        var result = await _paymentService.HandleVnPayCallbackAsync(Request.Query, null, ct).ConfigureAwait(false);
-
-        if (result.IsSuccess)
+        string rawBody;
+        using (var reader = new StreamReader(Request.Body, Encoding.UTF8, leaveOpen: true))
         {
-            return Ok(new VnPayWebhookResponse { RspCode = "00", Message = "Confirm success" });
+            rawBody = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+        }
+        if (Request.Body.CanSeek)
+        {
+            Request.Body.Position = 0;
         }
 
-        // Map error codes to VNPAY response codes
-        var rspCode = result.Error.Code switch
+        PayOsWebhookPayload? payload = null;
+        try
         {
-            Error.Codes.NotFound => "01",
-            Error.Codes.Validation => "97",
-            Error.Codes.Conflict => "94",
-            _ => "99"
-        };
+            payload = JsonSerializer.Deserialize<PayOsWebhookPayload>(rawBody, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (JsonException)
+        {
+            return this.ToActionResult(Result<string>.Failure(new Error(Error.Codes.Validation, "Invalid PayOS webhook payload.")));
+        }
 
-        return Ok(new VnPayWebhookResponse { RspCode = rspCode, Message = result.Error.Message });
+        if (payload is null)
+        {
+            return this.ToActionResult(Result<string>.Failure(new Error(Error.Codes.Validation, "Payload is required.")));
+        }
+
+        string? signatureHeader = null;
+        if (Request.Headers.TryGetValue("x-signature", out var signature))
+        {
+            signatureHeader = signature.ToString();
+        }
+        else if (Request.Headers.TryGetValue("X-Signature", out var signatureAlt))
+        {
+            signatureHeader = signatureAlt.ToString();
+        }
+
+        var result = await _payOsService.HandleWebhookAsync(payload, rawBody, signatureHeader, ct).ConfigureAwait(false);
+        var mapped = result.IsSuccess
+            ? Result<string>.Success("ok")
+            : Result<string>.Failure(result.Error);
+
+        return this.ToActionResult(mapped, v => new { status = v }, StatusCodes.Status200OK);
     }
 
-    [HttpGet("vnpay/return")]
+    [HttpGet("payos/return")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status302Found)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult VnPayReturn()
+    public ActionResult PayOsReturn()
     {
-        var vnpResponseCode = Request.Query["vnp_ResponseCode"].ToString();
-        var vnpTxnRef = Request.Query["vnp_TxnRef"].ToString();
+        var status = Request.Query["status"].ToString();
+        var orderCode = Request.Query["orderCode"].ToString();
 
-        if (vnpResponseCode == "00" && Guid.TryParseExact(vnpTxnRef, "N", out var intentId))
+        if (IsSuccessStatus(status) && Guid.TryParse(orderCode, out var intentId))
         {
-            // Redirect to SPA with success status
             return Redirect($"/payment/result?status=success&intentId={intentId}");
         }
 
-        // Redirect to SPA with failure status
-        return Redirect($"/payment/result?status=failed");
+        return Redirect("/payment/result?status=failed");
+    }
+
+    private static bool IsSuccessStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return false;
+        }
+
+        return status.Equals("PAID", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase);
     }
 }
 
-public sealed record VnPayCheckoutRequest
+public sealed record PayOsCheckoutRequest
 {
-    public string? ReturnUrl { get; set; }
-}
-
-public sealed record VnPayWebhookResponse
-{
-    public string RspCode { get; set; } = default!;
-    public string Message { get; set; } = default!;
+    public Guid IntentId { get; init; }
+    public string? ReturnUrl { get; init; }
 }

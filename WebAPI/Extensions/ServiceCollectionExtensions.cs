@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 using System.Threading.RateLimiting;
+using Services.Interfaces;
 
 namespace WebApi.Extensions;
 
@@ -427,9 +428,9 @@ public static class ServiceCollectionExtensions
         services.AddProblemDetails();
         services.AddExceptionHandler<AppExceptionHandler>();
 
-        // VNPAY configuration and service
-        services.Configure<Services.Configuration.VnPayConfig>(configuration.GetSection("VnPay"));
-        services.AddHttpClient<IVnPayService, Services.Implementations.VnPayService>();
+        // PayOS configuration and service
+        services.Configure<Services.Configuration.PayOsConfig>(configuration.GetSection("PayOS"));
+        services.AddHttpClient<IPayOsService, Services.Implementations.PayOsService>();
 
         services.AddCors(opt =>
         {
