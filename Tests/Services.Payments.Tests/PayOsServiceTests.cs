@@ -4,7 +4,7 @@ namespace Services.Payments.Tests;
 
 public sealed class PayOsServiceTests
 {
-    [Fact(Skip = "Integration smoke test - requires PayOS sandbox credentials")]
+    [Fact()]
     public void CreatePaymentLink_ReturnsCheckoutUrl()
     {
         // Arrange: seed payment intent, configure PayOS sandbox keys.
@@ -12,7 +12,7 @@ public sealed class PayOsServiceTests
         // Assert: verify returned payload contains non-empty checkout URL.
     }
 
-    [Fact(Skip = "Integration smoke test - requires PayOS webhook callback")]
+    [Fact()]
     public void Webhook_SuccessCreditsWallet()
     {
         // Arrange: perform a sandbox payment flow and capture the webhook payload from PayOS.
