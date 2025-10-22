@@ -73,11 +73,14 @@ public sealed class TeammateFinderService : ITeammateFinderService
         {
             Dto = new TeammateDto
             {
-                User = new UserBriefDto(
-                    Id: c.UserId,
-                    UserName: c.FullName ?? c.UserId.ToString(), // Fallback to ID if no name
-                    AvatarUrl: c.AvatarUrl
-                ),
+                User = new UserBriefDto
+                {
+                    Id = c.UserId,
+                    UserName = c.FullName ?? c.UserId.ToString(), // Fallback to ID if no name
+                    FullName = c.FullName,
+                    AvatarUrl = c.AvatarUrl,
+                    Level = 0
+                },
                 IsOnline = onlineMap.TryGetValue(c.UserId, out var online) && online,
                 SharedGames = c.SharedGames
             },

@@ -1,4 +1,5 @@
 using BusinessObjects.Common.Pagination;
+using DTOs.Common.Filters;
 using Repositories.Models;
 
 namespace Repositories.Interfaces;
@@ -38,5 +39,22 @@ public interface IRoomQueryRepository
     /// Determine if a club currently has any active rooms (respecting soft-delete filters).
     /// </summary>
     Task<bool> AnyByClubAsync(Guid clubId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List room members with filtering and offset pagination.
+    /// </summary>
+    Task<OffsetPage<RoomMemberModel>> ListMembersAsync(
+        Guid roomId,
+        RoomMemberListFilter filter,
+        OffsetPaging paging,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetch the most recently joined room members limited by <paramref name="limit"/>.
+    /// </summary>
+    Task<IReadOnlyList<RoomMemberModel>> ListRecentMembersAsync(
+        Guid roomId,
+        int limit,
+        CancellationToken ct = default);
 
 }

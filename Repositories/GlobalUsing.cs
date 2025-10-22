@@ -2,6 +2,7 @@
 global using BusinessObjects.Common;
 global using BusinessObjects.Common.Pagination;
 global using BusinessObjects.Common.Results;
+global using DTOs.Common.Filters;
 global using DTOs.Roles.Filters;
 global using Repositories.Interfaces;
 global using Repositories.Persistence;

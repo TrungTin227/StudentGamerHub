@@ -1,3 +1,5 @@
+using BusinessObjects.Common.Pagination;
+using DTOs.Common.Filters;
 using Repositories.Models;
 
 namespace Repositories.Interfaces;
@@ -57,5 +59,22 @@ public interface IClubQueryRepository
     /// Get projected detail model for API responses.
     /// </summary>
     Task<ClubDetailModel?> GetDetailsAsync(Guid clubId, Guid? currentUserId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List club members with filtering and offset pagination.
+    /// </summary>
+    Task<OffsetPage<ClubMemberModel>> ListMembersAsync(
+        Guid clubId,
+        MemberListFilter filter,
+        OffsetPaging paging,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetch the most recently joined club members limited by <paramref name="limit"/>.
+    /// </summary>
+    Task<IReadOnlyList<ClubMemberModel>> ListRecentMembersAsync(
+        Guid clubId,
+        int limit,
+        CancellationToken ct = default);
 
 }

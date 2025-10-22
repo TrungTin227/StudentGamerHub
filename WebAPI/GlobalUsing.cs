@@ -28,4 +28,5 @@ global using WebAPI.Extensions;
 global using WebAPI.Security;
 global using BusinessObjects.Common;
 global using DTOs.Common;
+global using DTOs.Common.Filters;
 global using DTOs.Events;

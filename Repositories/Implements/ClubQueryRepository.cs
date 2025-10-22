@@ -1,3 +1,5 @@
+using BusinessObjects.Common.Pagination;
+using DTOs.Common.Filters;
 using Microsoft.EntityFrameworkCore;
 using Repositories.Models;
 
@@ -136,6 +138,122 @@ public sealed class ClubQueryRepository : IClubQueryRepository
             ));
 
         return await query.FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<OffsetPage<ClubMemberModel>> ListMembersAsync(
+        Guid clubId,
+        MemberListFilter filter,
+        OffsetPaging paging,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        filter.Normalize();
+
+        var offset = paging.OffsetSafe;
+        var limit = Math.Clamp(paging.LimitSafe, 1, 50);
+
+        var query = _context.ClubMembers
+            .AsNoTracking()
+            .Where(cm => cm.ClubId == clubId)
+            .Join(
+                _context.Users.AsNoTracking(),
+                cm => cm.UserId,
+                u => u.Id,
+                (cm, u) => new
+                {
+                    cm.Role,
+                    cm.JoinedAt,
+                    UserId = u.Id,
+                    UserName = u.UserName ?? string.Empty,
+                    u.FullName,
+                    u.AvatarUrl,
+                    u.Level
+                });
+
+        if (filter.Role.HasValue)
+        {
+            var role = filter.Role.Value;
+            query = query.Where(x => x.Role == role);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Query))
+        {
+            var pattern = $"%{filter.Query!}%";
+            query = query.Where(x =>
+                EF.Functions.ILike(x.FullName ?? string.Empty, pattern) ||
+                EF.Functions.ILike(x.UserName, pattern));
+        }
+
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+
+        var ordered = filter.Sort switch
+        {
+            MemberListSort.NameAsc => query
+                .OrderBy(x => x.FullName ?? x.UserName)
+                .ThenBy(x => x.UserName)
+                .ThenByDescending(x => x.JoinedAt),
+            MemberListSort.NameDesc => query
+                .OrderByDescending(x => x.FullName ?? x.UserName)
+                .ThenByDescending(x => x.UserName)
+                .ThenByDescending(x => x.JoinedAt),
+            MemberListSort.Role => query
+                .OrderBy(x => x.Role == MemberRole.Owner ? 0 : x.Role == MemberRole.Admin ? 1 : 2)
+                .ThenByDescending(x => x.JoinedAt)
+                .ThenBy(x => x.UserId),
+            _ => query
+                .OrderByDescending(x => x.JoinedAt)
+                .ThenBy(x => x.UserId)
+        };
+
+        var items = await ordered
+            .Skip(offset)
+            .Take(limit)
+            .Select(x => new ClubMemberModel(
+                new MemberUserModel(x.UserId, x.UserName, x.FullName, x.AvatarUrl, x.Level),
+                x.Role,
+                x.JoinedAt))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var hasNext = offset + items.Count < total;
+        var hasPrev = offset > 0;
+
+        return new OffsetPage<ClubMemberModel>(items, offset, limit, total, hasPrev, hasNext);
+    }
+
+    public async Task<IReadOnlyList<ClubMemberModel>> ListRecentMembersAsync(
+        Guid clubId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        var sanitizedLimit = Math.Clamp(limit, 1, 50);
+
+        var query = _context.ClubMembers
+            .AsNoTracking()
+            .Where(cm => cm.ClubId == clubId)
+            .Join(
+                _context.Users.AsNoTracking(),
+                cm => cm.UserId,
+                u => u.Id,
+                (cm, u) => new
+                {
+                    cm.Role,
+                    cm.JoinedAt,
+                    UserId = u.Id,
+                    UserName = u.UserName ?? string.Empty,
+                    u.FullName,
+                    u.AvatarUrl,
+                    u.Level
+                })
+            .OrderByDescending(x => x.JoinedAt)
+            .ThenBy(x => x.UserId)
+            .Take(sanitizedLimit)
+            .Select(x => new ClubMemberModel(
+                new MemberUserModel(x.UserId, x.UserName, x.FullName, x.AvatarUrl, x.Level),
+                x.Role,
+                x.JoinedAt));
+
+        return await query.ToListAsync(ct).ConfigureAwait(false);
     }
 
 }

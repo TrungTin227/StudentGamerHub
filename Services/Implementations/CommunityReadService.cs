@@ -54,4 +54,70 @@ public sealed class CommunityReadService : ICommunityReadService
 
         return Result<PagedResult<CommunityDetailDto>>.Success(dtoPage);
     }
+
+    public async Task<Result<OffsetPage<CommunityMemberDto>>> ListMembersAsync(
+        Guid communityId,
+        MemberListFilter filter,
+        OffsetPaging paging,
+        Guid? currentUserId,
+        CancellationToken ct = default)
+    {
+        if (communityId == Guid.Empty)
+        {
+            return Result<OffsetPage<CommunityMemberDto>>.Failure(
+                new Error(Error.Codes.Validation, "CommunityId is required."));
+        }
+
+        ArgumentNullException.ThrowIfNull(filter);
+
+        var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result<OffsetPage<CommunityMemberDto>>.Failure(
+                new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var sanitizedLimit = Math.Clamp(paging.LimitSafe, 1, 50);
+        var sanitizedPaging = new OffsetPaging(paging.OffsetSafe, sanitizedLimit, paging.Sort, paging.Desc);
+
+        var page = await _communityQuery
+            .ListMembersAsync(communityId, filter, sanitizedPaging, ct)
+            .ConfigureAwait(false);
+
+        var dtoPage = page.Map(model => model.ToCommunityMemberDto(currentUserId));
+
+        return Result<OffsetPage<CommunityMemberDto>>.Success(dtoPage);
+    }
+
+    public async Task<Result<IReadOnlyList<CommunityMemberDto>>> ListRecentMembersAsync(
+        Guid communityId,
+        int limit,
+        Guid? currentUserId,
+        CancellationToken ct = default)
+    {
+        if (communityId == Guid.Empty)
+        {
+            return Result<IReadOnlyList<CommunityMemberDto>>.Failure(
+                new Error(Error.Codes.Validation, "CommunityId is required."));
+        }
+
+        var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result<IReadOnlyList<CommunityMemberDto>>.Failure(
+                new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var sanitizedLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
+
+        var members = await _communityQuery
+            .ListRecentMembersAsync(communityId, sanitizedLimit, ct)
+            .ConfigureAwait(false);
+
+        var dtos = members
+            .Select(model => model.ToCommunityMemberDto(currentUserId))
+            .ToList();
+
+        return Result<IReadOnlyList<CommunityMemberDto>>.Success(dtos);
+    }
 }
