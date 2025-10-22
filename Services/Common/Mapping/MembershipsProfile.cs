@@ -4,37 +4,29 @@ namespace Services.Common.Mapping;
 
 public static class MembershipsProfile
 {
-    public static MembershipTreeMutableDto ToMutableDto(this MembershipTreeProjection projection)
+    public static ClubRoomTreeMutableDto ToMutableDto(this ClubRoomTreeProjection projection)
     {
         ArgumentNullException.ThrowIfNull(projection);
 
-        var dto = new MembershipTreeMutableDto
+        var dto = new ClubRoomTreeMutableDto
         {
-            Overview = new MembershipTreeMutableDto.OverviewMutable
+            Overview = new ClubRoomTreeMutableDto.OverviewMutable
             {
-                CommunityCount = projection.Overview.CommunityCount,
                 ClubCount = projection.Overview.ClubCount,
                 RoomCount = projection.Overview.RoomCount
             }
         };
 
-        dto.Communities = projection.Communities
-            .Select(community => new MembershipTreeMutableDto.CommunityNode
+        dto.Clubs = projection.Clubs
+            .Select(club => new ClubRoomTreeMutableDto.ClubNode
             {
-                CommunityId = community.CommunityId,
-                CommunityName = community.CommunityName,
-                Clubs = community.Clubs
-                    .Select(club => new MembershipTreeMutableDto.ClubNode
+                ClubId = club.ClubId,
+                ClubName = club.ClubName,
+                Rooms = club.Rooms
+                    .Select(room => new ClubRoomTreeMutableDto.RoomNode
                     {
-                        ClubId = club.ClubId,
-                        ClubName = club.ClubName,
-                        Rooms = club.Rooms
-                            .Select(room => new MembershipTreeMutableDto.RoomNode
-                            {
-                                RoomId = room.RoomId,
-                                RoomName = room.RoomName
-                            })
-                            .ToList()
+                        RoomId = room.RoomId,
+                        RoomName = room.RoomName
                     })
                     .ToList()
             })
@@ -43,78 +35,60 @@ public static class MembershipsProfile
         return dto;
     }
 
-    public static MembershipTreeImmutableDto ToImmutableDto(this MembershipTreeProjection projection)
+    public static ClubRoomTreeImmutableDto ToImmutableDto(this ClubRoomTreeProjection projection)
     {
         ArgumentNullException.ThrowIfNull(projection);
 
-        var communities = projection.Communities
-            .Select(community => new MembershipTreeImmutableDto.CommunityNode(
-                community.CommunityId,
-                community.CommunityName,
-                community.Clubs
-                    .Select(club => new MembershipTreeImmutableDto.ClubNode(
-                        club.ClubId,
-                        club.ClubName,
-                        club.Rooms
-                            .Select(room => new MembershipTreeImmutableDto.RoomNode(room.RoomId, room.RoomName))
-                            .ToList()))
+        var clubs = projection.Clubs
+            .Select(club => new ClubRoomTreeImmutableDto.ClubNode(
+                club.ClubId,
+                club.ClubName,
+                club.Rooms
+                    .Select(room => new ClubRoomTreeImmutableDto.RoomNode(room.RoomId, room.RoomName))
                     .ToList()))
             .ToList();
 
-        var overview = new MembershipTreeImmutableDto.OverviewImmutable(
-            projection.Overview.CommunityCount,
+        var overview = new ClubRoomTreeImmutableDto.OverviewImmutable(
             projection.Overview.ClubCount,
             projection.Overview.RoomCount);
 
-        return new MembershipTreeImmutableDto(communities, overview);
+        return new ClubRoomTreeImmutableDto(clubs, overview);
     }
 
-    public static MembershipTreeHybridDto ToHybridDto(this MembershipTreeProjection projection)
+    public static ClubRoomTreeHybridDto ToHybridDto(this ClubRoomTreeProjection projection)
     {
         ArgumentNullException.ThrowIfNull(projection);
 
-        var communities = projection.Communities
-            .Select(community => new MembershipTreeHybridDto.CommunityNode(
-                community.CommunityId,
-                community.CommunityName,
-                community.Clubs
-                    .Select(club => new MembershipTreeHybridDto.ClubNode(
-                        club.ClubId,
-                        club.ClubName,
-                        club.Rooms
-                            .Select(room => new MembershipTreeHybridDto.RoomNode(room.RoomId, room.RoomName))
-                            .ToList()))
+        var clubs = projection.Clubs
+            .Select(club => new ClubRoomTreeHybridDto.ClubNode(
+                club.ClubId,
+                club.ClubName,
+                club.Rooms
+                    .Select(room => new ClubRoomTreeHybridDto.RoomNode(room.RoomId, room.RoomName))
                     .ToList()))
             .ToList();
 
-        var overview = new MembershipTreeHybridDto.OverviewHybrid(
-            projection.Overview.CommunityCount,
+        var overview = new ClubRoomTreeHybridDto.OverviewHybrid(
             projection.Overview.ClubCount,
             projection.Overview.RoomCount);
 
-        return MembershipTreeHybridDto.FromBuilder(communities, overview);
+        return ClubRoomTreeHybridDto.FromBuilder(clubs, overview);
     }
 }
 
-public sealed record MembershipTreeProjection(
-    IReadOnlyList<MembershipCommunityProjection> Communities,
-    MembershipOverviewProjection Overview);
+public sealed record ClubRoomTreeProjection(
+    IReadOnlyList<ClubProjection> Clubs,
+    ClubRoomOverviewProjection Overview);
 
-public sealed record MembershipCommunityProjection(
-    Guid CommunityId,
-    string? CommunityName,
-    IReadOnlyList<MembershipClubProjection> Clubs);
-
-public sealed record MembershipClubProjection(
+public sealed record ClubProjection(
     Guid ClubId,
     string? ClubName,
-    IReadOnlyList<MembershipRoomProjection> Rooms);
+    IReadOnlyList<RoomProjection> Rooms);
 
-public sealed record MembershipRoomProjection(
+public sealed record RoomProjection(
     Guid RoomId,
     string? RoomName);
 
-public sealed record MembershipOverviewProjection(
-    int CommunityCount,
+public sealed record ClubRoomOverviewProjection(
     int ClubCount,
     int RoomCount);

@@ -219,12 +219,6 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Club not found."));
         }
 
-        var communityMembership = await _communityQuery.GetMemberAsync(club.CommunityId, currentUserId, ct).ConfigureAwait(false);
-        if (communityMembership is null)
-        {
-            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Conflict, "CommunityMembershipRequired"));
-        }
-
         var existingMembership = await _clubQuery.GetMemberAsync(clubId, currentUserId, ct).ConfigureAwait(false);
         if (existingMembership is not null)
         {
