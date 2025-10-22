@@ -95,36 +95,109 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
             Sort: sort,
             Desc: paging.Desc);
 
-        var query = _context.Rooms
+        var roomsQuery = _context.Rooms
             .AsNoTracking()
-            .Where(r => r.ClubId == clubId)
-            .Select(r => new RoomDetailModel(
-                r.Id,
-                r.ClubId,
-                r.Name,
-                r.Description,
-                r.JoinPolicy,
-                r.Capacity,
-                r.MembersCount,
-                _context.RoomMembers
-                    .Where(rm => rm.RoomId == r.Id && rm.Role == RoomRole.Owner)
-                    .Select(rm => rm.UserId)
-                    .FirstOrDefault(),
-                currentUserId.HasValue && _context.RoomMembers
-                    .Any(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved),
-                currentUserId.HasValue && _context.RoomMembers
-                    .Any(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved && rm.Role == RoomRole.Owner),
-                currentUserId.HasValue
-                    ? _context.RoomMembers
-                        .Where(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value)
-                        .Select(rm => (RoomMemberStatus?)rm.Status)
-                        .FirstOrDefault()
-                    : null,
-                r.CreatedAtUtc,
-                r.UpdatedAtUtc
-            ));
+            .Where(r => r.ClubId == clubId);
 
-        return await query.ToPagedResultAsync(sanitized, ct).ConfigureAwait(false);
+        var pagedRooms = await roomsQuery
+            .ToPagedResultAsync(sanitized, ct)
+            .ConfigureAwait(false);
+
+        if (pagedRooms.Items.Count == 0)
+        {
+            return new PagedResult<RoomDetailModel>(
+                Array.Empty<RoomDetailModel>(),
+                pagedRooms.Page,
+                pagedRooms.Size,
+                pagedRooms.TotalCount,
+                pagedRooms.TotalPages,
+                pagedRooms.HasPrevious,
+                pagedRooms.HasNext,
+                pagedRooms.Sort,
+                pagedRooms.Desc);
+        }
+
+        var roomIds = pagedRooms.Items.Select(r => r.Id).ToArray();
+
+        var owners = await _context.RoomMembers
+            .AsNoTracking()
+            .Where(rm => roomIds.Contains(rm.RoomId) && rm.Role == RoomRole.Owner)
+            .GroupBy(rm => rm.RoomId)
+            .Select(g => new
+            {
+                RoomId = g.Key,
+                OwnerId = g
+                    .OrderBy(rm => rm.JoinedAt)
+                    .Select(rm => rm.UserId)
+                    .FirstOrDefault()
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var ownersMap = owners.ToDictionary(x => x.RoomId, x => x.OwnerId);
+
+        Dictionary<Guid, (RoomMemberStatus Status, RoomRole Role)> membershipMap = new();
+
+        if (currentUserId.HasValue)
+        {
+            var memberships = await _context.RoomMembers
+                .AsNoTracking()
+                .Where(rm => roomIds.Contains(rm.RoomId) && rm.UserId == currentUserId.Value)
+                .Select(rm => new
+                {
+                    rm.RoomId,
+                    rm.Status,
+                    rm.Role
+                })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            membershipMap = memberships
+                .ToDictionary(
+                    x => x.RoomId,
+                    x => (x.Status, x.Role));
+        }
+
+        var items = pagedRooms.Items
+            .Select(r =>
+            {
+                var hasMember = membershipMap.TryGetValue(r.Id, out var memberInfo);
+
+                var ownerId = ownersMap.TryGetValue(r.Id, out var foundOwner)
+                    ? foundOwner
+                    : Guid.Empty;
+
+                var isMember = hasMember && memberInfo.Status == RoomMemberStatus.Approved;
+                var isOwner = isMember && memberInfo.Role == RoomRole.Owner;
+                var membershipStatus = hasMember ? memberInfo.Status : (RoomMemberStatus?)null;
+
+                return new RoomDetailModel(
+                    r.Id,
+                    r.ClubId,
+                    r.Name,
+                    r.Description,
+                    r.JoinPolicy,
+                    r.Capacity,
+                    r.MembersCount,
+                    ownerId,
+                    isMember,
+                    isOwner,
+                    membershipStatus,
+                    r.CreatedAtUtc,
+                    r.UpdatedAtUtc);
+            })
+            .ToList();
+
+        return new PagedResult<RoomDetailModel>(
+            items,
+            pagedRooms.Page,
+            pagedRooms.Size,
+            pagedRooms.TotalCount,
+            pagedRooms.TotalPages,
+            pagedRooms.HasPrevious,
+            pagedRooms.HasNext,
+            pagedRooms.Sort,
+            pagedRooms.Desc);
     }
 
     public async Task<bool> AnyByClubAsync(Guid clubId, CancellationToken ct = default)
