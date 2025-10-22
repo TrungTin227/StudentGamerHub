@@ -18,6 +18,33 @@
         public string SortSafe => string.IsNullOrWhiteSpace(Sort) ? PaginationOptions.DefaultSort : Sort!;
     }
 
+    public sealed record OffsetPaging(
+        int Offset = 0,
+        int Limit = PaginationOptions.DefaultPageSize,
+        string? Sort = null,
+        bool Desc = false)
+    {
+        public int OffsetSafe => Offset < 0 ? 0 : Offset;
+        public int LimitSafe => Math.Clamp(Limit, 1, PaginationOptions.MaxPageSize);
+        public string SortSafe => string.IsNullOrWhiteSpace(Sort) ? PaginationOptions.DefaultSort : Sort!;
+        public int PageSafe
+        {
+            get
+            {
+                var limit = LimitSafe;
+                if (limit == 0)
+                {
+                    limit = PaginationOptions.DefaultPageSize;
+                }
+
+                return (OffsetSafe / limit) + 1;
+            }
+        }
+
+        public PageRequest ToPageRequest()
+            => new(PageSafe, LimitSafe, SortSafe, Desc);
+    }
+
     public sealed record PagedResult<T>(
         IReadOnlyList<T> Items,
         int Page,

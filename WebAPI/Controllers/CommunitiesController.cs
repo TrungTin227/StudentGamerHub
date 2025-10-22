@@ -15,16 +15,16 @@ public sealed class CommunitiesController : ControllerBase
 {
     private readonly ICommunitySearchService _communitySearch;
     private readonly ICommunityService _communityService;
-    private readonly ICommunityDiscoveryService _communityDiscovery;
+    private readonly ICommunityReadService _communityRead;
 
     public CommunitiesController(
         ICommunitySearchService communitySearch,
         ICommunityService communityService,
-        ICommunityDiscoveryService communityDiscovery)
+        ICommunityReadService communityRead)
     {
         _communitySearch = communitySearch ?? throw new ArgumentNullException(nameof(communitySearch));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
-        _communityDiscovery = communityDiscovery ?? throw new ArgumentNullException(nameof(communityDiscovery));
+        _communityRead = communityRead ?? throw new ArgumentNullException(nameof(communityRead));
     }
 
     /// <summary>
@@ -52,6 +52,26 @@ public sealed class CommunitiesController : ControllerBase
 
         var result = await _communityService.CreateCommunityAsync(request, userId.Value, ct);
         return this.ToCreatedAtAction(result, nameof(GetById), result.IsSuccess ? new { id = result.Value!.Id } : null);
+    }
+
+    /// <summary>
+    /// Update editable community fields. Owner only.
+    /// </summary>
+    [HttpPut("{id:guid}")]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(typeof(CommunityDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult> UpdateCommunity(Guid id, [FromBody] CommunityUpdateRequestDto request, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _communityService.UpdateCommunityAsync(id, request, actorId.Value, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
     }
 
     /// <summary>
@@ -89,6 +109,26 @@ public sealed class CommunitiesController : ControllerBase
             return Unauthorized();
 
         var result = await _communityService.KickCommunityMemberAsync(communityId, userId, actorId.Value, ct);
+        return this.ToActionResult(result);
+    }
+
+    /// <summary>
+    /// Soft delete a community. Owner only.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [EnableRateLimiting("CommunitiesWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> DeleteCommunity(Guid id, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _communityService.DeleteCommunityAsync(id, actorId.Value, ct);
         return this.ToActionResult(result);
     }
 
@@ -173,38 +213,44 @@ public sealed class CommunitiesController : ControllerBase
     }
 
     /// <summary>
-    /// Discover popular communities with filtering and stable cursor-based pagination.
-    /// Filters by IsPublic=true (default), optional school (exact match), and game.
-    /// Sorted by popularity:
-    /// 1. MembersCount DESC
-    /// 2. RecentActivity48h DESC (room joins in last 48 hours)
-    /// 3. CreatedAtUtc DESC
-    /// 4. Id ASC (for stable tie-breaking)
+    /// Discover popular communities with optional free-text search.
+    /// Supports offset pagination and ordering by trending (default) or newest.
     /// </summary>
-    /// <param name="school">Filter by school name (case-insensitive exact match)</param>
-    /// <param name="gameId">Filter communities that include this game</param>
-    /// <param name="cursor">Cursor token for pagination (null = first page)</param>
-    /// <param name="size">Page size (default: 20, clamped 1-100)</param>
+    /// <param name="query">Optional search term matched against name and description.</param>
+    /// <param name="offset">Zero-based offset (default 0).</param>
+    /// <param name="limit">Page size (default 20, clamped 1-50).</param>
+    /// <param name="orderBy">Either "trending" (default) or "newest".</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Discovery response with popular communities and next cursor</returns>
+    /// <returns>Paginated discovery result.</returns>
     /// <response code="200">Communities discovered successfully</response>
     /// <response code="400">Invalid request parameters</response>
     /// <response code="401">Not authenticated</response>
     /// <response code="429">Rate limit exceeded</response>
     [HttpGet("discover")]
     [AllowAnonymous] // Public endpoint for discovery
-    [EnableRateLimiting("CommunitiesRead")]
-    [ProducesResponseType(typeof(DiscoverResponse), StatusCodes.Status200OK)]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(PagedResult<CommunityDetailDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult> Discover(
-        [FromQuery] string? school = null,
-        [FromQuery] Guid? gameId = null,
-        [FromQuery] string? cursor = null,
-        [FromQuery] int? size = null,
+        [FromQuery] string? query = null,
+        [FromQuery] int? offset = null,
+        [FromQuery] int? limit = null,
+        [FromQuery] string? orderBy = null,
         CancellationToken ct = default)
     {
-        var result = await _communityDiscovery.DiscoverAsync(school, gameId, cursor, size, ct);
+        var sanitizedOffset = Math.Max(offset ?? 0, 0);
+        var sanitizedLimit = Math.Clamp(limit ?? 20, 1, 50);
+        var paging = new OffsetPaging(sanitizedOffset, sanitizedLimit);
+        var currentUserId = User.GetUserId();
+
+        var result = await _communityRead.SearchDiscoverAsync(
+            currentUserId,
+            query,
+            orderBy ?? "trending",
+            paging,
+            ct);
+
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
     }
 }

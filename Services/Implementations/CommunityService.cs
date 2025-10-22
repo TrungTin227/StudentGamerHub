@@ -94,6 +94,66 @@ public sealed class CommunityService : ICommunityService
         return Result<CommunityDetailDto>.Success(detailModel.ToDetailDto());
     }
 
+    public async Task<Result<CommunityDetailDto>> UpdateCommunityAsync(Guid id, CommunityUpdateRequestDto req, Guid actorId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (id == Guid.Empty)
+        {
+            return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.Validation, "CommunityId is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+        {
+            return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.Validation, "Community name is required."));
+        }
+
+        var name = req.Name.Trim();
+        if (name.Length > 200)
+        {
+            return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.Validation, "Community name must be at most 200 characters."));
+        }
+
+        var community = await _communityQuery.GetByIdAsync(id, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var membership = await _communityQuery.GetMemberAsync(id, actorId, ct).ConfigureAwait(false);
+        if (membership is null || membership.Role != MemberRole.Owner)
+        {
+            return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.Forbidden, "Only community owners can update the community."));
+        }
+
+        community.Name = name;
+        community.Description = NormalizeOrNull(req.Description);
+        community.School = NormalizeOrNull(req.School);
+        community.IsPublic = req.IsPublic;
+        community.UpdatedAtUtc = DateTime.UtcNow;
+        community.UpdatedBy = actorId;
+
+        var updateResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            await _communityCommand.UpdateAsync(community, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+
+        if (!updateResult.IsSuccess)
+        {
+            return Result<CommunityDetailDto>.Failure(updateResult.Error!);
+        }
+
+        var detail = await _communityQuery.GetDetailsAsync(id, actorId, ct).ConfigureAwait(false);
+        if (detail is null)
+        {
+            return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load community details."));
+        }
+
+        return Result<CommunityDetailDto>.Success(detail.ToDetailDto());
+    }
+
     public async Task<Result<CommunityDetailDto>> JoinCommunityAsync(Guid communityId, Guid currentUserId, CancellationToken ct = default)
     {
         var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
@@ -206,6 +266,40 @@ public sealed class CommunityService : ICommunityService
         }, ct: ct).ConfigureAwait(false);
 
         return kickResult;
+    }
+
+    public async Task<Result> DeleteCommunityAsync(Guid id, Guid actorId, CancellationToken ct = default)
+    {
+        if (id == Guid.Empty)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "CommunityId is required."));
+        }
+
+        var community = await _communityQuery.GetByIdAsync(id, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var membership = await _communityQuery.GetMemberAsync(id, actorId, ct).ConfigureAwait(false);
+        if (membership is null || membership.Role != MemberRole.Owner)
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Only community owners can delete the community."));
+        }
+
+        // Require callers to remove dependent clubs before deleting the community.
+        var hasClubs = await _clubQuery.AnyByCommunityAsync(id, ct).ConfigureAwait(false);
+        if (hasClubs)
+        {
+            return Result.Failure(new Error(Error.Codes.Conflict, "CommunityHasActiveClubs"));
+        }
+
+        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            await _communityCommand.SoftDeleteAsync(id, actorId, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
     }
 
     public async Task<Result<CommunityDetailDto>> GetByIdAsync(Guid communityId, Guid? currentUserId = null, CancellationToken ct = default)

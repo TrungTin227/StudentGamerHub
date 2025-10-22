@@ -381,7 +381,7 @@
 | GET    | `/api/communities/{communityId:guid}/clubs` | TODO | `[Authorize]` |
 | POST   | `/api/Clubs`                              | TODO  | `[Authorize]` |
 | GET    | `/api/Clubs/{id:guid}`                    | TODO  | `[Authorize]` |
-| PATCH  | `/api/Clubs/{id:guid}`                    | TODO  | `[Authorize]` |
+| PUT    | `/api/Clubs/{id:guid}`                    | TODO  | `[Authorize]` |
 | DELETE | `/api/Clubs/{id:guid}`                    | TODO  | `[Authorize]` |
 
 **Endpoint Details**
@@ -418,7 +418,7 @@
 </details>
 
 <details>
-<summary><code>PATCH /api/Clubs/{id:guid}</code> — TODO</summary>
+<summary><code>PUT /api/Clubs/{id:guid}</code> — TODO</summary>
 
 - **Auth:** `[Authorize]`  
 - **Rate limit:** `ClubsWrite`  
@@ -450,7 +450,7 @@
 | POST   | `/api/Communities`             | TODO  | `[Authorize]` |
 | GET    | `/api/Communities`             | TODO  | `[Authorize]` |
 | GET    | `/api/Communities/{id:guid}`   | TODO  | `[Authorize]` |
-| PATCH  | `/api/Communities/{id:guid}`   | TODO  | `[Authorize]` |
+| PUT    | `/api/Communities/{id:guid}`   | TODO  | `[Authorize]` |
 | DELETE | `/api/Communities/{id:guid}`   | TODO  | `[Authorize]` |
 | GET    | `/api/Communities/discover`    | TODO  | `AllowAnonymous` |
 
@@ -487,7 +487,7 @@
 </details>
 
 <details>
-<summary><code>PATCH /api/Communities/{id:guid}</code> — TODO</summary>
+<summary><code>PUT /api/Communities/{id:guid}</code> — TODO</summary>
 
 - **Auth:** `[Authorize]`  
 - **Rate limit:** `CommunitiesWrite`  
@@ -513,7 +513,7 @@
 - **Auth:** `AllowAnonymous`  
 - **Rate limit:** `CommunitiesRead`  
 - **Query:** `school?: string`, `gameId?: Guid`, `cursor?: string`, `size?: int`  
-- **Responses:** `200 DiscoverResponse`; `400/429 ProblemDetails`  
+- **Responses:** `200 PagedResult<CommunityDetailDto>`; `400/429 ProblemDetails`
 - **Code:** `WebAPI/Controllers/CommunitiesController.cs:L208`
 </details>
 
@@ -1009,7 +1009,7 @@
 | POST   | `/api/Rooms/{id:guid}/approve/{userId:guid}` | TODO  | `[Authorize]` |
 | POST   | `/api/Rooms/{id:guid}/leave`                 | TODO  | `[Authorize]` |
 | POST   | `/api/Rooms/{id:guid}/kickban/{userId:guid}` | TODO  | `[Authorize]` |
-| PATCH  | `/api/Rooms/{id:guid}`                       | TODO  | `[Authorize]` |
+| PUT    | `/api/Rooms/{id:guid}`                       | TODO  | `[Authorize]` |
 | POST   | `/api/Rooms/{id:guid}/transfer-ownership/{newOwnerId:guid}` | TODO | `[Authorize]` |
 | DELETE | `/api/Rooms/{id:guid}`                       | TODO  | `[Authorize]` |
 
@@ -1089,7 +1089,7 @@
 </details>
 
 <details>
-<summary><code>PATCH /api/Rooms/{id:guid}</code> — TODO</summary>
+<summary><code>PUT /api/Rooms/{id:guid}</code> — TODO</summary>
 
 - **Auth:** `[Authorize]`  
 - **Rate limit:** `RoomsWrite`  

@@ -11,4 +11,6 @@ public interface IRoomService
     Task<Result> ApproveRoomMemberAsync(Guid roomId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default);
     Task<Result> RejectRoomMemberAsync(Guid roomId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default);
     Task<Result<RoomDetailDto>> GetByIdAsync(Guid roomId, Guid? currentUserId = null, CancellationToken ct = default);
+    Task<Result<RoomDetailDto>> UpdateRoomAsync(Guid id, RoomUpdateRequestDto req, Guid actorId, CancellationToken ct = default);
+    Task<Result> DeleteRoomAsync(Guid id, Guid actorId, CancellationToken ct = default);
 }

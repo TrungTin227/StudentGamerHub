@@ -109,6 +109,23 @@ public sealed class ClubsController : ControllerBase
         return this.ToCreatedAtAction(result, nameof(GetClubById), result.IsSuccess ? new { id = result.Value!.Id } : null);
     }
 
+    [HttpPut("{id:guid}")]
+    [EnableRateLimiting("ClubsWrite")]
+    [ProducesResponseType(typeof(ClubDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult> UpdateClub(Guid id, [FromBody] ClubUpdateRequestDto request, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _clubService.UpdateClubAsync(id, request, actorId.Value, ct);
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
     /// <summary>
     /// Join a club. Requires community membership and is idempotent if already joined.
     /// </summary>
@@ -126,6 +143,23 @@ public sealed class ClubsController : ControllerBase
 
         var result = await _clubService.JoinClubAsync(clubId, userId.Value, ct);
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    [HttpDelete("{id:guid}")]
+    [EnableRateLimiting("ClubsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> DeleteClub(Guid id, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (actorId is null)
+            return Unauthorized();
+
+        var result = await _clubService.DeleteClubAsync(id, actorId.Value, ct);
+        return this.ToActionResult(result);
     }
 
     /// <summary>

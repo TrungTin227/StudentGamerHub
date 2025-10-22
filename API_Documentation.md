@@ -221,21 +221,21 @@ Student Gamer Hub is a platform for gaming communities, providing features like 
   - Rate Limit: CommunitiesRead
   - Returns: `200 OK` with `CommunityDetailDto`
 
-- **PATCH** `/{id}` - Update community metadata
+- **PUT** `/{id}` - Update community metadata (owner only)
   - Body: `CommunityUpdateRequestDto`
   - Rate Limit: CommunitiesWrite
-  - Returns: `204 No Content` or error
+  - Returns: `200 OK` with updated `CommunityDetailDto`
 
-- **DELETE** `/{id}` - Archive community (soft delete)
+- **DELETE** `/{id}` - Archive community (soft delete, owner only)
   - Rate Limit: CommunitiesWrite
-  - Returns: `204 No Content` or error
+  - Returns: `204 No Content` (conflict if clubs remain)
 
 #### Community Discovery
 - **GET** `/discover` - Discover popular communities (Public)
-  - Query: `school`, `gameId`, `cursor`, `size`
+  - Query: `query`, `offset`, `limit`, `orderBy=trending|newest`
   - Rate Limit: CommunitiesRead
-  - Returns: `200 OK` with `DiscoverResponse`
-  - Sorted by popularity metrics
+  - Returns: `200 OK` with `PagedResult<CommunityDetailDto>`
+  - Sorted by popularity (`trending`) or creation date (`newest`)
 
 ### ClubsController (`/api/clubs`)
 
@@ -249,14 +249,14 @@ Student Gamer Hub is a platform for gaming communities, providing features like 
   - Rate Limit: ClubsRead
   - Returns: `200 OK` with `ClubDetailDto`
 
-- **PATCH** `/{id}` - Update club information
+- **PUT** `/{id}` - Update club information (owner only)
   - Body: `ClubUpdateRequestDto`
   - Rate Limit: ClubsWrite
-  - Returns: `204 No Content` or error
+  - Returns: `200 OK` with `ClubDetailDto`
 
-- **DELETE** `/{id}` - Archive club (soft delete)
+- **DELETE** `/{id}` - Archive club (soft delete, owner only)
   - Rate Limit: ClubsWrite
-  - Returns: `204 No Content` or error
+  - Returns: `204 No Content` (conflict if rooms remain)
 
 #### Club Search
 - **GET** `/api/communities/{communityId}/clubs` - Search clubs in community

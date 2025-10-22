@@ -1,3 +1,4 @@
+using BusinessObjects.Common.Pagination;
 using Repositories.Models;
 
 namespace Repositories.Interfaces;
@@ -27,5 +28,15 @@ public interface IRoomQueryRepository
     /// Projected room detail for API responses.
     /// </summary>
     Task<RoomDetailModel?> GetDetailsAsync(Guid roomId, Guid? currentUserId, CancellationToken ct = default);
+
+    /// <summary>
+    /// List rooms within a club with pagination and membership flags.
+    /// </summary>
+    Task<PagedResult<RoomDetailModel>> ListByClubAsync(Guid clubId, Guid? currentUserId, PageRequest paging, CancellationToken ct = default);
+
+    /// <summary>
+    /// Determine if a club currently has any active rooms (respecting soft-delete filters).
+    /// </summary>
+    Task<bool> AnyByClubAsync(Guid clubId, CancellationToken ct = default);
 
 }

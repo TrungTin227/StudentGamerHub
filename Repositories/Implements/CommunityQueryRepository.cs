@@ -1,3 +1,4 @@
+using BusinessObjects.Common.Pagination;
 using Microsoft.EntityFrameworkCore;
 using Repositories.Models;
 
@@ -123,5 +124,83 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
         );
 
         return (result.Items, result.NextCursor);
+    }
+
+    public async Task<PagedResult<CommunityDetailModel>> SearchDiscoverAsync(
+        Guid? currentUserId,
+        string? query,
+        bool orderByTrending,
+        PageRequest paging,
+        CancellationToken ct = default)
+    {
+        var normalizedQuery = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
+        var page = paging.PageSafe;
+        var size = Math.Clamp(paging.SizeSafe, 1, 50);
+
+        IQueryable<Community> baseQuery = _context.Communities.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(normalizedQuery))
+        {
+            var term = normalizedQuery.ToUpperInvariant();
+            baseQuery = baseQuery.Where(c =>
+                c.Name.ToUpper().Contains(term) ||
+                (c.Description ?? string.Empty).ToUpper().Contains(term));
+        }
+
+        var total = await baseQuery.CountAsync(ct).ConfigureAwait(false);
+
+        var projection = baseQuery.Select(c => new CommunityDetailModel(
+            c.Id,
+            c.Name,
+            c.Description,
+            c.School,
+            c.IsPublic,
+            c.MembersCount,
+            c.Clubs.Count(),
+            _context.CommunityMembers
+                .Where(cm => cm.CommunityId == c.Id && cm.Role == MemberRole.Owner)
+                .Select(cm => cm.UserId)
+                .FirstOrDefault(),
+            currentUserId.HasValue && _context.CommunityMembers
+                .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value),
+            currentUserId.HasValue && _context.CommunityMembers
+                .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value && cm.Role == MemberRole.Owner),
+            c.CreatedAtUtc,
+            c.UpdatedAtUtc
+        ));
+
+        IOrderedQueryable<CommunityDetailModel> ordered = orderByTrending
+            ? projection
+                .OrderByDescending(c => c.MembersCount)
+                .ThenByDescending(c => c.ClubsCount)
+                .ThenByDescending(c => c.CreatedAtUtc)
+                .ThenBy(c => c.Id)
+            : projection
+                .OrderByDescending(c => c.CreatedAtUtc)
+                .ThenByDescending(c => c.MembersCount)
+                .ThenBy(c => c.Id);
+
+        var skip = (page - 1) * size;
+        var items = await ordered
+            .Skip(skip)
+            .Take(size)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
+        var hasPrev = page > 1 && total > 0;
+        var hasNext = totalPages > 0 && page < totalPages;
+        var sortLabel = orderByTrending ? nameof(Community.MembersCount) : nameof(Community.CreatedAtUtc);
+
+        return new PagedResult<CommunityDetailModel>(
+            items,
+            page,
+            size,
+            total,
+            totalPages,
+            hasPrev,
+            hasNext,
+            sortLabel,
+            true);
     }
 }
