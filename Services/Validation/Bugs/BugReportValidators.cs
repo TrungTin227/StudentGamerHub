@@ -1,8 +1,9 @@
+using DTOs.Bugs;
 using FluentValidation;
 
 namespace Services.Validation.Bugs;
 
-public sealed class BugReportCreateValidator : AbstractValidator<DTOs.Bugs.BugReportCreateRequest>
+public sealed class BugReportCreateValidator : AbstractValidator<BugReportCreateRequest>
 {
     public BugReportCreateValidator()
     {
@@ -22,7 +23,7 @@ public sealed class BugReportCreateValidator : AbstractValidator<DTOs.Bugs.BugRe
     }
 }
 
-public sealed class BugReportStatusPatchValidator : AbstractValidator<DTOs.Bugs.BugReportStatusPatchRequest>
+public sealed class BugReportStatusPatchValidator : AbstractValidator<BugReportStatusPatchRequest>
 {
     private static readonly string[] AllowedStatuses = { "Open", "InProgress", "Resolved", "Rejected" };
 

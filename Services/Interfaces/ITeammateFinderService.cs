@@ -18,7 +18,7 @@ public interface ITeammateFinderService
     /// <param name="cursor">Cursor pagination request</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Result containing cursor-paginated TeammateDto list</returns>
-    Task<Result<CursorPageResult<DTOs.Teammates.TeammateDto>>> SearchAsync(
+    Task<Result<CursorPageResult<TeammateDto>>> SearchAsync(
         Guid currentUserId,
         Guid? gameId,
         string? university,
