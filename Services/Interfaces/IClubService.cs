@@ -32,4 +32,6 @@ public interface IClubService
     Task<Result<ClubDetailDto>> JoinClubAsync(Guid clubId, Guid currentUserId, CancellationToken ct = default);
     Task<Result> KickClubMemberAsync(Guid clubId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default);
     Task<Result<ClubDetailDto>> GetByIdAsync(Guid clubId, Guid? currentUserId = null, CancellationToken ct = default);
+    Task<Result<ClubDetailDto>> UpdateClubAsync(Guid id, ClubUpdateRequestDto req, Guid actorId, CancellationToken ct = default);
+    Task<Result> DeleteClubAsync(Guid id, Guid actorId, CancellationToken ct = default);
 }

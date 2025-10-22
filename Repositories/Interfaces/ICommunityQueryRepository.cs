@@ -1,3 +1,4 @@
+using BusinessObjects.Common.Pagination;
 using Repositories.Models;
 
 namespace Repositories.Interfaces;
@@ -46,5 +47,15 @@ public interface ICommunityQueryRepository
         int? membersFrom,
         int? membersTo,
         CursorRequest cursor,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Discover communities using offset pagination with optional free-text filtering.
+    /// </summary>
+    Task<PagedResult<CommunityDetailModel>> SearchDiscoverAsync(
+        Guid? currentUserId,
+        string? query,
+        bool orderByTrending,
+        PageRequest paging,
         CancellationToken ct = default);
 }

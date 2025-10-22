@@ -73,6 +73,13 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         return (result.Items, result.NextCursor);
     }
 
+    public async Task<bool> AnyByCommunityAsync(Guid communityId, CancellationToken ct = default)
+    {
+        return await _context.Clubs
+            .AnyAsync(c => c.CommunityId == communityId, ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Check if a club still has approved room members.
     /// </summary>
