@@ -129,7 +129,7 @@ public sealed class CommunitiesController : ControllerBase
             return Unauthorized();
 
         var result = await _communityService.DeleteCommunityAsync(id, actorId.Value, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 
     /// <summary>

@@ -159,7 +159,7 @@ public sealed class ClubsController : ControllerBase
             return Unauthorized();
 
         var result = await _clubService.DeleteClubAsync(id, actorId.Value, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 
     /// <summary>

@@ -115,7 +115,7 @@ public sealed class RoomsController : ControllerBase
             return Unauthorized();
 
         var result = await _roomService.DeleteRoomAsync(id, actorId.Value, ct);
-        return this.ToActionResult(result, successStatus: StatusCodes.Status204NoContent);
+        return this.ToActionResult(result);
     }
 
     [HttpDelete("{roomId:guid}/members/{userId:guid}")]

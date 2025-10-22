@@ -201,6 +201,6 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
             hasPrev,
             hasNext,
             sortLabel,
-            desc: true);
+            true);
     }
 }
