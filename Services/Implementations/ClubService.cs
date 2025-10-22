@@ -152,6 +152,65 @@ public sealed class ClubService : IClubService
         return Result<ClubDetailDto>.Success(detailModel.ToClubDetailDto());
     }
 
+    public async Task<Result<ClubDetailDto>> UpdateClubAsync(Guid id, ClubUpdateRequestDto req, Guid actorId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (id == Guid.Empty)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Validation, "ClubId is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Validation, "Club name is required."));
+        }
+
+        var name = req.Name.Trim();
+        if (name.Length > 200)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Validation, "Club name must be at most 200 characters."));
+        }
+
+        var club = await _clubQuery.GetByIdAsync(id, ct).ConfigureAwait(false);
+        if (club is null)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Club not found."));
+        }
+
+        var membership = await _clubQuery.GetMemberAsync(id, actorId, ct).ConfigureAwait(false);
+        if (membership is null || membership.Role != MemberRole.Owner)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Forbidden, "Only club owners can update the club."));
+        }
+
+        club.Name = name;
+        club.Description = NormalizeOrNull(req.Description);
+        club.IsPublic = req.IsPublic;
+        club.UpdatedAtUtc = DateTime.UtcNow;
+        club.UpdatedBy = actorId;
+
+        var updateResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            await _clubCommand.UpdateAsync(club, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+
+        if (!updateResult.IsSuccess)
+        {
+            return Result<ClubDetailDto>.Failure(updateResult.Error!);
+        }
+
+        var detail = await _clubQuery.GetDetailsAsync(id, actorId, ct).ConfigureAwait(false);
+        if (detail is null)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load club details."));
+        }
+
+        return Result<ClubDetailDto>.Success(detail.ToClubDetailDto());
+    }
+
     public async Task<Result<ClubDetailDto>> JoinClubAsync(Guid clubId, Guid currentUserId, CancellationToken ct = default)
     {
         var club = await _clubQuery.GetByIdAsync(clubId, ct).ConfigureAwait(false);
@@ -216,6 +275,40 @@ public sealed class ClubService : IClubService
         }
 
         return Result<ClubDetailDto>.Success(detail.ToClubDetailDto());
+    }
+
+    public async Task<Result> DeleteClubAsync(Guid id, Guid actorId, CancellationToken ct = default)
+    {
+        if (id == Guid.Empty)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "ClubId is required."));
+        }
+
+        var club = await _clubQuery.GetByIdAsync(id, ct).ConfigureAwait(false);
+        if (club is null)
+        {
+            return Result.Failure(new Error(Error.Codes.NotFound, "Club not found."));
+        }
+
+        var membership = await _clubQuery.GetMemberAsync(id, actorId, ct).ConfigureAwait(false);
+        if (membership is null || membership.Role != MemberRole.Owner)
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Only club owners can delete the club."));
+        }
+
+        // Force explicit room cleanup before deleting the parent club.
+        var hasRooms = await _roomQuery.AnyByClubAsync(id, ct).ConfigureAwait(false);
+        if (hasRooms)
+        {
+            return Result.Failure(new Error(Error.Codes.Conflict, "ClubHasRooms"));
+        }
+
+        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            await _clubCommand.SoftDeleteAsync(id, actorId, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
     }
 
     public async Task<Result> KickClubMemberAsync(Guid clubId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default)

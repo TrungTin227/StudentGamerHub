@@ -9,4 +9,6 @@ public interface ICommunityService
     Task<Result<CommunityDetailDto>> JoinCommunityAsync(Guid communityId, Guid currentUserId, CancellationToken ct = default);
     Task<Result> KickCommunityMemberAsync(Guid communityId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default);
     Task<Result<CommunityDetailDto>> GetByIdAsync(Guid communityId, Guid? currentUserId = null, CancellationToken ct = default);
+    Task<Result<CommunityDetailDto>> UpdateCommunityAsync(Guid id, CommunityUpdateRequestDto req, Guid actorId, CancellationToken ct = default);
+    Task<Result> DeleteCommunityAsync(Guid id, Guid actorId, CancellationToken ct = default);
 }

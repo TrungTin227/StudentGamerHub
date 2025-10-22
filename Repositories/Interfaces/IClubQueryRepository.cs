@@ -29,6 +29,11 @@ public interface IClubQueryRepository
         CancellationToken ct = default);
 
     /// <summary>
+    /// Determine whether a community currently has any non-deleted clubs.
+    /// </summary>
+    Task<bool> AnyByCommunityAsync(Guid communityId, CancellationToken ct = default);
+
+    /// <summary>
     /// Determine whether the club has any approved room members.
     /// </summary>
     /// <param name="clubId">Club ID</param>

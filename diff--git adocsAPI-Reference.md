@@ -110,12 +110,12 @@ PATCH /api/BugReports/{id:guid}/status	TODO
 ClubsController	5	GET /api/communities/{communityId:guid}/clubs
 POST /api/Clubs
 GET /api/Clubs/{id:guid}
-PATCH /api/Clubs/{id:guid}
+PUT /api/Clubs/{id:guid}
 DELETE /api/Clubs/{id:guid}	TODO
 CommunitiesController	6	POST /api/Communities
 GET /api/Communities
 GET /api/Communities/{id:guid}
-PATCH /api/Communities/{id:guid}
+PUT /api/Communities/{id:guid}
 DELETE /api/Communities/{id:guid}
 GET /api/Communities/discover	TODO
 DashboardController	1	GET /api/Dashboard/today	TODO
@@ -162,7 +162,7 @@ POST /api/Rooms/{id:guid}/join
 POST /api/Rooms/{id:guid}/approve/{userId:guid}
 POST /api/Rooms/{id:guid}/leave
 POST /api/Rooms/{id:guid}/kickban/{userId:guid}
-PATCH /api/Rooms/{id:guid}
+PUT /api/Rooms/{id:guid}
 POST /api/Rooms/{id:guid}/transfer-ownership/{newOwnerId:guid}
 DELETE /api/Rooms/{id:guid}	TODO
 TeammatesController	1	GET /api/Teammates	TODO
@@ -510,7 +510,7 @@ Responses: 200 ClubDetailDto; 401/404 ProblemDetails
 
 Code: WebAPI/Controllers/ClubsController.cs:L128
 
-PATCH /api/Clubs/{id:guid} — TODO
+PUT /api/Clubs/{id:guid} — TODO
 
 Auth: [Authorize]
 
@@ -586,7 +586,7 @@ Responses: 200 CommunityDetailDto; 401/404 ProblemDetails
 
 Code: WebAPI/Controllers/CommunitiesController.cs:L123
 
-PATCH /api/Communities/{id:guid} — TODO
+PUT /api/Communities/{id:guid} — TODO
 
 Auth: [Authorize]
 
@@ -608,7 +608,7 @@ Rate limit: CommunitiesWrite
 
 Path: id: Guid
 
-Responses: 204; 401/403/404/429 ProblemDetails
+Responses: 204; 401/403/404/409/429 ProblemDetails
 
 Code: WebAPI/Controllers/CommunitiesController.cs:L172
 
@@ -618,9 +618,9 @@ Auth: AllowAnonymous
 
 Rate limit: CommunitiesRead
 
-Query: school?: string, gameId?: Guid, cursor?: string, size?: int
+Query: query?: string, offset?: int, limit?: int, orderBy?: string
 
-Responses: 200 DiscoverResponse; 400/429 ProblemDetails
+Responses: 200 PagedResult<CommunityDetailDto>; 400/429 ProblemDetails
 
 Code: WebAPI/Controllers/CommunitiesController.cs:L208
 
@@ -1199,7 +1199,7 @@ Rate limit: RoomsWrite
 
 Path: id: Guid
 
-Responses: 204; 401/403/404/429 ProblemDetails
+Responses: 204; 401/403/404/409/429 ProblemDetails
 
 Code: WebAPI/Controllers/RoomsController.cs:L217
 
@@ -1213,11 +1213,11 @@ Path: id: Guid, userId: Guid
 
 Query: ban: bool=false
 
-Responses: 204; 401/403/404/429 ProblemDetails
+Responses: 204; 401/403/404/409/429 ProblemDetails
 
 Code: WebAPI/Controllers/RoomsController.cs:L256
 
-PATCH /api/Rooms/{id:guid} — TODO
+PUT /api/Rooms/{id:guid} — TODO
 
 Auth: [Authorize]
 
@@ -1251,7 +1251,7 @@ Rate limit: RoomsArchive
 
 Path: id: Guid
 
-Responses: 204; 401/403/404/429 ProblemDetails
+Responses: 204; 401/403/404/409/429 ProblemDetails
 
 Code: WebAPI/Controllers/RoomsController.cs:L367
 

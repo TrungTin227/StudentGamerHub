@@ -112,6 +112,98 @@ public sealed class RoomService : IRoomService
         return Result<RoomDetailDto>.Success(detail.ToRoomDetailDto());
     }
 
+    public async Task<Result<RoomDetailDto>> UpdateRoomAsync(Guid id, RoomUpdateRequestDto req, Guid actorId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        if (id == Guid.Empty)
+        {
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Validation, "RoomId is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+        {
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Validation, "Room name is required."));
+        }
+
+        var name = req.Name.Trim();
+        if (name.Length > 200)
+        {
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Validation, "Room name must be at most 200 characters."));
+        }
+
+        var room = await _roomQuery.GetByIdAsync(id, ct).ConfigureAwait(false);
+        if (room is null)
+        {
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+        }
+
+        var membership = await _roomQuery.GetMemberAsync(id, actorId, ct).ConfigureAwait(false);
+        if (membership is null || membership.Status != RoomMemberStatus.Approved || membership.Role != RoomRole.Owner)
+        {
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Forbidden, "Only room owners can update the room."));
+        }
+
+        if (req.Capacity.HasValue)
+        {
+            if (req.Capacity.Value < 1)
+            {
+                return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Validation, "Capacity must be at least 1."));
+            }
+
+            if (req.Capacity.Value < room.MembersCount)
+            {
+                return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Validation, "Capacity cannot be less than current approved members."));
+            }
+        }
+
+        room.Name = name;
+        room.Description = NormalizeOrNull(req.Description);
+        room.JoinPolicy = req.JoinPolicy;
+        room.Capacity = req.Capacity;
+        room.UpdatedAtUtc = DateTime.UtcNow;
+        room.UpdatedBy = actorId;
+
+        if (req.JoinPolicy == RoomJoinPolicy.RequiresPassword)
+        {
+            if (string.IsNullOrWhiteSpace(req.Password))
+            {
+                if (string.IsNullOrEmpty(room.JoinPasswordHash))
+                {
+                    return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Validation, "Password is required for password-protected rooms."));
+                }
+            }
+            else
+            {
+                room.JoinPasswordHash = _passwordHasher.HashPassword(room, req.Password);
+            }
+        }
+        else
+        {
+            room.JoinPasswordHash = null;
+        }
+
+        var updateResult = await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            await _roomCommand.UpdateRoomAsync(room, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+
+        if (!updateResult.IsSuccess)
+        {
+            return Result<RoomDetailDto>.Failure(updateResult.Error!);
+        }
+
+        var detail = await _roomQuery.GetDetailsAsync(id, actorId, ct).ConfigureAwait(false);
+        if (detail is null)
+        {
+            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load room details."));
+        }
+
+        return Result<RoomDetailDto>.Success(detail.ToRoomDetailDto());
+    }
+
     public async Task<Result<RoomDetailDto>> JoinRoomAsync(Guid roomId, Guid currentUserId, RoomJoinRequestDto? req, CancellationToken ct = default)
     {
         var room = await _roomQuery.GetRoomWithClubCommunityAsync(roomId, ct).ConfigureAwait(false);
@@ -430,6 +522,33 @@ public sealed class RoomService : IRoomService
         }
 
         return Result<RoomDetailDto>.Success(detail.ToRoomDetailDto());
+    }
+
+    public async Task<Result> DeleteRoomAsync(Guid id, Guid actorId, CancellationToken ct = default)
+    {
+        if (id == Guid.Empty)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "RoomId is required."));
+        }
+
+        var room = await _roomQuery.GetByIdAsync(id, ct).ConfigureAwait(false);
+        if (room is null)
+        {
+            return Result.Failure(new Error(Error.Codes.NotFound, "Room not found."));
+        }
+
+        var membership = await _roomQuery.GetMemberAsync(id, actorId, ct).ConfigureAwait(false);
+        if (membership is null || membership.Status != RoomMemberStatus.Approved || membership.Role != RoomRole.Owner)
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Only room owners can delete the room."));
+        }
+
+        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            await _roomCommand.SoftDeleteRoomAsync(id, actorId, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
     }
 
     private static string? NormalizeOrNull(string? value)

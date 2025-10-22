@@ -26,8 +26,8 @@
 | AbuseController | 1 | POST /api/abuse/report | TODO |
 | AuthController | 12 | POST /api/Auth/user-register<br>POST /api/Auth/login<br>POST /api/Auth/refresh<br>POST /api/Auth/revoke<br>POST /api/Auth/email:confirm<br>POST /api/Auth/password:send-reset<br>POST /api/Auth/password:reset<br>GET /api/Auth/me<br>PUT /api/Auth/me<br>POST /api/Auth/me/password:change<br>POST /api/Auth/me/email:send-confirm<br>POST /api/Auth/me/email:send-change | TODO |
 | BugReportsController | 6 | POST /api/BugReports<br>GET /api/BugReports/{id:guid}<br>GET /api/BugReports/my<br>GET /api/BugReports<br>GET /api/BugReports/status/{status}<br>PATCH /api/BugReports/{id:guid}/status | TODO |
-| ClubsController | 5 | GET /api/communities/{communityId:guid}/clubs<br>POST /api/Clubs<br>GET /api/Clubs/{id:guid}<br>PATCH /api/Clubs/{id:guid}<br>DELETE /api/Clubs/{id:guid} | TODO |
-| CommunitiesController | 6 | POST /api/Communities<br>GET /api/Communities<br>GET /api/Communities/{id:guid}<br>PATCH /api/Communities/{id:guid}<br>DELETE /api/Communities/{id:guid}<br>GET /api/Communities/discover | TODO |
+| ClubsController | 5 | GET /api/communities/{communityId:guid}/clubs<br>POST /api/Clubs<br>GET /api/Clubs/{id:guid}<br>PUT /api/Clubs/{id:guid}<br>DELETE /api/Clubs/{id:guid} | TODO |
+| CommunitiesController | 6 | POST /api/Communities<br>GET /api/Communities<br>GET /api/Communities/{id:guid}<br>PUT /api/Communities/{id:guid}<br>DELETE /api/Communities/{id:guid}<br>GET /api/Communities/discover | TODO |
 | DashboardController | 1 | GET /api/Dashboard/today | TODO |
 | EventsController | 6 | POST /api/Events<br>POST /api/Events/{eventId:guid}/open<br>POST /api/Events/{eventId:guid}/cancel<br>GET /api/Events/{eventId:guid}<br>GET /api/Events<br>GET /api/organizer/events | TODO |
 | FriendsController | 5 | POST /api/Friends/{userId:guid}/invite<br>POST /api/Friends/{userId:guid}/accept<br>POST /api/Friends/{userId:guid}/decline<br>POST /api/Friends/{userId:guid}/cancel<br>GET /api/Friends | TODO |
@@ -36,7 +36,7 @@
 | QuestsController | 4 | GET /api/Quests/today<br>POST /api/Quests/check-in<br>POST /api/Quests/join-room/{roomId:guid}<br>POST /api/Quests/attend-event/{eventId:guid} | TODO |
 | RegistrationsController | 3 | POST /api/events/{eventId:guid}/registrations<br>GET /api/events/{eventId:guid}/registrations<br>GET /api/me/registrations | TODO |
 | RolesController | 12 | GET /api/Roles<br>GET /api/Roles/exists<br>POST /api/Roles<br>PUT /api/Roles/{id:guid}<br>DELETE /api/Roles/{id:guid}<br>POST /api/Roles/{id:guid}/soft-delete<br>POST /api/Roles/{id:guid}/restore<br>POST /api/Roles/batch-create<br>PUT /api/Roles/batch-update<br>DELETE /api/Roles/batch-delete<br>POST /api/Roles/batch-soft-delete<br>POST /api/Roles/batch-restore | TODO |
-| RoomsController | 10 | GET /api/Rooms/{id:guid}<br>GET /api/Rooms/{id:guid}/members<br>POST /api/Rooms<br>POST /api/Rooms/{id:guid}/join<br>POST /api/Rooms/{id:guid}/approve/{userId:guid}<br>POST /api/Rooms/{id:guid}/leave<br>POST /api/Rooms/{id:guid}/kickban/{userId:guid}<br>PATCH /api/Rooms/{id:guid}<br>POST /api/Rooms/{id:guid}/transfer-ownership/{newOwnerId:guid}<br>DELETE /api/Rooms/{id:guid} | TODO |
+| RoomsController | 10 | GET /api/Rooms/{id:guid}<br>GET /api/Rooms/{id:guid}/members<br>POST /api/Rooms<br>POST /api/Rooms/{id:guid}/join<br>POST /api/Rooms/{id:guid}/approve/{userId:guid}<br>POST /api/Rooms/{id:guid}/leave<br>POST /api/Rooms/{id:guid}/kickban/{userId:guid}<br>PUT /api/Rooms/{id:guid}<br>POST /api/Rooms/{id:guid}/transfer-ownership/{newOwnerId:guid}<br>DELETE /api/Rooms/{id:guid} | TODO |
 | TeammatesController | 1 | GET /api/Teammates | TODO |
 | UsersController | 14 | GET /api/Users<br>GET /api/Users/{id:guid}<br>POST /api/Users<br>PUT /api/Users/{id:guid}<br>PATCH /api/Users/{id:guid}/lockout<br>POST /api/Users/{id:guid}/roles:replace<br>POST /api/Users/{id:guid}/roles:modify<br>POST /api/Users/{id:guid}/password:change<br>POST /api/Users/password:send-reset<br>POST /api/Users/password:reset<br>POST /api/Users/{id:guid}/email:send-confirm<br>POST /api/Users/email:confirm<br>POST /api/Users/{id:guid}/email:send-change<br>POST /api/Users/email:confirm-change | TODO |
 
@@ -568,8 +568,8 @@ VÍ DỤ FE:
 Ghi chú kỹ thuật: TODO (timezone, idempotency, v.v.)
 Code reference: `WebAPI/Controllers/ClubsController.cs:L128`
 
-##### PATCH /api/Clubs/{id:guid} — TODO mô tả
-- Method + Path: `PATCH /api/Clubs/{id:guid}`
+##### PUT /api/Clubs/{id:guid} — TODO mô tả
+- Method + Path: `PUT /api/Clubs/{id:guid}`
 - Auth: [Authorize]
 - Rate limit: ClubsWrite
 Path Params:
@@ -706,8 +706,8 @@ VÍ DỤ FE:
 Ghi chú kỹ thuật: TODO (timezone, idempotency, v.v.)
 Code reference: `WebAPI/Controllers/CommunitiesController.cs:L123`
 
-##### PATCH /api/Communities/{id:guid} — TODO mô tả
-- Method + Path: `PATCH /api/Communities/{id:guid}`
+##### PUT /api/Communities/{id:guid} — TODO mô tả
+- Method + Path: `PUT /api/Communities/{id:guid}`
 - Auth: [Authorize]
 - Rate limit: CommunitiesWrite
 Path Params:
@@ -772,7 +772,7 @@ Query Params:
 Headers: _Không có đặc thù_
 Request Body: _Không có_
 Responses:
-- [ProducesResponseType(typeof(DiscoverResponse), StatusCodes.Status200OK)] (TODO mô tả schema)
+- [ProducesResponseType(typeof(PagedResult<CommunityDetailDto>), StatusCodes.Status200OK)] (TODO mô tả schema)
 - [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)] (TODO mô tả schema)
 - [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)] (TODO mô tả schema)
 VÍ DỤ FE:
@@ -1978,8 +1978,8 @@ VÍ DỤ FE:
 Ghi chú kỹ thuật: TODO (timezone, idempotency, v.v.)
 Code reference: `WebAPI/Controllers/RoomsController.cs:L256`
 
-##### PATCH /api/Rooms/{id:guid} — TODO mô tả
-- Method + Path: `PATCH /api/Rooms/{id:guid}`
+##### PUT /api/Rooms/{id:guid} — TODO mô tả
+- Method + Path: `PUT /api/Rooms/{id:guid}`
 - Auth: [Authorize]
 - Rate limit: RoomsWrite
 Path Params:
