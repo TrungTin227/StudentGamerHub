@@ -2,9 +2,12 @@ using BusinessObjects;
 using BusinessObjects.Common.Enums;
 using BusinessObjects.Common.Results;
 using FluentAssertions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Services.DTOs.Memberships;
+using Services.Implementations;
 using Services.Implementations.Memberships;
 using Xunit;
 
@@ -13,93 +16,193 @@ namespace Services.Memberships.Tests;
 public sealed class MembershipReadServiceTests
 {
     [Fact]
-    public async Task GetMyMembershipTreeAsync_ShouldReturnHierarchyForJoinedEntities()
+    public async Task JoinClubAsync_ShouldSucceedWithoutCommunityMembership()
     {
-        await using var ctx = await MembershipReadServiceTestContext.CreateAsync();
+        await using var ctx = await MembershipScenarioTestContext.CreateAsync();
         var userId = Guid.NewGuid();
+        var community = CreateCommunity();
+        var club = CreateClub(community.Id);
+
         ctx.Db.Users.Add(CreateUser(userId));
-
-        var alphaCommunity = CreateCommunity("Alpha Community", userId);
-        var betaCommunity = CreateCommunity("Beta Community", userId);
-        ctx.Db.Communities.AddRange(alphaCommunity, betaCommunity);
-
-        var arcadeClub = CreateClub(alphaCommunity.Id, "Arcade Club", userId);
-        var boardClub = CreateClub(alphaCommunity.Id, "Board Club", userId);
-        var betaClub = CreateClub(betaCommunity.Id, "Beta Club", userId);
-        ctx.Db.Clubs.AddRange(arcadeClub, boardClub, betaClub);
-
-        var arcadeRoom = CreateRoom(arcadeClub.Id, "Arcade Room", userId);
-        var arcadeRoomPending = CreateRoom(arcadeClub.Id, "Arcade Pending", userId);
-        var boardRoom = CreateRoom(boardClub.Id, "Board Room", userId);
-        ctx.Db.Rooms.AddRange(arcadeRoom, arcadeRoomPending, boardRoom);
-
-        ctx.Db.CommunityMembers.AddRange(
-            CreateCommunityMember(alphaCommunity.Id, userId),
-            CreateCommunityMember(betaCommunity.Id, userId));
-
-        ctx.Db.ClubMembers.AddRange(
-            CreateClubMember(arcadeClub.Id, userId),
-            CreateClubMember(boardClub.Id, userId));
-
-        ctx.Db.RoomMembers.AddRange(
-            CreateRoomMember(arcadeRoom.Id, userId, RoomMemberStatus.Approved),
-            CreateRoomMember(arcadeRoomPending.Id, userId, RoomMemberStatus.Pending));
-
+        ctx.Db.Communities.Add(community);
+        ctx.Db.Clubs.Add(club);
         await ctx.Db.SaveChangesAsync();
 
-        var result = await ctx.Service.GetMyMembershipTreeAsync(userId);
+        var result = await ctx.ClubService.JoinClubAsync(club.Id, userId);
 
         result.IsSuccess.Should().BeTrue();
-        var tree = result.Value.Should().NotBeNull().Subject;
+        var memberships = await ctx.Db.ClubMembers.Where(m => m.UserId == userId).ToListAsync();
+        memberships.Should().ContainSingle(m => m.ClubId == club.Id);
 
-        tree.Overview.CommunityCount.Should().Be(2);
-        tree.Overview.ClubCount.Should().Be(2);
-        tree.Overview.RoomCount.Should().Be(1);
-
-        tree.Communities.Should().HaveCount(2);
-        tree.Communities.Select(c => c.CommunityName)
-            .Should().ContainInOrder("Alpha Community", "Beta Community");
-
-        var alphaNode = tree.Communities.First();
-        alphaNode.Clubs.Should().HaveCount(2);
-        alphaNode.Clubs.Select(c => c.ClubName)
-            .Should().ContainInOrder("Arcade Club", "Board Club");
-
-        var arcadeNode = alphaNode.Clubs.First();
-        arcadeNode.Rooms.Should().ContainSingle();
-        arcadeNode.Rooms[0].RoomName.Should().Be("Arcade Room");
-
-        var boardNode = alphaNode.Clubs.Skip(1).First();
-        boardNode.Rooms.Should().BeEmpty();
-
-        var betaNode = tree.Communities.Last();
-        betaNode.Clubs.Should().BeEmpty();
+        var communityMemberships = await ctx.Db.CommunityMembers.CountAsync();
+        communityMemberships.Should().Be(0);
     }
 
     [Fact]
-    public async Task GetMyMembershipTreeAsync_ShouldReturnEmptyTree_WhenUserHasNoMemberships()
+    public async Task JoinRoomAsync_ShouldFailWithoutClubMembership()
     {
-        await using var ctx = await MembershipReadServiceTestContext.CreateAsync();
+        await using var ctx = await MembershipScenarioTestContext.CreateAsync();
         var userId = Guid.NewGuid();
+        var community = CreateCommunity();
+        var club = CreateClub(community.Id);
+        var room = CreateRoom(club.Id, RoomJoinPolicy.Open);
+
         ctx.Db.Users.Add(CreateUser(userId));
+        ctx.Db.Communities.Add(community);
+        ctx.Db.Clubs.Add(club);
+        ctx.Db.Rooms.Add(room);
         await ctx.Db.SaveChangesAsync();
 
-        var result = await ctx.Service.GetMyMembershipTreeAsync(userId);
+        var result = await ctx.RoomService.JoinRoomAsync(room.Id, userId, null);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().NotBeNull();
+        result.Error!.Code.Should().Be(Error.Codes.Conflict);
+        result.Error.Message.Should().Be("ClubMembershipRequired");
+    }
+
+    [Fact]
+    public async Task GetMyClubRoomTreeAsync_ShouldReturnClubWithoutRooms_WhenOnlyClubJoined()
+    {
+        await using var ctx = await MembershipScenarioTestContext.CreateAsync();
+        var userId = Guid.NewGuid();
+        var community = CreateCommunity();
+        var club = CreateClub(community.Id);
+
+        ctx.Db.Users.Add(CreateUser(userId));
+        ctx.Db.Communities.Add(community);
+        ctx.Db.Clubs.Add(club);
+        await ctx.Db.SaveChangesAsync();
+
+        var joinResult = await ctx.ClubService.JoinClubAsync(club.Id, userId);
+        joinResult.IsSuccess.Should().BeTrue();
+
+        var result = await ctx.MembershipReadService.GetMyClubRoomTreeAsync(userId);
 
         result.IsSuccess.Should().BeTrue();
         var tree = result.Value.Should().NotBeNull().Subject;
-        tree.Communities.Should().BeEmpty();
-        tree.Overview.CommunityCount.Should().Be(0);
-        tree.Overview.ClubCount.Should().Be(0);
+        tree.Clubs.Should().ContainSingle();
+        var node = tree.Clubs[0];
+        node.ClubId.Should().Be(club.Id);
+        node.Rooms.Should().BeEmpty();
+        tree.Overview.ClubCount.Should().Be(1);
         tree.Overview.RoomCount.Should().Be(0);
     }
 
     [Fact]
-    public async Task GetMyMembershipTreeAsync_ShouldFail_WhenUserIdIsEmpty()
+    public async Task GetMyClubRoomTreeAsync_ShouldIncludeJoinedRoomsAndOverviewCounts()
     {
-        await using var ctx = await MembershipReadServiceTestContext.CreateAsync();
+        await using var ctx = await MembershipScenarioTestContext.CreateAsync();
+        var userId = Guid.NewGuid();
+        var community = CreateCommunity();
+        var club = CreateClub(community.Id);
+        var room = CreateRoom(club.Id, RoomJoinPolicy.Open);
 
-        var result = await ctx.Service.GetMyMembershipTreeAsync(Guid.Empty);
+        ctx.Db.Users.Add(CreateUser(userId));
+        ctx.Db.Communities.Add(community);
+        ctx.Db.Clubs.Add(club);
+        ctx.Db.Rooms.Add(room);
+        await ctx.Db.SaveChangesAsync();
+
+        var joinClub = await ctx.ClubService.JoinClubAsync(club.Id, userId);
+        joinClub.IsSuccess.Should().BeTrue();
+
+        var joinRoom = await ctx.RoomService.JoinRoomAsync(room.Id, userId, null);
+        joinRoom.IsSuccess.Should().BeTrue();
+
+        var result = await ctx.MembershipReadService.GetMyClubRoomTreeAsync(userId);
+
+        result.IsSuccess.Should().BeTrue();
+        var tree = result.Value.Should().NotBeNull().Subject;
+        tree.Clubs.Should().ContainSingle();
+        var node = tree.Clubs[0];
+        node.Rooms.Should().ContainSingle();
+        node.Rooms[0].RoomId.Should().Be(room.Id);
+        tree.Overview.ClubCount.Should().Be(1);
+        tree.Overview.RoomCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetMyClubRoomTreeAsync_ShouldExcludeSoftDeletedAndBannedMemberships()
+    {
+        await using var ctx = await MembershipScenarioTestContext.CreateAsync();
+        var userId = Guid.NewGuid();
+        var community = CreateCommunity();
+        var activeClub = CreateClub(community.Id, "Active Club");
+        var deletedClub = CreateClub(community.Id, "Deleted Club");
+        var activeRoom = CreateRoom(activeClub.Id, RoomJoinPolicy.Open, "Active Room");
+        var bannedRoom = CreateRoom(activeClub.Id, RoomJoinPolicy.Open, "Banned Room");
+
+        ctx.Db.Users.Add(CreateUser(userId));
+        ctx.Db.Communities.Add(community);
+        ctx.Db.Clubs.AddRange(activeClub, deletedClub);
+        ctx.Db.Rooms.AddRange(activeRoom, bannedRoom);
+
+        var now = DateTime.UtcNow;
+        ctx.Db.ClubMembers.AddRange(
+            new ClubMember
+            {
+                ClubId = activeClub.Id,
+                UserId = userId,
+                Role = MemberRole.Member,
+                JoinedAt = now,
+                CreatedAtUtc = now,
+                CreatedBy = userId
+            },
+            new ClubMember
+            {
+                ClubId = deletedClub.Id,
+                UserId = userId,
+                Role = MemberRole.Member,
+                JoinedAt = now,
+                CreatedAtUtc = now,
+                CreatedBy = userId,
+                IsDeleted = true,
+                DeletedAtUtc = now,
+                DeletedBy = userId
+            });
+
+        ctx.Db.RoomMembers.AddRange(
+            new RoomMember
+            {
+                RoomId = activeRoom.Id,
+                UserId = userId,
+                Role = RoomRole.Member,
+                Status = RoomMemberStatus.Approved,
+                JoinedAt = now,
+                CreatedAtUtc = now,
+                CreatedBy = userId
+            },
+            new RoomMember
+            {
+                RoomId = bannedRoom.Id,
+                UserId = userId,
+                Role = RoomRole.Member,
+                Status = RoomMemberStatus.Banned,
+                JoinedAt = now,
+                CreatedAtUtc = now,
+                CreatedBy = userId
+            });
+
+        await ctx.Db.SaveChangesAsync();
+
+        var result = await ctx.MembershipReadService.GetMyClubRoomTreeAsync(userId);
+
+        result.IsSuccess.Should().BeTrue();
+        var tree = result.Value.Should().NotBeNull().Subject;
+        tree.Clubs.Should().ContainSingle();
+        tree.Clubs[0].ClubId.Should().Be(activeClub.Id);
+        tree.Clubs[0].Rooms.Should().ContainSingle(r => r.RoomId == activeRoom.Id);
+        tree.Overview.ClubCount.Should().Be(1);
+        tree.Overview.RoomCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetMyClubRoomTreeAsync_ShouldFail_WhenUserIdIsEmpty()
+    {
+        await using var ctx = await MembershipScenarioTestContext.CreateAsync();
+
+        var result = await ctx.MembershipReadService.GetMyClubRoomTreeAsync(Guid.Empty);
 
         result.IsSuccess.Should().BeFalse();
         result.Error.Should().NotBeNull();
@@ -118,88 +221,58 @@ public sealed class MembershipReadServiceTests
         CreatedAtUtc = DateTime.UtcNow
     };
 
-    private static Community CreateCommunity(string name, Guid createdBy) => new()
+    private static Community CreateCommunity() => new()
     {
         Id = Guid.NewGuid(),
-        Name = name,
+        Name = "Community",
         Description = null,
         IsPublic = true,
         MembersCount = 0,
         CreatedAtUtc = DateTime.UtcNow,
-        CreatedBy = createdBy
+        CreatedBy = Guid.NewGuid()
     };
 
-    private static Club CreateClub(Guid communityId, string name, Guid createdBy) => new()
+    private static Club CreateClub(Guid communityId, string? name = null) => new()
     {
         Id = Guid.NewGuid(),
         CommunityId = communityId,
-        Name = name,
+        Name = name ?? "Club",
         Description = null,
         IsPublic = true,
         MembersCount = 0,
         CreatedAtUtc = DateTime.UtcNow,
-        CreatedBy = createdBy
+        CreatedBy = Guid.NewGuid()
     };
 
-    private static Room CreateRoom(Guid clubId, string name, Guid createdBy) => new()
+    private static Room CreateRoom(Guid clubId, RoomJoinPolicy policy, string? name = null) => new()
     {
         Id = Guid.NewGuid(),
         ClubId = clubId,
-        Name = name,
+        Name = name ?? "Room",
         Description = null,
-        JoinPolicy = RoomJoinPolicy.Open,
+        JoinPolicy = policy,
         MembersCount = 0,
         CreatedAtUtc = DateTime.UtcNow,
-        CreatedBy = createdBy
+        CreatedBy = Guid.NewGuid()
     };
 
-    private static CommunityMember CreateCommunityMember(Guid communityId, Guid userId) => new()
-    {
-        Id = Guid.NewGuid(),
-        CommunityId = communityId,
-        UserId = userId,
-        Role = MemberRole.Member,
-        JoinedAt = DateTime.UtcNow,
-        CreatedAtUtc = DateTime.UtcNow,
-        CreatedBy = userId
-    };
-
-    private static ClubMember CreateClubMember(Guid clubId, Guid userId) => new()
-    {
-        Id = Guid.NewGuid(),
-        ClubId = clubId,
-        UserId = userId,
-        Role = MemberRole.Member,
-        JoinedAt = DateTime.UtcNow,
-        CreatedAtUtc = DateTime.UtcNow,
-        CreatedBy = userId
-    };
-
-    private static RoomMember CreateRoomMember(Guid roomId, Guid userId, RoomMemberStatus status) => new()
-    {
-        Id = Guid.NewGuid(),
-        RoomId = roomId,
-        UserId = userId,
-        Role = RoomRole.Member,
-        Status = status,
-        JoinedAt = DateTime.UtcNow,
-        CreatedAtUtc = DateTime.UtcNow,
-        CreatedBy = userId
-    };
-
-    private sealed class MembershipReadServiceTestContext : IAsyncDisposable
+    private sealed class MembershipScenarioTestContext : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
+        private readonly IGenericUnitOfWork _uow;
 
         public required AppDbContext Db { get; init; }
-        public required MembershipReadService Service { get; init; }
+        public required MembershipReadService MembershipReadService { get; init; }
+        public required ClubService ClubService { get; init; }
+        public required RoomService RoomService { get; init; }
 
-        private MembershipReadServiceTestContext(SqliteConnection connection)
+        private MembershipScenarioTestContext(SqliteConnection connection, IGenericUnitOfWork uow)
         {
             _connection = connection;
+            _uow = uow;
         }
 
-        public static async Task<MembershipReadServiceTestContext> CreateAsync()
+        public static async Task<MembershipScenarioTestContext> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -211,17 +284,31 @@ public sealed class MembershipReadServiceTests
             var db = new AppDbContext(options);
             await db.Database.EnsureCreatedAsync();
 
-            var service = new MembershipReadService(db);
+            var services = new ServiceCollection().BuildServiceProvider();
+            var factory = new RepositoryFactory(db, services);
+            var uow = new UnitOfWork(db, factory);
 
-            return new MembershipReadServiceTestContext(connection)
+            var communityQuery = new CommunityQueryRepository(db);
+            var clubQuery = new ClubQueryRepository(db);
+            var clubCommand = new ClubCommandRepository(db);
+            var roomQuery = new RoomQueryRepository(db);
+            var roomCommand = new RoomCommandRepository(db);
+            var clubService = new ClubService(uow, clubQuery, clubCommand, communityQuery, roomQuery, roomCommand);
+            var roomService = new RoomService(uow, roomQuery, roomCommand, clubQuery, new PasswordHasher<Room>());
+            var membershipReadService = new MembershipReadService(db);
+
+            return new MembershipScenarioTestContext(connection, uow)
             {
                 Db = db,
-                Service = service
+                MembershipReadService = membershipReadService,
+                ClubService = clubService,
+                RoomService = roomService
             };
         }
 
         public async ValueTask DisposeAsync()
         {
+            await _uow.DisposeAsync();
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
         }
