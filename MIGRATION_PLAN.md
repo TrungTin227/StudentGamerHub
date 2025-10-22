@@ -50,3 +50,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS ix_transactions_provider_providerref ON transa
 ```
 
 These updates widen the payment-intent purpose check constraint to include wallet top-ups and ensure provider callbacks cannot create duplicate transaction rows.
+
+## Member Directory Indexes (Performance)
+
+Apply the following indexes to support joined-at ordering for membership listings:
+
+- `CREATE INDEX IF NOT EXISTS "IX_CommunityMembers_CommunityId_JoinedAt" ON "CommunityMembers"("CommunityId", "JoinedAt" DESC);`
+- `CREATE INDEX IF NOT EXISTS "IX_ClubMembers_ClubId_JoinedAt" ON "ClubMembers"("ClubId", "JoinedAt" DESC);`
+- `CREATE INDEX IF NOT EXISTS "IX_RoomMembers_RoomId_JoinedAt" ON "RoomMembers"("RoomId", "JoinedAt" DESC);`

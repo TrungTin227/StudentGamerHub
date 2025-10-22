@@ -62,4 +62,70 @@ public sealed class RoomReadService : IRoomReadService
 
         return Result<PagedResult<RoomDetailDto>>.Success(dtoPage);
     }
+
+    public async Task<Result<OffsetPage<RoomMemberDto>>> ListMembersAsync(
+        Guid roomId,
+        RoomMemberListFilter filter,
+        OffsetPaging paging,
+        Guid? currentUserId,
+        CancellationToken ct = default)
+    {
+        if (roomId == Guid.Empty)
+        {
+            return Result<OffsetPage<RoomMemberDto>>.Failure(
+                new Error(Error.Codes.Validation, "RoomId is required."));
+        }
+
+        ArgumentNullException.ThrowIfNull(filter);
+
+        var room = await _roomQuery.GetByIdAsync(roomId, ct).ConfigureAwait(false);
+        if (room is null)
+        {
+            return Result<OffsetPage<RoomMemberDto>>.Failure(
+                new Error(Error.Codes.NotFound, "Room not found."));
+        }
+
+        var sanitizedLimit = Math.Clamp(paging.LimitSafe, 1, 50);
+        var sanitizedPaging = new OffsetPaging(paging.OffsetSafe, sanitizedLimit, paging.Sort, paging.Desc);
+
+        var page = await _roomQuery
+            .ListMembersAsync(roomId, filter, sanitizedPaging, ct)
+            .ConfigureAwait(false);
+
+        var dtoPage = page.Map(model => model.ToRoomMemberDto(currentUserId));
+
+        return Result<OffsetPage<RoomMemberDto>>.Success(dtoPage);
+    }
+
+    public async Task<Result<IReadOnlyList<RoomMemberDto>>> ListRecentMembersAsync(
+        Guid roomId,
+        int limit,
+        Guid? currentUserId,
+        CancellationToken ct = default)
+    {
+        if (roomId == Guid.Empty)
+        {
+            return Result<IReadOnlyList<RoomMemberDto>>.Failure(
+                new Error(Error.Codes.Validation, "RoomId is required."));
+        }
+
+        var room = await _roomQuery.GetByIdAsync(roomId, ct).ConfigureAwait(false);
+        if (room is null)
+        {
+            return Result<IReadOnlyList<RoomMemberDto>>.Failure(
+                new Error(Error.Codes.NotFound, "Room not found."));
+        }
+
+        var sanitizedLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
+
+        var members = await _roomQuery
+            .ListRecentMembersAsync(roomId, sanitizedLimit, ct)
+            .ConfigureAwait(false);
+
+        var dtos = members
+            .Select(model => model.ToRoomMemberDto(currentUserId))
+            .ToList();
+
+        return Result<IReadOnlyList<RoomMemberDto>>.Success(dtos);
+    }
 }

@@ -45,6 +45,67 @@ public sealed class RoomsController : ControllerBase
     }
 
     /// <summary>
+    /// List members of a room with optional filtering and offset pagination.
+    /// </summary>
+    [HttpGet("{roomId:guid}/members")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(OffsetPage<RoomMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ListMembers(
+        Guid roomId,
+        [FromQuery] RoomRole? role = null,
+        [FromQuery] RoomMemberStatus? status = null,
+        [FromQuery(Name = "q")] string? query = null,
+        [FromQuery] string? sort = null,
+        [FromQuery] int? offset = null,
+        [FromQuery] int? limit = null,
+        CancellationToken ct = default)
+    {
+        var filter = new RoomMemberListFilter
+        {
+            Role = role,
+            Status = status,
+            Query = query,
+            Sort = sort ?? MemberListSort.JoinedAtDesc
+        };
+
+        var sanitizedOffset = Math.Max(offset ?? 0, 0);
+        var sanitizedLimit = Math.Clamp(limit ?? 20, 1, 50);
+        var paging = new OffsetPaging(sanitizedOffset, sanitizedLimit, filter.Sort, false);
+        var currentUserId = User.GetUserId();
+
+        var result = await _roomReadService
+            .ListMembersAsync(roomId, filter, paging, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// Get the most recent members who joined the room.
+    /// </summary>
+    [HttpGet("{roomId:guid}/members/recent")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(IReadOnlyList<RoomMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ListRecentMembers(
+        Guid roomId,
+        [FromQuery] int? limit = null,
+        CancellationToken ct = default)
+    {
+        var currentUserId = User.GetUserId();
+        var sanitizedLimit = limit ?? 20;
+
+        var result = await _roomReadService
+            .ListRecentMembersAsync(roomId, sanitizedLimit, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
     /// Create a room inside a club and join the caller as the owner member.
     /// </summary>
     [HttpPost]

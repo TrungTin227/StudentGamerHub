@@ -1,4 +1,5 @@
 using BusinessObjects.Common.Pagination;
+using DTOs.Common.Filters;
 using Microsoft.EntityFrameworkCore;
 using Repositories.Models;
 
@@ -131,6 +132,132 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
         return await _context.Rooms
             .AnyAsync(r => r.ClubId == clubId, ct)
             .ConfigureAwait(false);
+    }
+
+    public async Task<OffsetPage<RoomMemberModel>> ListMembersAsync(
+        Guid roomId,
+        RoomMemberListFilter filter,
+        OffsetPaging paging,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        filter.Normalize();
+
+        var offset = paging.OffsetSafe;
+        var limit = Math.Clamp(paging.LimitSafe, 1, 50);
+
+        var query = _context.RoomMembers
+            .AsNoTracking()
+            .Where(rm => rm.RoomId == roomId)
+            .Join(
+                _context.Users.AsNoTracking(),
+                rm => rm.UserId,
+                u => u.Id,
+                (rm, u) => new
+                {
+                    rm.Role,
+                    rm.Status,
+                    rm.JoinedAt,
+                    UserId = u.Id,
+                    UserName = u.UserName ?? string.Empty,
+                    u.FullName,
+                    u.AvatarUrl,
+                    u.Level
+                });
+
+        if (filter.Role.HasValue)
+        {
+            var role = filter.Role.Value;
+            query = query.Where(x => x.Role == role);
+        }
+
+        if (filter.Status.HasValue)
+        {
+            var status = filter.Status.Value;
+            query = query.Where(x => x.Status == status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Query))
+        {
+            var pattern = $"%{filter.Query!}%";
+            query = query.Where(x =>
+                EF.Functions.ILike(x.FullName ?? string.Empty, pattern) ||
+                EF.Functions.ILike(x.UserName, pattern));
+        }
+
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+
+        var ordered = filter.Sort switch
+        {
+            MemberListSort.NameAsc => query
+                .OrderBy(x => x.FullName ?? x.UserName)
+                .ThenBy(x => x.UserName)
+                .ThenByDescending(x => x.JoinedAt),
+            MemberListSort.NameDesc => query
+                .OrderByDescending(x => x.FullName ?? x.UserName)
+                .ThenByDescending(x => x.UserName)
+                .ThenByDescending(x => x.JoinedAt),
+            MemberListSort.Role => query
+                .OrderBy(x => x.Role == RoomRole.Owner ? 0 : x.Role == RoomRole.Moderator ? 1 : 2)
+                .ThenByDescending(x => x.JoinedAt)
+                .ThenBy(x => x.UserId),
+            _ => query
+                .OrderByDescending(x => x.JoinedAt)
+                .ThenBy(x => x.UserId)
+        };
+
+        var items = await ordered
+            .Skip(offset)
+            .Take(limit)
+            .Select(x => new RoomMemberModel(
+                new MemberUserModel(x.UserId, x.UserName, x.FullName, x.AvatarUrl, x.Level),
+                x.Role,
+                x.Status,
+                x.JoinedAt))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var hasNext = offset + items.Count < total;
+        var hasPrev = offset > 0;
+
+        return new OffsetPage<RoomMemberModel>(items, offset, limit, total, hasPrev, hasNext);
+    }
+
+    public async Task<IReadOnlyList<RoomMemberModel>> ListRecentMembersAsync(
+        Guid roomId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        var sanitizedLimit = Math.Clamp(limit, 1, 50);
+
+        var query = _context.RoomMembers
+            .AsNoTracking()
+            .Where(rm => rm.RoomId == roomId)
+            .Join(
+                _context.Users.AsNoTracking(),
+                rm => rm.UserId,
+                u => u.Id,
+                (rm, u) => new
+                {
+                    rm.Role,
+                    rm.Status,
+                    rm.JoinedAt,
+                    UserId = u.Id,
+                    UserName = u.UserName ?? string.Empty,
+                    u.FullName,
+                    u.AvatarUrl,
+                    u.Level
+                })
+            .OrderByDescending(x => x.JoinedAt)
+            .ThenBy(x => x.UserId)
+            .Take(sanitizedLimit)
+            .Select(x => new RoomMemberModel(
+                new MemberUserModel(x.UserId, x.UserName, x.FullName, x.AvatarUrl, x.Level),
+                x.Role,
+                x.Status,
+                x.JoinedAt));
+
+        return await query.ToListAsync(ct).ConfigureAwait(false);
     }
 
 }
