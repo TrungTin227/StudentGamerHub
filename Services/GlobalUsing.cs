@@ -22,6 +22,7 @@ global using DTOs.Common.Filters;
 global using DTOs.Registrations;
 global using DTOs.Wallets;
 global using DTOs.Games;
+global using DTOs.Teammates;
 global using Repositories.Interfaces;
 global using Repositories.Persistence;
 global using Repositories.WorkSeeds.Extensions;

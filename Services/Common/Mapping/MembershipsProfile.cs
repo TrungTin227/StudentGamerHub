@@ -96,25 +96,25 @@ public static class MembershipsProfile
     }
 }
 
-internal sealed record MembershipTreeProjection(
+public sealed record MembershipTreeProjection(
     IReadOnlyList<MembershipCommunityProjection> Communities,
     MembershipOverviewProjection Overview);
 
-internal sealed record MembershipCommunityProjection(
+public sealed record MembershipCommunityProjection(
     Guid CommunityId,
     string? CommunityName,
     IReadOnlyList<MembershipClubProjection> Clubs);
 
-internal sealed record MembershipClubProjection(
+public sealed record MembershipClubProjection(
     Guid ClubId,
     string? ClubName,
     IReadOnlyList<MembershipRoomProjection> Rooms);
 
-internal sealed record MembershipRoomProjection(
+public sealed record MembershipRoomProjection(
     Guid RoomId,
     string? RoomName);
 
-internal sealed record MembershipOverviewProjection(
+public sealed record MembershipOverviewProjection(
     int CommunityCount,
     int ClubCount,
     int RoomCount);

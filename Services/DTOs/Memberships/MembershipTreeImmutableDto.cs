@@ -1,8 +1,8 @@
 namespace Services.DTOs.Memberships;
 
 public sealed record MembershipTreeImmutableDto(
-    IReadOnlyList<CommunityNode> Communities,
-    OverviewImmutable Overview
+    IReadOnlyList<MembershipTreeImmutableDto.CommunityNode> Communities,
+    MembershipTreeImmutableDto.OverviewImmutable Overview
 )
 {
     public sealed record CommunityNode(Guid CommunityId, string? CommunityName, IReadOnlyList<ClubNode> Clubs);
