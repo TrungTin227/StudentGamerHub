@@ -228,79 +228,63 @@ namespace Repositories.Persistence
                 e.HasIndex(c => c.MembersCount);
             });
 
+            // ====== CommunityGame ======
+            b.Entity<CommunityGame>(e =>
+            {
+                e.HasOne(x => x.Community).WithMany(x => x.Games)
+                 .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Cascade);
+
+                e.HasOne(x => x.Game).WithMany()
+                 .HasForeignKey(x => x.GameId).OnDelete(DeleteBehavior.Cascade);
+    
+                // Phase 9: Index for gameId filter in discovery
+                e.HasIndex(x => x.CommunityId).HasDatabaseName("IX_CommunityGame_CommunityId");
+                e.HasIndex(x => x.GameId).HasDatabaseName("IX_CommunityGame_GameId");
+            });
+
+            // ====== CommunityMember ======
             b.Entity<CommunityMember>(e =>
             {
                 e.Property(x => x.Role).HasConversion<string>();
+        
+                e.HasOne(x => x.Community).WithMany(x => x.Members)
+                 .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Cascade);
 
-                e.HasOne(x => x.Community)
-                 .WithMany()
-                 .HasForeignKey(x => x.CommunityId)
-                 .OnDelete(DeleteBehavior.Cascade);
+                e.HasOne(x => x.User).WithMany()
+                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
 
-                e.HasOne(x => x.User)
-                 .WithMany()
-                 .HasForeignKey(x => x.UserId)
-                 .OnDelete(DeleteBehavior.Cascade);
-
-                e.HasIndex(x => x.UserId).HasDatabaseName("IX_CommunityMember_User");
+                e.HasIndex(x => new { x.CommunityId, x.UserId }).IsUnique();
+                e.HasIndex(x => x.UserId).HasDatabaseName("IX_CommunityMembers_UserId");
             });
 
-            b.Entity<CommunityGame>(e =>
-       {
-  e.HasOne(x => x.Community).WithMany(x => x.Games)
-         .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Cascade);
-
-          e.HasOne(x => x.Game).WithMany()
-   .HasForeignKey(x => x.GameId).OnDelete(DeleteBehavior.Cascade);
-    
-      // Phase 9: Index for gameId filter in discovery
-           e.HasIndex(x => x.CommunityId).HasDatabaseName("IX_CommunityGame_CommunityId");
-  e.HasIndex(x => x.GameId).HasDatabaseName("IX_CommunityGame_GameId");
-     });
-
-     // ====== CommunityMember ======
-            b.Entity<CommunityMember>(e =>
+            // ====== Clubs ======
+            b.Entity<Club>(e =>
             {
-         e.Property(x => x.Role).HasConversion<int>();
-                
-  e.HasOne(x => x.Community).WithMany(x => x.Members)
-        .HasForeignKey(x => x.CommunityId).OnDelete(DeleteBehavior.Restrict);
+                e.HasOne(c => c.Community).WithMany(x => x.Clubs)
+                 .HasForeignKey(c => c.CommunityId)
+                 .OnDelete(DeleteBehavior.Cascade);
 
-       e.HasOne(x => x.User).WithMany()
-  .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
-
-           e.HasIndex(x => new { x.CommunityId, x.UserId }).IsUnique();
-      e.HasIndex(x => x.UserId).HasDatabaseName("IX_CommunityMembers_UserId");
-     });
-
-     // ====== Clubs ======
-         b.Entity<Club>(e =>
-    {
-    e.HasOne(c => c.Community).WithMany(x => x.Clubs)
-      .HasForeignKey(c => c.CommunityId)
-.OnDelete(DeleteBehavior.Cascade);
-
-          e.HasIndex(c => new { c.CommunityId, c.Name }).IsUnique();
+                e.HasIndex(c => new { c.CommunityId, c.Name }).IsUnique();
      
-            // Indexes for club queries
-      e.HasIndex(c => c.CommunityId);
-       e.HasIndex(c => c.MembersCount);
+                // Indexes for club queries
+                e.HasIndex(c => c.CommunityId);
+                e.HasIndex(c => c.MembersCount);
             });
 
             // ====== ClubMember ======
- b.Entity<ClubMember>(e =>
-  {
-    e.Property(x => x.Role).HasConversion<int>();
-      
-     e.HasOne(x => x.Club).WithMany(x => x.Members)
-     .HasForeignKey(x => x.ClubId).OnDelete(DeleteBehavior.Restrict);
+            b.Entity<ClubMember>(e =>
+         {
+              e.Property(x => x.Role).HasConversion<string>();
+   
+         e.HasOne(x => x.Club).WithMany(x => x.Members)
+    .HasForeignKey(x => x.ClubId).OnDelete(DeleteBehavior.Restrict);
 
-    e.HasOne(x => x.User).WithMany()
-     .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+                e.HasOne(x => x.User).WithMany()
+           .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
 
-    e.HasIndex(x => new { x.ClubId, x.UserId }).IsUnique();
-   e.HasIndex(x => x.UserId).HasDatabaseName("IX_ClubMembers_UserId");
-       });
+      e.HasIndex(x => new { x.ClubId, x.UserId }).IsUnique();
+      e.HasIndex(x => x.UserId).HasDatabaseName("IX_ClubMembers_UserId");
+     });
 
             // ====== Rooms ======
             b.Entity<Room>(e =>
@@ -526,23 +510,28 @@ namespace Repositories.Persistence
                 e.HasIndex(x => x.UserId);
                 e.HasIndex(x => x.EventRegistrationId).IsUnique();
                 e.HasIndex(x => x.EventId);
+     
+      // Index for OrderCode with filter for non-null values
+      e.HasIndex(x => x.OrderCode)
+          .IsUnique()
+                 .HasFilter("\"OrderCode\" IS NOT NULL");
 
-                e.HasCheckConstraint(
-                    "chk_payment_intent_amount_positive",
-                    isNpgsql
-                        ? "\"AmountCents\" > 0"
-                        : "[AmountCents] > 0");
+ e.HasCheckConstraint(
+          "chk_payment_intent_amount_positive",
+        isNpgsql
+     ? "\"AmountCents\" > 0"
+            : "[AmountCents] > 0");
 
-                var paymentPurposeConstraint = isNpgsql
-                    ? "\"Purpose\" IN ('TopUp','EventTicket')"
-                    : "[Purpose] IN ('TopUp','EventTicket')";
-                e.HasCheckConstraint("chk_payment_intent_purpose_allowed", paymentPurposeConstraint);
+    var paymentPurposeConstraint = isNpgsql
+       ? "\"Purpose\" IN ('TopUp','EventTicket')"
+   : "[Purpose] IN ('TopUp','EventTicket')";
+    e.HasCheckConstraint("chk_payment_intent_purpose_allowed", paymentPurposeConstraint);
 
-                var paymentStatusConstraint = isNpgsql
-                    ? "\"Status\" IN ('RequiresPayment','Succeeded','Canceled','Expired')"
-                    : "[Status] IN ('RequiresPayment','Succeeded','Canceled','Expired')";
+      var paymentStatusConstraint = isNpgsql
+  ? "\"Status\" IN ('RequiresPayment','Succeeded','Canceled','Expired')"
+              : "[Status] IN ('RequiresPayment','Succeeded','Canceled','Expired')";
                 e.HasCheckConstraint("chk_payment_intent_status_allowed", paymentStatusConstraint);
-            });
+  });
 
             // ====== Gifts ======
             b.Entity<Gift>(e =>
@@ -583,22 +572,16 @@ namespace Repositories.Persistence
             // ====== Global Query Filters (soft-delete matching) ======
             b.Entity<Community>().HasQueryFilter(c => !c.IsDeleted);
             b.Entity<CommunityGame>().HasQueryFilter(cg => !cg.Community!.IsDeleted);
-   b.Entity<CommunityMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Community!.IsDeleted);
+            b.Entity<CommunityMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Community!.IsDeleted);
 
-b.Entity<Club>().HasQueryFilter(cl => !cl.IsDeleted && !cl.Community!.IsDeleted);
-      b.Entity<ClubMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Club!.IsDeleted && !cm.Club!.Community!.IsDeleted);
+            b.Entity<Club>().HasQueryFilter(cl => !cl.IsDeleted && !cl.Community!.IsDeleted);
+            b.Entity<ClubMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Club!.IsDeleted && !cm.Club!.Community!.IsDeleted);
             
             b.Entity<Room>().HasQueryFilter(r => !r.IsDeleted && !r.Club!.IsDeleted && !r.Club!.Community!.IsDeleted);
-            b.Entity<CommunityMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Community!.IsDeleted);
-            b.Entity<ClubMember>().HasQueryFilter(cm => !cm.User!.IsDeleted && !cm.Club!.IsDeleted && !cm.Club!.Community!.IsDeleted);
             b.Entity<RoomMember>().HasQueryFilter(rm => !rm.User!.IsDeleted && !rm.Room!.IsDeleted && !rm.Room!.Club!.IsDeleted && !rm.Room!.Club!.Community!.IsDeleted);
 
-      // (Tuỳ chọn) filter cho Game/UserGame nếu bạn có soft-delete ở Game
-       // b.Entity<Game>().HasQueryFilter(g => !g.IsDeleted);
-            // b.Entity<UserGame>().HasQueryFilter(ug => !ug.User!.IsDeleted && !ug.Game!.IsDeleted);
-
-            // Helper: tự áp cho ISoftDelete còn lại (nếu bạn đã viết extension này)
-            b.ApplySoftDeleteFilters();
+        // Helper: tự áp cho ISoftDelete còn lại (nếu bạn đã viết extension này)
+   b.ApplySoftDeleteFilters();
         }
 
         public override int SaveChanges()
