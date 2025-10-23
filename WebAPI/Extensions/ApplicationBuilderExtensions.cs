@@ -14,9 +14,6 @@ public static class ApplicationBuilderExtensions
         app.UseAuthentication();
         app.UseAuthorization();
 
-        // Map SignalR Hubs
-        app.MapHub<WebAPI.Hubs.ChatHub>("/ws/chat");
-
         app.MapControllers();
 
         // Map OpenAPI and documentation AFTER all endpoints are mapped

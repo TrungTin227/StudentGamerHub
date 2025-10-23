@@ -19,8 +19,6 @@ public static class ServiceCollectionExtensions
                 o.JsonSerializerOptions.PropertyNamingPolicy = null;
             });
 
-        services.AddSignalR();
-
         // Ensure API explorer for controllers is available for OpenAPI/Scalar
         services.AddEndpointsApiExplorer();
 
