@@ -2,6 +2,8 @@
 using Microsoft.EntityFrameworkCore;
 using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Services.Implementations;
 
@@ -14,20 +16,32 @@ public sealed class RoomService : IRoomService
     private readonly IRoomQueryRepository _roomQuery;
     private readonly IRoomCommandRepository _roomCommand;
     private readonly IClubQueryRepository _clubQuery;
+    private readonly IClubCommandRepository _clubCommand;
+    private readonly ICommunityQueryRepository _communityQuery;
+    private readonly ICommunityCommandRepository _communityCommand;
     private readonly IPasswordHasher<Room> _passwordHasher;
+    private readonly ILogger<RoomService> _logger;
 
     public RoomService(
         IGenericUnitOfWork uow,
         IRoomQueryRepository roomQuery,
         IRoomCommandRepository roomCommand,
         IClubQueryRepository clubQuery,
-        IPasswordHasher<Room> passwordHasher)
+        IClubCommandRepository clubCommand,
+        ICommunityQueryRepository communityQuery,
+        ICommunityCommandRepository communityCommand,
+        IPasswordHasher<Room> passwordHasher,
+        ILogger<RoomService>? logger = null)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _roomQuery = roomQuery ?? throw new ArgumentNullException(nameof(roomQuery));
         _roomCommand = roomCommand ?? throw new ArgumentNullException(nameof(roomCommand));
         _clubQuery = clubQuery ?? throw new ArgumentNullException(nameof(clubQuery));
+        _clubCommand = clubCommand ?? throw new ArgumentNullException(nameof(clubCommand));
+        _communityQuery = communityQuery ?? throw new ArgumentNullException(nameof(communityQuery));
+        _communityCommand = communityCommand ?? throw new ArgumentNullException(nameof(communityCommand));
         _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
+        _logger = logger ?? NullLogger<RoomService>.Instance;
     }
 
     public async Task<Result<RoomDetailDto>> CreateRoomAsync(RoomCreateRequestDto req, Guid currentUserId, CancellationToken ct = default)
@@ -387,6 +401,11 @@ public sealed class RoomService : IRoomService
 
     public async Task<Result> KickRoomMemberAsync(Guid roomId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default)
     {
+        if (actorUserId == targetUserId)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "Cannot remove yourself from the room."));
+        }
+
         var room = await _roomQuery.GetRoomWithClubCommunityAsync(roomId, ct).ConfigureAwait(false);
         if (room is null)
         {
@@ -394,37 +413,111 @@ public sealed class RoomService : IRoomService
         }
 
         var actorMembership = await _roomQuery.GetMemberAsync(roomId, actorUserId, ct).ConfigureAwait(false);
-        if (actorMembership is null || actorMembership.Status != RoomMemberStatus.Approved || actorMembership.Role != RoomRole.Owner)
+        if (actorMembership is null || actorMembership.Status != RoomMemberStatus.Approved)
         {
-            return Result.Failure(new Error(Error.Codes.Forbidden, "Only room owners can remove members."));
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Room moderation privileges required."));
+        }
+
+        if (!HasModerationPrivileges(actorMembership.Role))
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Room moderation privileges required."));
         }
 
         var targetMembership = await _roomQuery.GetMemberAsync(roomId, targetUserId, ct).ConfigureAwait(false);
-        if (targetMembership is null)
-        {
-            return Result.Failure(new Error(Error.Codes.NotFound, "Member not found."));
-        }
-
-        if (targetMembership.Role == RoomRole.Owner)
+        if (targetMembership is not null && targetMembership.Role == RoomRole.Owner)
         {
             return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a room owner."));
         }
 
+        if (targetMembership is not null && !HasHigherPriority(actorMembership.Role, targetMembership.Role))
+        {
+            return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a member with equal or higher role."));
+        }
+
         var kickResult = await _uow.ExecuteTransactionAsync(async innerCt =>
         {
-            var removedStatus = await _roomCommand.RemoveMemberAsync(roomId, targetUserId, innerCt).ConfigureAwait(false);
+            ClubMember? clubMembership = null;
+            CommunityMember? communityMembership = null;
 
-            if (removedStatus == RoomMemberStatus.Approved)
+            if (room.ClubId != Guid.Empty)
             {
-                await _roomCommand.IncrementRoomMembersAsync(roomId, -1, innerCt).ConfigureAwait(false);
+                clubMembership = await _clubQuery.GetMemberAsync(room.ClubId, targetUserId, innerCt).ConfigureAwait(false);
+                if (clubMembership?.Role == MemberRole.Owner)
+                {
+                    return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a club owner."));
+                }
+            }
+
+            var communityId = room.Club?.CommunityId;
+            if (communityId.HasValue)
+            {
+                communityMembership = await _communityQuery
+                    .GetMemberAsync(communityId.Value, targetUserId, innerCt)
+                    .ConfigureAwait(false);
+
+                if (communityMembership?.Role == MemberRole.Owner)
+                {
+                    return Result.Failure(new Error(Error.Codes.Forbidden, "Cannot remove a community owner."));
+                }
+            }
+
+            if (targetMembership is not null)
+            {
+                var removedStatus = await _roomCommand.RemoveMemberAsync(roomId, targetUserId, innerCt).ConfigureAwait(false);
+
+                if (removedStatus == RoomMemberStatus.Approved)
+                {
+                    await _roomCommand.IncrementRoomMembersAsync(roomId, -1, innerCt).ConfigureAwait(false);
+                }
+            }
+
+            if (clubMembership is not null)
+            {
+                await _clubCommand.RemoveMemberAsync(room.ClubId, targetUserId, innerCt).ConfigureAwait(false);
+                await _roomCommand.IncrementClubMembersAsync(room.ClubId, -1, innerCt).ConfigureAwait(false);
+            }
+
+            if (communityId.HasValue && communityMembership is not null)
+            {
+                await _communityCommand.RemoveMemberAsync(communityId.Value, targetUserId, innerCt).ConfigureAwait(false);
+                await _roomCommand.IncrementCommunityMembersAsync(communityId.Value, -1, innerCt).ConfigureAwait(false);
             }
 
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result.Success();
         }, ct: ct).ConfigureAwait(false);
 
+        if (kickResult.IsSuccess)
+        {
+            _logger.LogInformation(
+                "Room member kick cascade succeeded. Source={Source}. Actor={ActorId}({ActorRole}) Target={TargetId}({TargetRole}) Room={RoomId} Club={ClubId} Community={CommunityId}",
+                "CascadeFromRoom",
+                actorUserId,
+                actorMembership.Role,
+                targetUserId,
+                targetMembership?.Role,
+                roomId,
+                room.ClubId,
+                room.Club?.CommunityId);
+        }
+
         return kickResult;
     }
+
+    private static bool HasModerationPrivileges(RoomRole role) => role != RoomRole.Member;
+
+    private static bool HasHigherPriority(RoomRole actorRole, RoomRole targetRole)
+    {
+        return GetPriority(actorRole) > GetPriority(targetRole);
+    }
+
+    private static int GetPriority(RoomRole role) => role switch
+    {
+        RoomRole.Member => 0,
+        RoomRole.Moderator => 1,
+        RoomRole.Owner => 3,
+        _ => 2
+    };
 
     public async Task<Result> ApproveRoomMemberAsync(Guid roomId, Guid targetUserId, Guid actorUserId, CancellationToken ct = default)
     {
