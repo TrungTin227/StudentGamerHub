@@ -1,5 +1,3 @@
-using WebAPI.Hubs;
-
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +17,7 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddEmailing(builder.Configuration);
 builder.Services
     .AddWebApi(builder.Configuration)
+    .AddRealtime(builder.Configuration)
     .AddOperationalServices(builder.Configuration)
     .AddDataLayer(builder.Configuration)
     .AddJwtAuth<User>(builder.Configuration)
@@ -32,7 +31,6 @@ var app = builder.Build();
 app.UseOperationalPipeline(app.Environment);
 app.UseWebApi(app.Environment);
 
-app.MapHub<PresenceHub>("/ws/presence");
-app.MapHub<ChatHub>("/ws/chat");
+app.MapRealtimeEndpoints();
 
 app.Run();
