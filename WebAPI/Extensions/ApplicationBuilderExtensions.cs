@@ -1,4 +1,7 @@
-﻿using Scalar.AspNetCore;
+using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Scalar.AspNetCore;
 
 namespace WebApi.Extensions;
 
@@ -9,10 +12,40 @@ public static class ApplicationBuilderExtensions
         app.UseExceptionHandler();
 
         app.UseHttpsRedirection();
-        app.UseCors("Default");
-        app.UseRateLimiter();
+        app.UseRouting();
+        app.UseCors("Frontend");
         app.UseAuthentication();
         app.UseAuthorization();
+
+        if (env.IsDevelopment())
+        {
+            var corsOptions = app.Services.GetRequiredService<IOptions<CorsOptions>>().Value;
+            var policy = corsOptions.GetPolicy("Frontend");
+
+            if (policy is not null)
+            {
+                var origins = policy.Origins.Count > 0
+                    ? string.Join(", ", policy.Origins)
+                    : policy.AllowAnyOrigin ? "*" : "(none)";
+                var methods = policy.AllowAnyMethod
+                    ? "Any"
+                    : policy.Methods.Count > 0 ? string.Join(", ", policy.Methods) : "(none)";
+                var headers = policy.AllowAnyHeader
+                    ? "Any"
+                    : policy.Headers.Count > 0 ? string.Join(", ", policy.Headers) : "(none)";
+
+                app.Logger.LogInformation(
+                    "CORS policy 'Frontend' active. Origins: {Origins}. Methods: {Methods}. Headers: {Headers}. SupportsCredentials: {SupportsCredentials}",
+                    origins,
+                    methods,
+                    headers,
+                    policy.SupportsCredentials);
+            }
+            else
+            {
+                app.Logger.LogWarning("CORS policy 'Frontend' was not found during development diagnostics.");
+            }
+        }
 
         app.MapControllers();
 
