@@ -30,6 +30,7 @@ var app = builder.Build();
 // UseWebApi xử lý các vấn đề của khung sườn API (lỗi, OpenAPI, HTTPS, CORS, Auth, Controllers).
 app.UseOperationalPipeline(app.Environment);
 app.UseWebApi(app.Environment);
+app.UseRateLimiter();
 
 app.MapRealtimeEndpoints();
 

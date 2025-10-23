@@ -30,11 +30,15 @@ public static class RealtimeExtensions
         var options = app.Services.GetRequiredService<IOptions<RealtimeOptions>>().Value;
         var chatPath = options.ChatPath;
 
-        app.MapHub<PresenceHub>("/ws/presence").RequireCors("Default");
-        app.MapHub<ChatHub>(chatPath).RequireCors("Default");
+        const string corsPolicyName = "Frontend";
+
+        app.MapHub<PresenceHub>("/ws/presence").RequireCors(corsPolicyName);
+        app.MapHub<ChatHub>(chatPath).RequireCors(corsPolicyName);
 
         if (app.Environment.IsDevelopment())
         {
+            app.Logger.LogInformation("Realtime chat hub path resolved to {ChatPath}.", chatPath);
+
             var endpointSources = app.Services.GetRequiredService<IEnumerable<EndpointDataSource>>();
             var negotiatePath = $"{chatPath}/negotiate".TrimEnd('/');
             var duplicateCount = endpointSources
