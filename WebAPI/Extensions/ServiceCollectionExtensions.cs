@@ -435,27 +435,15 @@ public static class ServiceCollectionExtensions
 
         services.AddCors(opt =>
         {
-            opt.AddPolicy("Default", p =>
+            opt.AddPolicy("Frontend", p =>
             {
-                // Read allowed origins from configuration: Cors:AllowedOrigins as string[]
-                var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                                     ?? Array.Empty<string>();
-
-                if (allowedOrigins.Length == 0 || Array.Exists(allowedOrigins, o => o == "*"))
-                {
-                    // Fallback: allow any origin (no credentials allowed with wildcard)
-                    p.AllowAnyOrigin()
-                     .AllowAnyHeader()
-                     .AllowAnyMethod();
-                }
-                else
-                {
-                    // Explicit origins: allow credentials for SPA auth/cookies if needed
-                    p.WithOrigins(allowedOrigins)
-                     .AllowAnyHeader()
-                     .AllowAnyMethod()
-                     .AllowCredentials();
-                }
+                p.WithOrigins(
+                        "http://localhost:5173",
+                        "http://127.0.0.1:5173",
+                        "https://fe-student-gamer-hub.vercel.app")
+                 .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                 .AllowAnyHeader()
+                 .AllowCredentials();
             });
         });
 
