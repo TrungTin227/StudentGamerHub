@@ -147,7 +147,11 @@ public sealed class CascadeSeedingGuardTests
                 roomQuery,
                 roomCommand,
                 clubQuery,
-                new PasswordHasher<Room>());
+                clubCommand,
+                communityQuery,
+                communityCommand,
+                new PasswordHasher<Room>(),
+                NullLogger<RoomService>.Instance);
 
             var gameRepository = new GameRepository(db);
             var userGameRepository = new UserGameRepository(db);
