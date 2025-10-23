@@ -69,6 +69,8 @@ public sealed class ClubsController : ControllerBase
             Desc: true  // DESC order
         );
 
+        var currentUserId = User.GetUserId();
+
         var result = await _clubService.SearchAsync(
             communityId,
             name,
@@ -76,6 +78,7 @@ public sealed class ClubsController : ControllerBase
             membersFrom,
             membersTo,
             cursorRequest,
+            currentUserId,
             ct);
 
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
@@ -129,7 +132,7 @@ public sealed class ClubsController : ControllerBase
     }
 
     /// <summary>
-    /// Join a club. Requires community membership and is idempotent if already joined.
+    /// Join a club. Idempotent if already joined.
     /// </summary>
     [HttpPost("{clubId:guid}/join")]
     [EnableRateLimiting("ClubsWrite")]

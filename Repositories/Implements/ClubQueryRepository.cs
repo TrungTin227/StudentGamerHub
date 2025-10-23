@@ -131,6 +131,8 @@ public sealed class ClubQueryRepository : IClubQueryRepository
                     .FirstOrDefault(),
                 currentUserId.HasValue && _context.ClubMembers
                     .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value),
+                currentUserId.HasValue && _context.CommunityMembers
+                    .Any(cm => cm.CommunityId == c.CommunityId && cm.UserId == currentUserId.Value),
                 currentUserId.HasValue && _context.ClubMembers
                     .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value && cm.Role == MemberRole.Owner),
                 c.CreatedAtUtc,

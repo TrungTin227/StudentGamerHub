@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Repositories.Models;
 using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
@@ -16,6 +18,7 @@ public sealed class ClubService : IClubService
     private readonly ICommunityQueryRepository _communityQuery;
     private readonly IRoomQueryRepository _roomQuery;
     private readonly IRoomCommandRepository _roomCommand;
+    private readonly ILogger<ClubService> _logger;
 
     public ClubService(
         IGenericUnitOfWork uow,
@@ -23,7 +26,8 @@ public sealed class ClubService : IClubService
         IClubCommandRepository clubCommand,
         ICommunityQueryRepository communityQuery,
         IRoomQueryRepository roomQuery,
-        IRoomCommandRepository roomCommand)
+        IRoomCommandRepository roomCommand,
+        ILogger<ClubService>? logger = null)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _clubQuery = clubQuery ?? throw new ArgumentNullException(nameof(clubQuery));
@@ -31,6 +35,7 @@ public sealed class ClubService : IClubService
         _communityQuery = communityQuery ?? throw new ArgumentNullException(nameof(communityQuery));
         _roomQuery = roomQuery ?? throw new ArgumentNullException(nameof(roomQuery));
         _roomCommand = roomCommand ?? throw new ArgumentNullException(nameof(roomCommand));
+        _logger = logger ?? NullLogger<ClubService>.Instance;
     }
 
     public async Task<Result<CursorPageResult<ClubBriefDto>>> SearchAsync(
@@ -40,12 +45,43 @@ public sealed class ClubService : IClubService
         int? membersFrom,
         int? membersTo,
         CursorRequest cursor,
+        Guid? currentUserId = null,
         CancellationToken ct = default)
     {
         if (communityId == Guid.Empty)
         {
             return Result<CursorPageResult<ClubBriefDto>>.Failure(
                 new Error(Error.Codes.Validation, "CommunityId is required."));
+        }
+
+        var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+                new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var isCommunityMember = false;
+        if (currentUserId.HasValue)
+        {
+            var membership = await _communityQuery
+                .GetMemberAsync(communityId, currentUserId.Value, ct)
+                .ConfigureAwait(false);
+            isCommunityMember = membership is not null;
+        }
+
+        if (!community.IsPublic && !isCommunityMember)
+        {
+            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+                new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
+        }
+
+        if (community.IsPublic && !isCommunityMember)
+        {
+            _logger.LogInformation(
+                "Non-member user {UserId} listed clubs for public community {CommunityId}.",
+                currentUserId ?? Guid.Empty,
+                communityId);
         }
 
         if (membersFrom.HasValue && membersFrom.Value < 0)
@@ -219,6 +255,10 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Club not found."));
         }
 
+        var hadCommunityMembership = await _communityQuery
+            .GetMemberAsync(club.CommunityId, currentUserId, ct)
+            .ConfigureAwait(false) is not null;
+
         var existingMembership = await _clubQuery.GetMemberAsync(clubId, currentUserId, ct).ConfigureAwait(false);
         if (existingMembership is not null)
         {
@@ -266,6 +306,15 @@ public sealed class ClubService : IClubService
         if (detail is null)
         {
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load club details."));
+        }
+
+        if (!hadCommunityMembership && !detail.IsCommunityMember)
+        {
+            _logger.LogInformation(
+                "User {UserId} joined club {ClubId} in community {CommunityId} without community membership.",
+                currentUserId,
+                clubId,
+                club.CommunityId);
         }
 
         return Result<ClubDetailDto>.Success(detail.ToClubDetailDto());
@@ -358,6 +407,37 @@ public sealed class ClubService : IClubService
         if (detail is null)
         {
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Club not found."));
+        }
+
+        var community = await _communityQuery.GetByIdAsync(detail.CommunityId, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var isCommunityMember = detail.IsCommunityMember;
+        if (!isCommunityMember && currentUserId.HasValue)
+        {
+            var membership = await _communityQuery
+                .GetMemberAsync(detail.CommunityId, currentUserId.Value, ct)
+                .ConfigureAwait(false);
+            isCommunityMember = membership is not null;
+        }
+
+        var canView = community.IsPublic || detail.IsMember || isCommunityMember;
+        if (!canView)
+        {
+            return Result<ClubDetailDto>.Failure(
+                new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
+        }
+
+        if (community.IsPublic && !detail.IsMember && !isCommunityMember)
+        {
+            _logger.LogInformation(
+                "Non-member user {UserId} viewed public club {ClubId} in community {CommunityId}.",
+                currentUserId ?? Guid.Empty,
+                clubId,
+                community.Id);
         }
 
         return Result<ClubDetailDto>.Success(detail.ToClubDetailDto());
