@@ -30,8 +30,8 @@ public static class RealtimeExtensions
         var options = app.Services.GetRequiredService<IOptions<RealtimeOptions>>().Value;
         var chatPath = options.ChatPath;
 
-        app.MapHub<PresenceHub>("/ws/presence");
-        app.MapHub<ChatHub>(chatPath);
+        app.MapHub<PresenceHub>("/ws/presence").RequireCors("Default");
+        app.MapHub<ChatHub>(chatPath).RequireCors("Default");
 
         if (app.Environment.IsDevelopment())
         {

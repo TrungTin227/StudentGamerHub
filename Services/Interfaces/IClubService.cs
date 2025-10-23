@@ -26,6 +26,7 @@ public interface IClubService
         int? membersFrom,
         int? membersTo,
         CursorRequest cursor,
+        Guid? currentUserId = null,
         CancellationToken ct = default);
 
     Task<Result<ClubDetailDto>> CreateClubAsync(ClubCreateRequestDto req, Guid currentUserId, CancellationToken ct = default);
