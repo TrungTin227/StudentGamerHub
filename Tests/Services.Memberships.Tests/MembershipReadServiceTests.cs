@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Services.DTOs.Memberships;
 using Services.Implementations;
 using Services.Implementations.Memberships;
@@ -289,12 +290,22 @@ public sealed class MembershipReadServiceTests
             var uow = new UnitOfWork(db, factory);
 
             var communityQuery = new CommunityQueryRepository(db);
+            var communityCommand = new CommunityCommandRepository(db);
             var clubQuery = new ClubQueryRepository(db);
             var clubCommand = new ClubCommandRepository(db);
             var roomQuery = new RoomQueryRepository(db);
             var roomCommand = new RoomCommandRepository(db);
             var clubService = new ClubService(uow, clubQuery, clubCommand, communityQuery, roomQuery, roomCommand);
-            var roomService = new RoomService(uow, roomQuery, roomCommand, clubQuery, new PasswordHasher<Room>());
+            var roomService = new RoomService(
+                uow,
+                roomQuery,
+                roomCommand,
+                clubQuery,
+                clubCommand,
+                communityQuery,
+                communityCommand,
+                new PasswordHasher<Room>(),
+                NullLogger<RoomService>.Instance);
             var membershipReadService = new MembershipReadService(db);
 
             return new MembershipScenarioTestContext(connection, uow)
