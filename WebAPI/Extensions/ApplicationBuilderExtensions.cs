@@ -9,6 +9,7 @@ public static class ApplicationBuilderExtensions
         app.UseExceptionHandler();
 
         app.UseHttpsRedirection();
+        app.UseRouting();
         app.UseCors("Default");
         app.UseRateLimiter();
         app.UseAuthentication();

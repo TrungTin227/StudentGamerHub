@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
+using System;
+using System.Linq;
 using System.Threading.RateLimiting;
 using Services.Implementations.Memberships;
 using Services.Interfaces;
@@ -435,27 +437,26 @@ public static class ServiceCollectionExtensions
 
         services.AddCors(opt =>
         {
-            opt.AddPolicy("Default", p =>
+            opt.AddPolicy("Default", policy =>
             {
-                // Read allowed origins from configuration: Cors:AllowedOrigins as string[]
-                var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                                     ?? Array.Empty<string>();
+                var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins")
+                    .Get<string[]>()
+                    ?.Select(origin => origin?.Trim())
+                    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+                    .Select(origin => origin!.TrimEnd('/'))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray() ?? Array.Empty<string>();
 
-                if (allowedOrigins.Length == 0 || Array.Exists(allowedOrigins, o => o == "*"))
+                if (allowedOrigins.Length == 0)
                 {
-                    // Fallback: allow any origin (no credentials allowed with wildcard)
-                    p.AllowAnyOrigin()
-                     .AllowAnyHeader()
-                     .AllowAnyMethod();
+                    throw new InvalidOperationException(
+                        "Cors:AllowedOrigins must contain at least one origin. Configure explicit origins instead of relying on wildcards.");
                 }
-                else
-                {
-                    // Explicit origins: allow credentials for SPA auth/cookies if needed
-                    p.WithOrigins(allowedOrigins)
-                     .AllowAnyHeader()
-                     .AllowAnyMethod()
-                     .AllowCredentials();
-                }
+
+                policy.WithOrigins(allowedOrigins)
+                      .AllowAnyHeader()
+                      .AllowAnyMethod()
+                      .AllowCredentials();
             });
         });
 
