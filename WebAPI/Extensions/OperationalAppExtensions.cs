@@ -19,7 +19,6 @@ public static class OperationalAppExtensions
 
         app.UseResponseCompression();
         app.UseResponseCaching();
-        app.UseRateLimiter();
         app.UseRequestTimeouts();
 
         // Health endpoints
