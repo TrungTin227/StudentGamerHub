@@ -13,6 +13,7 @@ public sealed record ClubDetailDto(
     int RoomsCount,
     Guid OwnerId,
     bool IsMember,
+    bool IsCommunityMember,
     bool IsOwner,
     DateTime CreatedAtUtc,
     DateTime? UpdatedAtUtc

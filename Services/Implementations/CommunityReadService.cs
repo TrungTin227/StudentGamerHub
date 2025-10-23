@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace Services.Implementations;
 
 /// <summary>
@@ -6,10 +9,12 @@ namespace Services.Implementations;
 public sealed class CommunityReadService : ICommunityReadService
 {
     private readonly ICommunityQueryRepository _communityQuery;
+    private readonly ILogger<CommunityReadService> _logger;
 
-    public CommunityReadService(ICommunityQueryRepository communityQuery)
+    public CommunityReadService(ICommunityQueryRepository communityQuery, ILogger<CommunityReadService>? logger = null)
     {
         _communityQuery = communityQuery ?? throw new ArgumentNullException(nameof(communityQuery));
+        _logger = logger ?? NullLogger<CommunityReadService>.Instance;
     }
 
     public async Task<Result<PagedResult<CommunityDetailDto>>> SearchDiscoverAsync(
@@ -77,6 +82,29 @@ public sealed class CommunityReadService : ICommunityReadService
                 new Error(Error.Codes.NotFound, "Community not found."));
         }
 
+        var isMember = false;
+        if (currentUserId.HasValue)
+        {
+            var membership = await _communityQuery
+                .GetMemberAsync(communityId, currentUserId.Value, ct)
+                .ConfigureAwait(false);
+            isMember = membership is not null;
+        }
+
+        if (!community.IsPublic && !isMember)
+        {
+            return Result<OffsetPage<CommunityMemberDto>>.Failure(
+                new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
+        }
+
+        if (community.IsPublic && !isMember)
+        {
+            _logger.LogInformation(
+                "Non-member user {UserId} viewed members list for public community {CommunityId}.",
+                currentUserId ?? Guid.Empty,
+                communityId);
+        }
+
         var sanitizedLimit = Math.Clamp(paging.LimitSafe, 1, 50);
         var sanitizedPaging = new OffsetPaging(paging.OffsetSafe, sanitizedLimit, paging.Sort, paging.Desc);
 
@@ -106,6 +134,29 @@ public sealed class CommunityReadService : ICommunityReadService
         {
             return Result<IReadOnlyList<CommunityMemberDto>>.Failure(
                 new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var isMember = false;
+        if (currentUserId.HasValue)
+        {
+            var membership = await _communityQuery
+                .GetMemberAsync(communityId, currentUserId.Value, ct)
+                .ConfigureAwait(false);
+            isMember = membership is not null;
+        }
+
+        if (!community.IsPublic && !isMember)
+        {
+            return Result<IReadOnlyList<CommunityMemberDto>>.Failure(
+                new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
+        }
+
+        if (community.IsPublic && !isMember)
+        {
+            _logger.LogInformation(
+                "Non-member user {UserId} viewed recent members for public community {CommunityId}.",
+                currentUserId ?? Guid.Empty,
+                communityId);
         }
 
         var sanitizedLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);

@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Repositories.Models;
 using Repositories.WorkSeeds.Extensions;
 using Services.Common.Mapping;
@@ -17,6 +19,7 @@ public sealed class CommunityService : ICommunityService
     private readonly IClubCommandRepository _clubCommand;
     private readonly IRoomQueryRepository _roomQuery;
     private readonly IRoomCommandRepository _roomCommand;
+    private readonly ILogger<CommunityService> _logger;
 
     public CommunityService(
         IGenericUnitOfWork uow,
@@ -25,7 +28,8 @@ public sealed class CommunityService : ICommunityService
         IClubQueryRepository clubQuery,
         IClubCommandRepository clubCommand,
         IRoomQueryRepository roomQuery,
-        IRoomCommandRepository roomCommand)
+        IRoomCommandRepository roomCommand,
+        ILogger<CommunityService>? logger = null)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _communityQuery = communityQuery ?? throw new ArgumentNullException(nameof(communityQuery));
@@ -34,6 +38,7 @@ public sealed class CommunityService : ICommunityService
         _clubCommand = clubCommand ?? throw new ArgumentNullException(nameof(clubCommand));
         _roomQuery = roomQuery ?? throw new ArgumentNullException(nameof(roomQuery));
         _roomCommand = roomCommand ?? throw new ArgumentNullException(nameof(roomCommand));
+        _logger = logger ?? NullLogger<CommunityService>.Instance;
     }
 
     public async Task<Result<CommunityDetailDto>> CreateCommunityAsync(CommunityCreateRequestDto req, Guid currentUserId, CancellationToken ct = default)
@@ -308,6 +313,33 @@ public sealed class CommunityService : ICommunityService
         if (detail is null)
         {
             return Result<CommunityDetailDto>.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        if (!detail.IsPublic && !detail.IsMember)
+        {
+            if (!currentUserId.HasValue)
+            {
+                return Result<CommunityDetailDto>.Failure(
+                    new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
+            }
+
+            var membership = await _communityQuery
+                .GetMemberAsync(communityId, currentUserId.Value, ct)
+                .ConfigureAwait(false);
+
+            if (membership is null)
+            {
+                return Result<CommunityDetailDto>.Failure(
+                    new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
+            }
+        }
+
+        if (detail.IsPublic && !detail.IsMember)
+        {
+            _logger.LogInformation(
+                "Non-member user {UserId} viewed public community {CommunityId}.",
+                currentUserId ?? Guid.Empty,
+                communityId);
         }
 
         return Result<CommunityDetailDto>.Success(detail.ToDetailDto());

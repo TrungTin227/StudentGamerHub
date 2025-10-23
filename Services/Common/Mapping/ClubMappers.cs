@@ -41,6 +41,7 @@ public static class ClubMappers
             model.RoomsCount,
             model.OwnerId,
             model.IsMember,
+            model.IsCommunityMember,
             model.IsOwner,
             model.CreatedAtUtc,
             model.UpdatedAtUtc
