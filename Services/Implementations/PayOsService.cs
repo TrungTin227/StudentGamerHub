@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Services.Application.Quests;
 using Services.Configuration;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -25,6 +26,7 @@ public sealed class PayOsService : IPayOsService
     private readonly ITransactionRepository _transactionRepository;
     private readonly IWalletRepository _walletRepository;
     private readonly IEscrowRepository _escrowRepository;
+    private readonly IQuestService _questService;
 
     public PayOsService(
         HttpClient httpClient,
@@ -37,7 +39,8 @@ public sealed class PayOsService : IPayOsService
         IEventQueryRepository eventQueryRepository,
         ITransactionRepository transactionRepository,
         IWalletRepository walletRepository,
-        IEscrowRepository escrowRepository)
+        IEscrowRepository escrowRepository,
+        IQuestService questService)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _config = configOptions?.Value ?? throw new ArgumentNullException(nameof(configOptions));
@@ -50,6 +53,7 @@ public sealed class PayOsService : IPayOsService
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
+        _questService = questService ?? throw new ArgumentNullException(nameof(questService));
     }
 
     // =========================
@@ -292,6 +296,7 @@ public sealed class PayOsService : IPayOsService
 
         if (registration.Status is EventRegistrationStatus.Confirmed or EventRegistrationStatus.CheckedIn)
         {
+            await TriggerAttendQuestAsync(registration.UserId, registration.EventId, ct).ConfigureAwait(false);
             if (pi.Status != PaymentIntentStatus.Succeeded)
             {
                 pi.Status = PaymentIntentStatus.Succeeded;
@@ -329,6 +334,7 @@ public sealed class PayOsService : IPayOsService
                 await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
                 await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
             }
+            await TriggerAttendQuestAsync(registration.UserId, registration.EventId, ct).ConfigureAwait(false);
             return Result.Success();
         }
 
@@ -364,6 +370,8 @@ public sealed class PayOsService : IPayOsService
         pi.UpdatedBy = pi.UserId;
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await TriggerAttendQuestAsync(registration.UserId, registration.EventId, ct).ConfigureAwait(false);
 
         return Result.Success();
     }
@@ -502,6 +510,23 @@ public sealed class PayOsService : IPayOsService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return Result.Success();
+    }
+
+    private async Task TriggerAttendQuestAsync(Guid userId, Guid eventId, CancellationToken ct)
+    {
+        try
+        {
+            var questResult = await _questService.MarkAttendEventAsync(userId, eventId, ct).ConfigureAwait(false);
+            _ = questResult;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to trigger ATTEND_EVENT quest for user {UserId} event {EventId}.", userId, eventId);
+        }
     }
 
     private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)
