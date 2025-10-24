@@ -439,9 +439,11 @@ public static class ServiceCollectionExtensions
             {
                 p.WithOrigins(
                         "http://localhost:5173",
+                        "https://localhost:5173",
                         "http://127.0.0.1:5173",
+                        "https://127.0.0.1:5173",
                         "https://fe-student-gamer-hub.vercel.app")
-                 .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                 .AllowAnyMethod()
                  .AllowAnyHeader()
                  .AllowCredentials();
             });
