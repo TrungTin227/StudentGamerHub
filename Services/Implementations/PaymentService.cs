@@ -1,6 +1,7 @@
 ﻿using DTOs.Payments.PayOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Services.Application.Quests;
 using Services.Configuration;
 using Services.Interfaces;
 using System;
@@ -28,6 +29,7 @@ public sealed class PaymentService : IPaymentService
     private readonly IPayOsService _payOsService;
     private readonly BillingOptions _billingOptions;
     private readonly PayOsConfig _payOsConfig;
+    private readonly IQuestService _questService;
 
     public PaymentService(
         IGenericUnitOfWork uow,
@@ -40,7 +42,8 @@ public sealed class PaymentService : IPaymentService
         IEscrowRepository escrowRepository,
         IPayOsService payOsService,
         IOptionsSnapshot<BillingOptions> billingOptions,
-        IOptionsSnapshot<PayOsConfig> payOsOptions)
+        IOptionsSnapshot<PayOsConfig> payOsOptions,
+        IQuestService questService)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _paymentIntentRepository = paymentIntentRepository ?? throw new ArgumentNullException(nameof(paymentIntentRepository));
@@ -53,6 +56,7 @@ public sealed class PaymentService : IPaymentService
         _payOsService = payOsService ?? throw new ArgumentNullException(nameof(payOsService));
         _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
         _payOsConfig = payOsOptions?.Value ?? throw new ArgumentNullException(nameof(payOsOptions));
+        _questService = questService ?? throw new ArgumentNullException(nameof(questService));
     }
 
     public Task<Result<Guid>> CreateTopUpIntentAsync(Guid organizerId, Guid eventId, long amountCents, CancellationToken ct = default)
@@ -202,6 +206,7 @@ public sealed class PaymentService : IPaymentService
 
         if (registration.Status is EventRegistrationStatus.Confirmed or EventRegistrationStatus.CheckedIn)
         {
+            await TriggerAttendQuestAsync(registration.UserId, registration.EventId, ct).ConfigureAwait(false);
             pi.Status = PaymentIntentStatus.Succeeded;
             await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
             await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -281,6 +286,8 @@ public sealed class PaymentService : IPaymentService
 
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await TriggerAttendQuestAsync(registration.UserId, registration.EventId, ct).ConfigureAwait(false);
 
         return Result.Success();
     }
@@ -524,6 +531,23 @@ public sealed class PaymentService : IPaymentService
             PaymentPurpose.WalletTopUp => $"Wallet top-up {intent.Id}",
             _ => $"Payment intent {intent.Id}"
         };
+    }
+
+    private async Task TriggerAttendQuestAsync(Guid userId, Guid eventId, CancellationToken ct)
+    {
+        try
+        {
+            var questResult = await _questService.MarkAttendEventAsync(userId, eventId, ct).ConfigureAwait(false);
+            _ = questResult;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Best-effort: quest completion failures should not block payment confirmation.
+        }
     }
 
     private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)

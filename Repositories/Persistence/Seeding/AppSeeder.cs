@@ -330,7 +330,10 @@ public sealed class AppSeeder : IAppSeeder
 
         var users = await _db.Users
             .AsNoTracking()
-            .Where(u => !u.IsDeleted)
+            .Where(u => !u.IsDeleted
+                        && u.Email != null
+                        && u.Email.StartsWith("user")
+                        && u.Email.EndsWith("@example.com"))
             .OrderBy(u => u.CreatedAtUtc)
             .Select(u => new { u.Id })
             .ToListAsync(ct);
