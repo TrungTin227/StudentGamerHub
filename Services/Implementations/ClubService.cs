@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Repositories.Models;
@@ -139,10 +139,31 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Validation, "Club name must be at most 200 characters."));
         }
 
-        var communityMembership = await _communityQuery.GetMemberAsync(req.CommunityId, currentUserId, ct).ConfigureAwait(false);
-        if (communityMembership is null)
+        // ✅ Load community để kiểm tra IsPublic
+        var community = await _communityQuery.GetByIdAsync(req.CommunityId, ct).ConfigureAwait(false);
+        if (community is null)
         {
-            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Conflict, "CommunityMembershipRequired"));
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
+        var isCommunityMember = await _communityQuery
+            .GetMemberAsync(req.CommunityId, currentUserId, ct)
+            .ConfigureAwait(false) is not null;
+
+        // ❗Chỉ cấm nếu community private và user chưa join
+        if (!community.IsPublic && !isCommunityMember)
+        {
+            return Result<ClubDetailDto>.Failure(
+                new Error(Error.Codes.Forbidden, "CommunityMembershipRequired"));
+        }
+
+        if (community.IsPublic && !isCommunityMember)
+        {
+            _logger.LogInformation(
+                "Non-member user {UserId} created club {ClubName} in public community {CommunityId}.",
+                currentUserId,
+                req.Name,
+                req.CommunityId);
         }
 
         var now = DateTime.UtcNow;
@@ -255,9 +276,23 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Club not found."));
         }
 
+        // ✅ Load community để kiểm tra IsPublic
+        var community = await _communityQuery.GetByIdAsync(club.CommunityId, ct).ConfigureAwait(false);
+        if (community is null)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+        }
+
         var hadCommunityMembership = await _communityQuery
             .GetMemberAsync(club.CommunityId, currentUserId, ct)
             .ConfigureAwait(false) is not null;
+
+        // ❗Chỉ cấm nếu community private và user chưa join
+        if (!community.IsPublic && !hadCommunityMembership)
+        {
+            return Result<ClubDetailDto>.Failure(
+                new Error(Error.Codes.Forbidden, "CommunityMembershipRequired"));
+        }
 
         var existingMembership = await _clubQuery.GetMemberAsync(clubId, currentUserId, ct).ConfigureAwait(false);
         if (existingMembership is not null)
@@ -308,10 +343,10 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load club details."));
         }
 
-        if (!hadCommunityMembership && !detail.IsCommunityMember)
+        if (community.IsPublic && !hadCommunityMembership)
         {
             _logger.LogInformation(
-                "User {UserId} joined club {ClubId} in community {CommunityId} without community membership.",
+                "Non-member user {UserId} joined club {ClubId} in public community {CommunityId}.",
                 currentUserId,
                 clubId,
                 club.CommunityId);
