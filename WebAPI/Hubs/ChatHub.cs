@@ -1,9 +1,11 @@
 using DTOs.Chat;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Services.Common.Abstractions;
 using Services.Configuration;
+using Services.Realtime;
 using StackExchange.Redis;
 
 namespace WebAPI.Hubs;
@@ -18,17 +20,26 @@ public sealed class ChatHub : Hub
     private readonly ICurrentUserService _currentUser;
     private readonly IConnectionMultiplexer _redis;
     private readonly ChatOptions _options;
+    private readonly IRateLimiter _rateLimiter;
+    private readonly IChannelValidator _channelValidator;
+    private readonly ILogger<ChatHub> _logger;
 
     public ChatHub(
         IChatHistoryService chatHistory,
         ICurrentUserService currentUser,
         IConnectionMultiplexer redis,
-        IOptions<ChatOptions> options)
+        IOptions<ChatOptions> options,
+        IRateLimiter rateLimiter,
+        IChannelValidator channelValidator,
+        ILogger<ChatHub> logger)
     {
         _chatHistory = chatHistory ?? throw new ArgumentNullException(nameof(chatHistory));
         _currentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
         _redis = redis ?? throw new ArgumentNullException(nameof(redis));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
+        _channelValidator = channelValidator ?? throw new ArgumentNullException(nameof(channelValidator));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public override async Task OnConnectedAsync()
@@ -49,7 +60,6 @@ public sealed class ChatHub : Hub
     {
         var db = _redis.GetDatabase();
         await db.KeyDeleteAsync($"chat:conn:{Context.ConnectionId}").ConfigureAwait(false);
-        await db.KeyDeleteAsync($"chat:rl:{Context.ConnectionId}").ConfigureAwait(false);
 
         await base.OnDisconnectedAsync(exception).ConfigureAwait(false);
     }
@@ -59,9 +69,16 @@ public sealed class ChatHub : Hub
     /// </summary>
     public async Task SendDm(Guid toUserId, string text)
     {
-        await CheckRateLimitAsync().ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new HubException("Message text cannot be empty.");
+        }
 
+        var cancellation = Context.ConnectionAborted;
         var currentUserId = _currentUser.GetUserIdOrThrow();
+
+        await EnsureWithinRateLimitAsync(currentUserId, cancellation).ConfigureAwait(false);
+
 
         if (currentUserId == toUserId)
         {
@@ -94,9 +111,23 @@ public sealed class ChatHub : Hub
     /// </summary>
     public async Task SendToRoom(Guid roomId, string text)
     {
-        await CheckRateLimitAsync().ConfigureAwait(false);
+        if (roomId == Guid.Empty)
+        {
+            throw new HubException("Room id is required.");
+        }
 
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new HubException("Message text cannot be empty.");
+        }
+
+        var cancellation = Context.ConnectionAborted;
         var currentUserId = _currentUser.GetUserIdOrThrow();
+
+        await EnsureWithinRateLimitAsync(currentUserId, cancellation).ConfigureAwait(false);
+        await _channelValidator
+            .EnsureRoomAccessAsync(roomId, currentUserId, cancellation)
+            .ConfigureAwait(false);
 
         var channel = $"room:{roomId}";
 
@@ -123,10 +154,17 @@ public sealed class ChatHub : Hub
     /// </summary>
     public async Task LoadHistory(string channel, string? afterId, int? take)
     {
-        var currentUserId = _currentUser.GetUserIdOrThrow();
+        if (string.IsNullOrWhiteSpace(channel))
+        {
+            throw new HubException("Channel is required.");
+        }
 
-        // Validate channel format and authorization
-        ValidateChannelAccess(channel, currentUserId);
+        var currentUserId = _currentUser.GetUserIdOrThrow();
+        var cancellation = Context.ConnectionAborted;
+
+        await _channelValidator
+            .EnsureChannelAccessAsync(channel, currentUserId, cancellation)
+            .ConfigureAwait(false);
 
         var normalizedTake = Math.Clamp(take ?? 50, 1, _options.HistoryMax);
 
@@ -140,12 +178,19 @@ public sealed class ChatHub : Hub
     /// </summary>
     public async Task JoinChannels(string[] channels)
     {
+        if (channels is null || channels.Length == 0)
+        {
+            throw new HubException("Channels cannot be null or empty.");
+        }
+
         var currentUserId = _currentUser.GetUserIdOrThrow();
+        var cancellation = Context.ConnectionAborted;
 
         foreach (var channel in channels)
         {
-            // Validate access for each channel
-            ValidateChannelAccess(channel, currentUserId);
+            await _channelValidator
+                .EnsureChannelAccessAsync(channel, currentUserId, cancellation)
+                .ConfigureAwait(false);
 
             await Groups.AddToGroupAsync(Context.ConnectionId, channel).ConfigureAwait(false);
         }
@@ -153,20 +198,19 @@ public sealed class ChatHub : Hub
 
     // Helpers
 
-    private async Task CheckRateLimitAsync()
+    private async Task EnsureWithinRateLimitAsync(Guid userId, CancellationToken cancellationToken)
     {
-        var key = $"chat:rl:{Context.ConnectionId}";
-        var db = _redis.GetDatabase();
+        var window = TimeSpan.FromSeconds(_options.RateLimitWindowSeconds);
+        var allowed = await _rateLimiter
+            .IsAllowedAsync(userId, _options.RateLimitMaxMessages, window, cancellationToken)
+            .ConfigureAwait(false);
 
-        var count = await db.StringIncrementAsync(key).ConfigureAwait(false);
-
-        if (count == 1)
+        if (!allowed)
         {
-            await db.KeyExpireAsync(key, TimeSpan.FromSeconds(_options.RateLimitWindowSeconds)).ConfigureAwait(false);
-        }
-
-        if (count > _options.RateLimitMaxMessages)
-        {
+            _logger.LogWarning(
+                "Rate limit exceeded for user {UserId} on connection {ConnectionId}.",
+                userId,
+                Context.ConnectionId);
             throw new HubException("rate_limited");
         }
     }
@@ -176,46 +220,5 @@ public sealed class ChatHub : Hub
         return string.Compare(a.ToString(), b.ToString(), StringComparison.Ordinal) < 0
             ? (a, b)
             : (b, a);
-    }
-
-    private static void ValidateChannelAccess(string channel, Guid currentUserId)
-    {
-        if (string.IsNullOrWhiteSpace(channel))
-        {
-            throw new HubException("Channel is required.");
-        }
-
-        if (channel.StartsWith("dm:", StringComparison.OrdinalIgnoreCase))
-        {
-            // Extract min/max from "dm:{min}_{max}"
-            var parts = channel.Substring(3).Split('_');
-            if (parts.Length != 2 || !Guid.TryParse(parts[0], out var min) || !Guid.TryParse(parts[1], out var max))
-            {
-                throw new HubException("Invalid DM channel format.");
-            }
-
-            // User must be either min or max
-            if (currentUserId != min && currentUserId != max)
-            {
-                throw new HubException("Unauthorized access to DM channel.");
-            }
-        }
-        else if (channel.StartsWith("room:", StringComparison.OrdinalIgnoreCase))
-        {
-            // Extract roomId from "room:{roomId}"
-            var roomIdStr = channel.Substring(5);
-            if (!Guid.TryParse(roomIdStr, out _))
-            {
-                throw new HubException("Invalid room channel format.");
-            }
-
-            // For room access, we could check RoomMember in DB, but that's expensive
-            // For now, we allow access (security is handled at join time in RoomService)
-            // Optionally: implement IRoomMembershipChecker service for validation
-        }
-        else
-        {
-            throw new HubException("Invalid channel format. Must start with 'dm:' or 'room:'.");
-        }
     }
 }

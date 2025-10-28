@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using WebApi.Options;
 using WebAPI.Hubs;
+using Services.Realtime;
 
 namespace WebApi.Extensions;
 
@@ -16,6 +17,10 @@ public static class RealtimeExtensions
     public static IServiceCollection AddRealtime(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSignalR();
+
+        services.AddSingleton<IRateLimiter, RedisSlidingWindowRateLimiter>();
+        services.AddScoped<IRoomMembershipService, RoomMembershipService>();
+        services.AddScoped<IChannelValidator, ChannelValidatorService>();
 
         services.AddOptions<RealtimeOptions>()
             .Bind(configuration.GetSection(RealtimeOptions.SectionName))
