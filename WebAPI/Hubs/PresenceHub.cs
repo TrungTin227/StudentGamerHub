@@ -1,4 +1,6 @@
 using Application.Friends;
+using System.Collections.Concurrent;
+using System.Linq;
 using DTOs.Presence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -15,6 +17,8 @@ public sealed class PresenceHub : Hub
 {
     private const string FriendsSnapshotEvent = "presence:friends";
     private const string FriendUpdateEvent = "presence:update";
+
+    private static readonly ConcurrentDictionary<Guid, CancellationTokenSource> PendingOfflineBroadcasts = new();
 
     private readonly IPresenceService _presence;
     private readonly IPresenceReader _reader;
@@ -39,6 +43,8 @@ public sealed class PresenceHub : Hub
     public override async Task OnConnectedAsync()
     {
         var userId = EnsureAuthenticatedUser();
+
+        CancelPendingOfflineBroadcast(userId);
 
         await Groups
             .AddToGroupAsync(Context.ConnectionId, GetUserGroup(userId))
@@ -136,29 +142,35 @@ public sealed class PresenceHub : Hub
             return;
         }
 
-        var presenceResult = await _reader
-            .GetBatchAsync(friendIds, cancellationToken)
-            .ConfigureAwait(false);
+        var maxBatchSize = Math.Max(_options.MaxBatchSize, 1);
+        var onlineFriends = new List<PresenceSnapshotItem>(friendIds.Count);
 
-        if (!presenceResult.IsSuccess || presenceResult.Value is null)
+        foreach (var chunk in friendIds
+            .Distinct()
+            .Chunk(maxBatchSize))
         {
-            _logger.LogWarning(
-                "Failed to resolve presence snapshot for friends of user {UserId}: {Error}",
-                userId,
-                presenceResult.Error?.Message);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            await Clients.Caller
-                .SendAsync(FriendsSnapshotEvent, Array.Empty<PresenceSnapshotItem>(), cancellationToken: cancellationToken)
+            var chunkList = chunk.ToArray();
+            var presenceResult = await _reader
+                .GetBatchAsync(chunkList, cancellationToken)
                 .ConfigureAwait(false);
-            return;
+
+            if (!presenceResult.IsSuccess || presenceResult.Value is null)
+            {
+                _logger.LogWarning(
+                    "Failed to resolve presence snapshot chunk (size {ChunkSize}) for friends of user {UserId}: {Error}",
+                    chunkList.Length,
+                    userId,
+                    presenceResult.Error?.Message);
+                continue;
+            }
+
+            onlineFriends.AddRange(presenceResult.Value.Where(snapshot => snapshot.IsOnline));
         }
 
-        var onlineFriends = presenceResult.Value
-            .Where(snapshot => snapshot.IsOnline)
-            .ToArray();
-
         await Clients.Caller
-            .SendAsync(FriendsSnapshotEvent, onlineFriends, cancellationToken: cancellationToken)
+            .SendAsync(FriendsSnapshotEvent, onlineFriends.ToArray(), cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -224,12 +236,35 @@ public sealed class PresenceHub : Hub
         }
     }
 
-    private async Task ScheduleOfflineBroadcastAsync(Guid userId)
+    private Task ScheduleOfflineBroadcastAsync(Guid userId)
+    {
+        var delaySeconds = Math.Max(_options.TtlSeconds + _options.GraceSeconds + 1, 1);
+        var cts = new CancellationTokenSource();
+
+        var stored = PendingOfflineBroadcasts.AddOrUpdate(
+            userId,
+            cts,
+            (_, existing) =>
+            {
+                existing.Cancel();
+                existing.Dispose();
+                return cts;
+            });
+
+        if (!ReferenceEquals(stored, cts))
+        {
+            cts.Dispose();
+            return Task.CompletedTask;
+        }
+
+        return RunOfflineBroadcastAsync(userId, delaySeconds, cts);
+    }
+
+    private async Task RunOfflineBroadcastAsync(Guid userId, int delaySeconds, CancellationTokenSource cts)
     {
         try
         {
-            var delaySeconds = Math.Max(_options.TtlSeconds + _options.GraceSeconds + 1, 1);
-            await Task.Delay(TimeSpan.FromSeconds(delaySeconds)).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cts.Token).ConfigureAwait(false);
 
             var statusResult = await _presence
                 .IsOnlineAsync(userId, CancellationToken.None)
@@ -249,9 +284,24 @@ public sealed class PresenceHub : Hub
                 await BroadcastPresenceAsync(userId, CancellationToken.None).ConfigureAwait(false);
             }
         }
+        catch (TaskCanceledException)
+        {
+            _logger.LogDebug(
+                "Offline presence broadcast canceled for user {UserId}.",
+                userId);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to schedule offline broadcast for user {UserId}", userId);
+        }
+        finally
+        {
+            if (PendingOfflineBroadcasts.TryGetValue(userId, out var existing) && ReferenceEquals(existing, cts))
+            {
+                PendingOfflineBroadcasts.TryRemove(userId, out _);
+            }
+
+            cts.Dispose();
         }
     }
 
@@ -264,6 +314,15 @@ public sealed class PresenceHub : Hub
         }
 
         return userId.Value;
+    }
+
+    private static void CancelPendingOfflineBroadcast(Guid userId)
+    {
+        if (PendingOfflineBroadcasts.TryRemove(userId, out var cts))
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
     }
 
     private static string GetUserGroup(Guid userId) => $"presence:user:{userId:D}";
