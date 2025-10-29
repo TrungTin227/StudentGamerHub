@@ -28,7 +28,7 @@ public sealed class PaymentService : IPaymentService
     private readonly IEscrowRepository _escrowRepository;
     private readonly IPayOsService _payOsService;
     private readonly BillingOptions _billingOptions;
-    private readonly PayOsConfig _payOsConfig;
+    private readonly PayOsOptions _payOsOptions;
     private readonly IQuestService _questService;
 
     public PaymentService(
@@ -42,7 +42,7 @@ public sealed class PaymentService : IPaymentService
         IEscrowRepository escrowRepository,
         IPayOsService payOsService,
         IOptionsSnapshot<BillingOptions> billingOptions,
-        IOptionsSnapshot<PayOsConfig> payOsOptions,
+        IOptionsSnapshot<PayOsOptions> payOsOptions,
         IQuestService questService)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
@@ -55,7 +55,7 @@ public sealed class PaymentService : IPaymentService
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _payOsService = payOsService ?? throw new ArgumentNullException(nameof(payOsService));
         _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
-        _payOsConfig = payOsOptions?.Value ?? throw new ArgumentNullException(nameof(payOsOptions));
+        _payOsOptions = payOsOptions?.Value ?? throw new ArgumentNullException(nameof(payOsOptions));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
     }
 
@@ -428,7 +428,7 @@ public sealed class PaymentService : IPaymentService
                 return Result<string>.Failure(new Error(Error.Codes.Validation, "Return URL is not allowed."));
             }
 
-            var cancelUrl = ResolveCancelUrl(returnUrl);
+            var cancelUrl = ResolveCancelUrl(returnUrl) ?? resolvedReturnUrl;
             var description = BuildDescription(pi);
 
             // 🔑 đảm bảo có OrderCode số và gán vào PI (TrySetOrderCodeAsync)
@@ -480,33 +480,33 @@ public sealed class PaymentService : IPaymentService
 
     private string? ResolveReturnUrl(string? requestedReturnUrl)
     {
-        var defaultUrl = _payOsConfig.ReturnUrl?.Trim();
-        if (string.IsNullOrWhiteSpace(defaultUrl))
+        if (!string.IsNullOrWhiteSpace(requestedReturnUrl))
         {
-            return null;
+            var normalized = requestedReturnUrl.Trim();
+            if (Uri.TryCreate(normalized, UriKind.Absolute, out var absolute))
+            {
+                return absolute.ToString();
+            }
+
+            var frontendResolved = BuildFrontendUrl(normalized);
+            if (!string.IsNullOrWhiteSpace(frontendResolved))
+            {
+                return frontendResolved;
+            }
         }
 
-        if (string.IsNullOrWhiteSpace(requestedReturnUrl))
+        if (!string.IsNullOrWhiteSpace(_payOsOptions.FrontendBaseUrl))
         {
-            return defaultUrl;
+            var frontendDefault = BuildFrontendUrl("/payment/result");
+            if (!string.IsNullOrWhiteSpace(frontendDefault))
+            {
+                return frontendDefault;
+            }
         }
 
-        var normalized = requestedReturnUrl.Trim();
-        if (string.Equals(normalized, defaultUrl, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(_payOsOptions.ReturnUrl))
         {
-            return normalized;
-        }
-
-        var cancel = _payOsConfig.CancelUrl?.Trim();
-        if (!string.IsNullOrWhiteSpace(cancel) && string.Equals(normalized, cancel, StringComparison.OrdinalIgnoreCase))
-        {
-            return normalized;
-        }
-
-        if (normalized.StartsWith("/", StringComparison.Ordinal) &&
-            Uri.TryCreate(defaultUrl, UriKind.Absolute, out var baseUri))
-        {
-            return new Uri(baseUri, normalized).ToString();
+            return _payOsOptions.ReturnUrl.Trim();
         }
 
         return null;
@@ -514,12 +514,58 @@ public sealed class PaymentService : IPaymentService
 
     private string? ResolveCancelUrl(string? requestedReturnUrl)
     {
-        if (!string.IsNullOrWhiteSpace(_payOsConfig.CancelUrl))
+        if (!string.IsNullOrWhiteSpace(_payOsOptions.CancelUrl))
         {
-            return _payOsConfig.CancelUrl.Trim();
+            return _payOsOptions.CancelUrl.Trim();
         }
 
-        return ResolveReturnUrl(requestedReturnUrl);
+        if (!string.IsNullOrWhiteSpace(requestedReturnUrl))
+        {
+            var normalized = requestedReturnUrl.Trim();
+            if (Uri.TryCreate(normalized, UriKind.Absolute, out var absolute))
+            {
+                return absolute.ToString();
+            }
+
+            var frontendResolved = BuildFrontendUrl(normalized);
+            if (!string.IsNullOrWhiteSpace(frontendResolved))
+            {
+                return frontendResolved;
+            }
+        }
+
+        var fallback = BuildFrontendUrl("/payment/result");
+        if (!string.IsNullOrWhiteSpace(fallback))
+        {
+            return fallback;
+        }
+
+        return ResolveReturnUrl(null);
+    }
+
+    private string? BuildFrontendUrl(string pathOrUrl)
+    {
+        if (string.IsNullOrWhiteSpace(_payOsOptions.FrontendBaseUrl))
+        {
+            return null;
+        }
+
+        var baseValue = _payOsOptions.FrontendBaseUrl.Trim();
+        if (!Uri.TryCreate(baseValue, UriKind.Absolute, out var baseUri))
+        {
+            return null;
+        }
+
+        if (Uri.TryCreate(pathOrUrl, UriKind.Absolute, out var absolute))
+        {
+            return absolute.ToString();
+        }
+
+        var relative = pathOrUrl.StartsWith("/", StringComparison.Ordinal)
+            ? pathOrUrl
+            : "/" + pathOrUrl;
+
+        return new Uri(baseUri, relative).ToString();
     }
 
     private static string BuildDescription(PaymentIntent intent)

@@ -1,30 +1,88 @@
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using FluentAssertions;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Repositories.Interfaces;
+using Repositories.WorkSeeds.Interfaces;
+using Services.Configuration;
+using Services.Implementations;
+using Services.Application.Quests;
+using Services.Interfaces;
 using Xunit;
 
 namespace Services.Payments.Tests;
 
 public sealed class PayOsServiceTests
 {
-    [Fact()]
-    public void CreatePaymentLink_ReturnsCheckoutUrl()
+    [Fact]
+    public void ValidatePayOsSignature_ReturnsTrueForValidSignature()
     {
-        // Arrange: seed payment intent, configure PayOS sandbox keys.
-        // Act: call IPaymentService.CreateHostedCheckoutUrlAsync and capture response.
-        // Assert: verify returned payload contains non-empty checkout URL.
+        const string secret = "test-secret";
+        const string payload = "{\"orderCode\":123}";
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var signature = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+
+        PayOsService.ValidatePayOsSignature(payload, signature, secret).Should().BeTrue();
     }
 
-    [Fact()]
-    public void Webhook_SuccessCreditsWallet()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("ffzz")]
+    public void ValidatePayOsSignature_ReturnsFalseForInvalidSignature(string? signature)
     {
-        // Arrange: perform a sandbox payment flow and capture the webhook payload from PayOS.
-        // Act: send payload + signature to POST /api/payments/payos/webhook.
-        // Assert: confirm wallet balance increases and payment intent status becomes Succeeded.
+        const string secret = "test-secret";
+        const string payload = "{\"orderCode\":123}";
+
+        PayOsService.ValidatePayOsSignature(payload, signature, secret).Should().BeFalse();
     }
 
-    [Fact(Skip = "Integration smoke test - invalid signature should be rejected")]
-    public void Webhook_InvalidSignature_ReturnsForbidden()
+    [Fact]
+    public async Task AcquireReplayLease_PreventsImmediateReplay()
     {
-        // Arrange: craft a valid webhook payload but tamper with signature header.
-        // Act: POST to /api/payments/payos/webhook with incorrect signature.
-        // Assert: API responds with 403 Forbidden and payment intent remains unchanged.
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = CreateService(cache);
+
+        var method = typeof(PayOsService)
+            .GetMethod("AcquireReplayLeaseAsync", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Expected replay lease method not found.");
+
+        var firstTask = (Task)method.Invoke(service, new object[] { 123456L, "fingerprint" })!;
+        await firstTask.ConfigureAwait(false);
+        var firstLease = firstTask.GetType().GetProperty("Result")!.GetValue(firstTask)!;
+        var acquiredProperty = firstLease.GetType().GetProperty("Acquired")!;
+        ((bool)acquiredProperty.GetValue(firstLease)!).Should().BeTrue();
+
+        var replayTask = (Task)method.Invoke(service, new object[] { 123456L, "fingerprint" })!;
+        await replayTask.ConfigureAwait(false);
+        var replayLease = replayTask.GetType().GetProperty("Result")!.GetValue(replayTask)!;
+        ((bool)acquiredProperty.GetValue(replayLease)!).Should().BeFalse();
+    }
+
+    private static PayOsService CreateService(IMemoryCache cache)
+    {
+        var options = Substitute.For<IOptionsSnapshot<PayOsOptions>>();
+        options.Value.Returns(new PayOsOptions { SecretKey = "unit-test-secret" });
+
+        return new PayOsService(
+            httpClient: new HttpClient(),
+            configOptions: options,
+            memoryCache: cache,
+            redis: null,
+            logger: NullLogger<PayOsService>.Instance,
+            uow: Substitute.For<IGenericUnitOfWork>(),
+            paymentIntentRepository: Substitute.For<IPaymentIntentRepository>(),
+            registrationQueryRepository: Substitute.For<IRegistrationQueryRepository>(),
+            registrationCommandRepository: Substitute.For<IRegistrationCommandRepository>(),
+            eventQueryRepository: Substitute.For<IEventQueryRepository>(),
+            transactionRepository: Substitute.For<ITransactionRepository>(),
+            walletRepository: Substitute.For<IWalletRepository>(),
+            escrowRepository: Substitute.For<IEscrowRepository>(),
+            questService: Substitute.For<IQuestService>());
     }
 }

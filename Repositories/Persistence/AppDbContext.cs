@@ -1,8 +1,11 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using System;
+using System.Text.Json;
 
 namespace Repositories.Persistence
 {
@@ -342,6 +345,21 @@ namespace Repositories.Persistence
             var providerName = Database.ProviderName ?? string.Empty;
             var isNpgsql = providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
 
+            ValueConverter<JsonDocument?, string?>? jsonMetadataConverter = null;
+            ValueComparer<JsonDocument?>? jsonMetadataComparer = null;
+
+            if (!isNpgsql)
+            {
+                jsonMetadataConverter = new ValueConverter<JsonDocument?, string?>(
+                    doc => ConvertJsonDocumentToRaw(doc),
+                    raw => ParseJsonDocument(raw));
+
+                jsonMetadataComparer = new ValueComparer<JsonDocument?>(
+                    (left, right) => string.Equals(ConvertJsonDocumentToRaw(left), ConvertJsonDocumentToRaw(right), StringComparison.Ordinal),
+                    doc => GetJsonDocumentHash(doc),
+                    doc => CloneJsonDocument(doc));
+            }
+
             b.Entity<Event>(e =>
             {
                 e.Property(x => x.Mode).HasConversion<string>();
@@ -455,6 +473,13 @@ namespace Repositories.Persistence
                 e.Property(x => x.Direction).HasConversion<string>();
                 e.Property(x => x.Method).HasConversion<string>();
                 e.Property(x => x.Status).HasConversion<string>();
+
+                if (!isNpgsql && jsonMetadataConverter is not null && jsonMetadataComparer is not null)
+                {
+                    var metadataBuilder = e.Property(x => x.Metadata);
+                    metadataBuilder.HasConversion(jsonMetadataConverter);
+                    metadataBuilder.Metadata.SetValueComparer(jsonMetadataComparer);
+                }
 
                 e.HasOne(x => x.Wallet).WithMany(x => x.Transactions)
                  .HasForeignKey(x => x.WalletId)
@@ -580,9 +605,24 @@ namespace Repositories.Persistence
             b.Entity<Room>().HasQueryFilter(r => !r.IsDeleted && !r.Club!.IsDeleted && !r.Club!.Community!.IsDeleted);
             b.Entity<RoomMember>().HasQueryFilter(rm => !rm.User!.IsDeleted && !rm.Room!.IsDeleted && !rm.Room!.Club!.IsDeleted && !rm.Room!.Club!.Community!.IsDeleted);
 
-        // Helper: tự áp cho ISoftDelete còn lại (nếu bạn đã viết extension này)
-   b.ApplySoftDeleteFilters();
+            // Helper: tự áp cho ISoftDelete còn lại (nếu bạn đã viết extension này)
+            b.ApplySoftDeleteFilters();
         }
+
+        private static string? ConvertJsonDocumentToRaw(JsonDocument? doc)
+            => doc is null ? null : doc.RootElement.GetRawText();
+
+        private static JsonDocument? ParseJsonDocument(string? raw)
+            => string.IsNullOrWhiteSpace(raw) ? null : JsonDocument.Parse(raw);
+
+        private static int GetJsonDocumentHash(JsonDocument? doc)
+        {
+            var raw = ConvertJsonDocumentToRaw(doc);
+            return raw is null ? 0 : StringComparer.Ordinal.GetHashCode(raw);
+        }
+
+        private static JsonDocument? CloneJsonDocument(JsonDocument? doc)
+            => ParseJsonDocument(ConvertJsonDocumentToRaw(doc));
 
         public override int SaveChanges()
         {
@@ -624,3 +664,4 @@ namespace Repositories.Persistence
         }
     }
 }
+

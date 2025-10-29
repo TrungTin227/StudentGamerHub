@@ -20,6 +20,7 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
         => _context.PaymentIntents
             .Where(pi => pi.UserId == userId && pi.Id == id)
             .Include(pi => pi.EventRegistration)
+                .ThenInclude(r => r.PaidTransaction)
             .AsNoTracking()
             .FirstOrDefaultAsync(ct);
 

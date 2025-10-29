@@ -1,12 +1,15 @@
 ﻿using DTOs.Payments.PayOs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Services.Application.Quests;
 using Services.Configuration;
+using StackExchange.Redis;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Services.Implementations;
@@ -14,9 +17,13 @@ namespace Services.Implementations;
 public sealed class PayOsService : IPayOsService
 {
     private const string Provider = "PAYOS";
+    private static readonly TimeSpan ReplayLeaseTtl = TimeSpan.FromMinutes(10);
 
     private readonly HttpClient _httpClient;
-    private readonly PayOsConfig _config;
+    private readonly PayOsOptions _options;
+    private readonly IMemoryCache _memoryCache;
+    private readonly IConnectionMultiplexer? _redis;
+    private readonly object _replayLock = new();
     private readonly ILogger<PayOsService> _logger;
     private readonly IGenericUnitOfWork _uow;
     private readonly IPaymentIntentRepository _paymentIntentRepository;
@@ -30,7 +37,9 @@ public sealed class PayOsService : IPayOsService
 
     public PayOsService(
         HttpClient httpClient,
-        IOptionsSnapshot<PayOsConfig> configOptions,
+        IOptionsSnapshot<PayOsOptions> configOptions,
+        IMemoryCache memoryCache,
+        IConnectionMultiplexer? redis,
         ILogger<PayOsService> logger,
         IGenericUnitOfWork uow,
         IPaymentIntentRepository paymentIntentRepository,
@@ -43,7 +52,9 @@ public sealed class PayOsService : IPayOsService
         IQuestService questService)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _config = configOptions?.Value ?? throw new ArgumentNullException(nameof(configOptions));
+        _options = configOptions?.Value ?? throw new ArgumentNullException(nameof(configOptions));
+        _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
+        _redis = redis;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _paymentIntentRepository = paymentIntentRepository ?? throw new ArgumentNullException(nameof(paymentIntentRepository));
@@ -56,6 +67,135 @@ public sealed class PayOsService : IPayOsService
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
     }
 
+    private async Task<ReplayLease> AcquireReplayLeaseAsync(long orderCode, string fingerprint)
+    {
+        var key = BuildReplayCacheKey(orderCode, fingerprint);
+
+        if (_redis is not null)
+        {
+            var db = _redis.GetDatabase();
+            var acquired = await db.StringSetAsync(key, "1", ReplayLeaseTtl, When.NotExists).ConfigureAwait(false);
+            if (!acquired)
+            {
+                return ReplayLease.NotAcquired;
+            }
+
+            return new ReplayLease(true, async () =>
+            {
+                await db.KeyDeleteAsync(key).ConfigureAwait(false);
+            });
+        }
+
+        lock (_replayLock)
+        {
+            if (_memoryCache.TryGetValue(key, out _))
+            {
+                return ReplayLease.NotAcquired;
+            }
+
+            _memoryCache.Set(key, true, ReplayLeaseTtl);
+            return new ReplayLease(true, () =>
+            {
+                lock (_replayLock)
+                {
+                    _memoryCache.Remove(key);
+                    return Task.CompletedTask;
+                }
+            });
+        }
+    }
+
+    private static string BuildReplayCacheKey(long orderCode, string fingerprint)
+    {
+        var normalized = string.IsNullOrWhiteSpace(fingerprint)
+            ? orderCode.ToString(CultureInfo.InvariantCulture)
+            : fingerprint.Trim().ToLowerInvariant();
+
+        return $"payos:webhook:{orderCode}:{normalized}";
+    }
+
+    private static string BuildReplayFingerprint(string? headerSignature, string? payloadSignature, long orderCode)
+    {
+        if (!string.IsNullOrWhiteSpace(headerSignature))
+        {
+            return headerSignature.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(payloadSignature))
+        {
+            return payloadSignature.Trim();
+        }
+
+        return orderCode.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static DateTimeOffset? ParseWebhookTimestamp(string? rawTimestamp)
+    {
+        if (string.IsNullOrWhiteSpace(rawTimestamp))
+        {
+            return null;
+        }
+
+        if (DateTimeOffset.TryParse(rawTimestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out var dto))
+        {
+            return dto.ToUniversalTime();
+        }
+
+        return null;
+    }
+
+    internal static bool ValidatePayOsSignature(string rawBody, string? signatureHeader, string secretKey)
+    {
+        if (string.IsNullOrWhiteSpace(secretKey) || string.IsNullOrWhiteSpace(signatureHeader))
+        {
+            return false;
+        }
+
+        var header = signatureHeader.Trim();
+        if (string.IsNullOrWhiteSpace(header))
+        {
+            return false;
+        }
+
+        var payloadBytes = Encoding.UTF8.GetBytes(rawBody ?? string.Empty);
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey));
+        var computed = hmac.ComputeHash(payloadBytes);
+
+        byte[] provided;
+        try
+        {
+            provided = Convert.FromHexString(header);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        if (provided.Length != computed.Length)
+        {
+            return false;
+        }
+
+        return CryptographicOperations.FixedTimeEquals(computed, provided);
+    }
+
+    private sealed class ReplayLease
+    {
+        private readonly Func<Task> _release;
+
+        internal ReplayLease(bool acquired, Func<Task>? release = null)
+        {
+            Acquired = acquired;
+            _release = release ?? (() => Task.CompletedTask);
+        }
+
+        public bool Acquired { get; }
+
+        public Task ReleaseAsync() => _release();
+
+        public static ReplayLease NotAcquired { get; } = new(false);
+    }
+
     // =========================
     // Create payment link (v2)
     // =========================
@@ -66,8 +206,8 @@ public sealed class PayOsService : IPayOsService
         try
         {
             var orderCode = req.OrderCode; // LONG
-            var returnUrl = string.IsNullOrWhiteSpace(req.ReturnUrl) ? _config.ReturnUrl : req.ReturnUrl!;
-            var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_config.CancelUrl ?? returnUrl) : req.CancelUrl!;
+            var returnUrl = string.IsNullOrWhiteSpace(req.ReturnUrl) ? _options.ReturnUrl : req.ReturnUrl!;
+            var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_options.CancelUrl ?? returnUrl) : req.CancelUrl!;
             var description = req.Description ?? string.Empty;
 
             // Signature khi tạo link: HMAC_SHA256 trên chuỗi "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
@@ -90,8 +230,8 @@ public sealed class PayOsService : IPayOsService
             {
                 Content = JsonContent.Create(payload)
             };
-            request.Headers.TryAddWithoutValidation("x-client-id", _config.ClientId);
-            request.Headers.TryAddWithoutValidation("x-api-key", _config.ApiKey);
+            request.Headers.TryAddWithoutValidation("x-client-id", _options.ClientId);
+            request.Headers.TryAddWithoutValidation("x-api-key", _options.ApiKey);
 
             var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -133,71 +273,123 @@ public sealed class PayOsService : IPayOsService
     // =====================================
     // Webhook handler (verify + business)
     // =====================================
-    public async Task<Result> HandleWebhookAsync(PayOsWebhookPayload payload, string rawBody, string? signatureHeader, CancellationToken ct = default)
+    public async Task<Result<PayOsWebhookOutcome>> HandleWebhookAsync(PayOsWebhookPayload payload, string rawBody, string? signatureHeader, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        // payOS đặt signature trong BODY -> ưu tiên kiểm tra từ payload.Signature
-        if (!VerifyWebhookSignature(payload))
+        if (!ValidatePayOsSignature(rawBody, signatureHeader, _options.SecretKey))
         {
-            _logger.LogWarning("Invalid payOS signature. OrderCode={OrderCode}", payload.Data?.OrderCode);
-            return Result.Failure(new Error(Error.Codes.Forbidden, "Invalid signature."));
+            _logger.LogWarning("SignatureInvalid OrderCode={OrderCode}", payload.Data?.OrderCode);
+            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid signature."));
         }
 
         if (payload.Data is null)
-            return Result.Failure(new Error(Error.Codes.Validation, "Webhook missing data."));
+        {
+            _logger.LogWarning("WebhookMissingData");
+            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook missing data."));
+        }
 
         var orderCode = payload.Data.OrderCode;
         if (orderCode <= 0)
-            return Result.Failure(new Error(Error.Codes.Validation, "Invalid order code."));
+        {
+            _logger.LogWarning("OrderCodeInvalid Value={OrderCode}", orderCode);
+            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid order code."));
+        }
+
+        var timestamp = ParseWebhookTimestamp(payload.Data.TransactionDateTime);
+        var tolerance = _options.WebhookTolerance <= TimeSpan.Zero ? TimeSpan.FromMinutes(5) : _options.WebhookTolerance;
+        if (!timestamp.HasValue)
+        {
+            _logger.LogWarning("WebhookTimestampInvalid OrderCode={OrderCode} Raw={Raw}", orderCode, payload.Data.TransactionDateTime);
+            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp is invalid."));
+        }
+
+        if ((DateTimeOffset.UtcNow - timestamp.Value).Duration() > tolerance)
+        {
+            _logger.LogWarning("WebhookTimestampOutOfRange OrderCode={OrderCode} Timestamp={Timestamp} ToleranceSeconds={Tolerance}", orderCode, timestamp.Value, tolerance.TotalSeconds);
+            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp outside allowed window."));
+        }
 
         var providerRef = payload.Data.Reference
                          ?? payload.Data.PaymentLinkId
-                         ?? orderCode.ToString();
+                         ?? orderCode.ToString(CultureInfo.InvariantCulture);
+        var fingerprint = BuildReplayFingerprint(signatureHeader, payload.Signature, orderCode);
+        var lease = await AcquireReplayLeaseAsync(orderCode, fingerprint).ConfigureAwait(false);
+        if (!lease.Acquired)
+        {
+            _logger.LogInformation("ReplayIgnored OrderCode={OrderCode}", orderCode);
+            return Result<PayOsWebhookOutcome>.Success(PayOsWebhookOutcome.Ignored);
+        }
 
-        // Thành công khi success==true và code=="00"
+        if (!VerifyWebhookSignature(payload))
+        {
+            _logger.LogWarning("PayloadSignatureInvalid OrderCode={OrderCode}", orderCode);
+            await lease.ReleaseAsync().ConfigureAwait(false);
+            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid payload signature."));
+        }
+
+        _logger.LogInformation("WebhookReceived OrderCode={OrderCode} Code={Code} Success={Success}", orderCode, payload.Code, payload.Success);
+
         var isPaid = payload.Success && string.Equals(payload.Code, "00", StringComparison.OrdinalIgnoreCase);
 
-        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        try
         {
-            // YÊU CẦU: repo hỗ trợ tìm theo OrderCode (long)
-            var pi = await _paymentIntentRepository.GetByOrderCodeAsync(orderCode, innerCt).ConfigureAwait(false);
-            if (pi is null)
+            var businessResult = await _uow.ExecuteTransactionAsync(async innerCt =>
             {
-                _logger.LogInformation("Webhook for unknown OrderCode={OrderCode}. Treat as no-op (return 200).", orderCode);
-                return Result.Success(); // ping hoặc không thuộc hệ thống -> 200 no-op
-            }
-
-            // đối chiếu số tiền
-            if (payload.Data.Amount != pi.AmountCents)
-            {
-                _logger.LogWarning("Amount mismatch. PI={PI} Expect={Expect} Actual={Actual}", pi.Id, pi.AmountCents, payload.Data.Amount);
-                return Result.Failure(new Error(Error.Codes.Validation, "Amount mismatch."));
-            }
-
-            if (!isPaid)
-            {
-                // thanh toán không thành công -> mark canceled (idempotent)
-                if (pi.Status != PaymentIntentStatus.Canceled && pi.Status != PaymentIntentStatus.Succeeded)
+                var pi = await _paymentIntentRepository.GetByOrderCodeAsync(orderCode, innerCt).ConfigureAwait(false);
+                if (pi is null)
                 {
-                    pi.Status = PaymentIntentStatus.Canceled;
-                    pi.UpdatedBy = pi.UserId;
-                    await _paymentIntentRepository.UpdateAsync(pi, innerCt).ConfigureAwait(false);
-                    await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                    _logger.LogInformation("WebhookUnknownOrder OrderCode={OrderCode}", orderCode);
+                    return Result.Success();
                 }
-                _logger.LogInformation("Marked PI={PI} canceled. code={Code} success={Success}", pi.Id, payload.Code, payload.Success);
-                return Result.Success();
+
+                if (payload.Data.Amount != pi.AmountCents)
+                {
+                    _logger.LogWarning("AmountMismatch PI={PI} Expect={Expect} Actual={Actual}", pi.Id, pi.AmountCents, payload.Data.Amount);
+                    return Result.Failure(new Error(Error.Codes.Validation, "Amount mismatch."));
+                }
+
+                if (!isPaid)
+                {
+                    if (pi.Status != PaymentIntentStatus.Canceled && pi.Status != PaymentIntentStatus.Succeeded)
+                    {
+                        pi.Status = PaymentIntentStatus.Canceled;
+                        pi.UpdatedBy = pi.UserId;
+                        await _paymentIntentRepository.UpdateAsync(pi, innerCt).ConfigureAwait(false);
+                        await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                    }
+
+                    _logger.LogInformation("PaymentMarkedCanceled PI={PI} Code={Code}", pi.Id, payload.Code);
+                    return Result.Success();
+                }
+
+                return pi.Purpose switch
+                {
+                    PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(pi, providerRef, innerCt).ConfigureAwait(false),
+                    PaymentPurpose.TopUp => await ConfirmEscrowTopUpAsync(pi, providerRef, innerCt).ConfigureAwait(false),
+                    PaymentPurpose.WalletTopUp => await ConfirmWalletTopUpAsync(pi, providerRef, innerCt).ConfigureAwait(false),
+                    _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose."))
+                };
+            }, ct: ct).ConfigureAwait(false);
+
+            if (businessResult.IsFailure)
+            {
+                await lease.ReleaseAsync().ConfigureAwait(false);
+                return Result<PayOsWebhookOutcome>.Failure(businessResult.Error);
             }
 
-            // thành công -> theo mục đích
-            return pi.Purpose switch
+            if (isPaid)
             {
-                PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(pi, providerRef, innerCt).ConfigureAwait(false),
-                PaymentPurpose.TopUp => await ConfirmEscrowTopUpAsync(pi, providerRef, innerCt).ConfigureAwait(false),
-                PaymentPurpose.WalletTopUp => await ConfirmWalletTopUpAsync(pi, providerRef, innerCt).ConfigureAwait(false),
-                _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose."))
-            };
-        }, ct: ct).ConfigureAwait(false);
+                _logger.LogInformation("PaymentConfirmed Provider={Provider} OrderCode={OrderCode} ProviderRef={ProviderRef}", Provider, orderCode, providerRef);
+            }
+
+            return Result<PayOsWebhookOutcome>.Success(PayOsWebhookOutcome.Processed);
+        }
+        catch
+        {
+            await lease.ReleaseAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     // ================
@@ -207,7 +399,7 @@ public sealed class PayOsService : IPayOsService
     {
         // thứ tự alphabet: amount, cancelUrl, description, orderCode, returnUrl
         var data = $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_config.ChecksumKey));
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_options.SecretKey));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLowerInvariant();
     }
 
@@ -215,7 +407,7 @@ public sealed class PayOsService : IPayOsService
     {
         if (payload is null || payload.Data is null || string.IsNullOrWhiteSpace(payload.Signature))
             return false;
-        if (string.IsNullOrWhiteSpace(_config.ChecksumKey))
+        if (string.IsNullOrWhiteSpace(_options.SecretKey))
         {
             _logger.LogWarning("payOS checksum key is not configured.");
             return false;
@@ -255,7 +447,7 @@ public sealed class PayOsService : IPayOsService
         var ordered = dict.OrderBy(kv => kv.Key, StringComparer.Ordinal);
         var query = string.Join("&", ordered.Select(kv => $"{kv.Key}={Normalize(kv.Value)}"));
 
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_config.ChecksumKey));
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_options.SecretKey));
         var expectedHex = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(query))).ToLowerInvariant();
 
         try
@@ -272,7 +464,7 @@ public sealed class PayOsService : IPayOsService
 
     private string BuildPaymentsEndpointV2()
     {
-        var baseUrl = string.IsNullOrWhiteSpace(_config.BaseUrl) ? "https://api-merchant.payos.vn" : _config.BaseUrl;
+        var baseUrl = string.IsNullOrWhiteSpace(_options.BaseUrl) ? "https://api-merchant.payos.vn" : _options.BaseUrl;
         return baseUrl.TrimEnd('/') + "/v2/payment-requests";
     }
 
