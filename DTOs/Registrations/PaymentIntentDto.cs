@@ -8,4 +8,7 @@ public sealed record PaymentIntentDto(
     Guid? EventId,
     PaymentIntentStatus Status,
     DateTime ExpiresAt,
-    string ClientSecret);
+    string ClientSecret,
+    string? ProviderName,
+    string? TransactionId,
+    string? MetadataJson);

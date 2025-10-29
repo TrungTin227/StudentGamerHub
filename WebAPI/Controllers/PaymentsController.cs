@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Services.Interfaces;
 
 namespace WebAPI.Controllers;
 
@@ -16,12 +18,14 @@ public sealed class PaymentsController : ControllerBase
     private readonly IPaymentService _paymentService;
     private readonly IPaymentReadService _paymentReadService;
     private readonly IPayOsService _payOsService;
+    private readonly ILogger<PaymentsController> _logger;
 
-    public PaymentsController(IPaymentService paymentService, IPaymentReadService paymentReadService, IPayOsService payOsService)
+    public PaymentsController(IPaymentService paymentService, IPaymentReadService paymentReadService, IPayOsService payOsService, ILogger<PaymentsController> logger)
     {
         _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
         _paymentReadService = paymentReadService ?? throw new ArgumentNullException(nameof(paymentReadService));
         _payOsService = payOsService ?? throw new ArgumentNullException(nameof(payOsService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     [HttpPost("{intentId:guid}/confirm")]
@@ -141,10 +145,22 @@ public sealed class PaymentsController : ControllerBase
             signatureHeader = signatureAlt.ToString();
         }
 
+        if (string.IsNullOrWhiteSpace(signatureHeader))
+        {
+            _logger.LogWarning("PayOS webhook missing signature header.");
+        }
+
         var result = await _payOsService.HandleWebhookAsync(payload, rawBody, signatureHeader, ct).ConfigureAwait(false);
-        var mapped = result.IsSuccess
-            ? Result<string>.Success("ok")
-            : Result<string>.Failure(result.Error);
+        Result<string> mapped;
+        if (result.IsSuccess)
+        {
+            var statusLabel = result.Value == PayOsWebhookOutcome.Ignored ? "ignored" : "ok";
+            mapped = Result<string>.Success(statusLabel);
+        }
+        else
+        {
+            mapped = Result<string>.Failure(result.Error);
+        }
 
         return this.ToActionResult(mapped, v => new { status = v }, StatusCodes.Status200OK);
     }
@@ -153,14 +169,19 @@ public sealed class PaymentsController : ControllerBase
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status302Found)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult PayOsReturn()
+    public async Task<ActionResult> PayOsReturn(CancellationToken ct)
     {
         var status = Request.Query["status"].ToString();
         var orderCode = Request.Query["orderCode"].ToString();
 
-        if (IsSuccessStatus(status) && Guid.TryParse(orderCode, out var intentId))
+        if (IsSuccessStatus(status) && long.TryParse(orderCode, out var orderCodeValue))
         {
-            return Redirect($"/payment/result?status=success&intentId={intentId}");
+            var intentResult = await _paymentReadService.ResolveIntentIdByOrderCodeAsync(orderCodeValue, ct).ConfigureAwait(false);
+            if (intentResult.IsSuccess)
+            {
+                return Redirect($"/payment/result?status=success&intentId={intentResult.Value}");
+            }
+            _logger.LogWarning("PayOS return unable to resolve intent for orderCode={OrderCode}", orderCodeValue);
         }
 
         return Redirect("/payment/result?status=failed");

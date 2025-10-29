@@ -29,4 +29,18 @@ public sealed class TransactionRepository : ITransactionRepository
             .AsNoTracking()
             .AnyAsync(t => t.Provider == normalizedProvider && t.ProviderRef == normalizedRef, ct);
     }
+    public Task<Transaction?> GetByProviderRefAsync(string provider, string providerRef, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerRef);
+
+        var normalizedProvider = provider.Trim();
+        var normalizedRef = providerRef.Trim();
+
+        return _context.Transactions
+            .AsNoTracking()
+            .Where(t => t.Provider == normalizedProvider && t.ProviderRef == normalizedRef)
+            .OrderByDescending(t => t.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+    }
 }

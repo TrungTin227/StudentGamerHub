@@ -430,7 +430,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMembershipReadService, MembershipReadService>();
 
         // PayOS configuration and service
-        services.Configure<Services.Configuration.PayOsConfig>(configuration.GetSection("PayOS"));
+        services.Configure<Services.Configuration.PayOsOptions>(configuration.GetSection("PayOS"));
         services.AddHttpClient<IPayOsService, Services.Implementations.PayOsService>();
 
         services.AddCors(opt =>
