@@ -8,7 +8,7 @@ COPY ["DTOs/DTOs.csproj", "DTOs/"]
 COPY ["Repositories/Repositories.csproj", "Repositories/"]
 COPY ["Services/Services.csproj", "Services/"]
 
-RUN dotnet restore "StudentGamerHub.sln" --ignore-failed-sources || true
+RUN dotnet restore "WebAPI/WebAPI.csproj" --ignore-failed-sources
 
 
 COPY . .
