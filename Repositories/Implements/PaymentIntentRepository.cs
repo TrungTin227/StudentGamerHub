@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 
 namespace Repositories.Implements;
 
@@ -57,6 +57,7 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
                         x.Intent.ExpiresAt > nowUtc)
             .CountAsync(ct);
     }
+
     public async Task<PaymentIntent?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default)
     {
         return await _context.PaymentIntents
@@ -66,21 +67,38 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
 
     public async Task<bool> TrySetOrderCodeAsync(Guid id, long orderCode, CancellationToken ct = default)
     {
-        var pi = await _context.PaymentIntents.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (pi is null) return false;
-        if (pi.OrderCode.HasValue) return true; // đã có -> coi như ok (idempotent)
-
-        pi.OrderCode = orderCode;
         try
         {
-            await _context.SaveChangesAsync(ct);
-            return true;
+            var updated = await _context.PaymentIntents
+                .Where(x => x.Id == id && x.OrderCode == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(pi => pi.OrderCode, orderCode), ct)
+                .ConfigureAwait(false);
+
+            if (updated > 0)
+            {
+                return true;
+            }
+
+            return await _context.PaymentIntents
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == id && x.OrderCode.HasValue, ct)
+                .ConfigureAwait(false);
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            // race hoặc trùng số -> revert state, báo false để caller thử số khác
-            _context.Entry(pi).State = EntityState.Unchanged;
             return false;
         }
+    }
+
+    public Task<bool> HasActiveTopUpIntentAsync(Guid eventId, Guid userId, CancellationToken ct = default)
+    {
+        return _context.PaymentIntents
+            .AsNoTracking()
+            .AnyAsync(pi =>
+                pi.EventId == eventId &&
+                pi.UserId == userId &&
+                pi.Purpose == PaymentPurpose.TopUp &&
+                (pi.Status == PaymentIntentStatus.RequiresPayment || pi.Status == PaymentIntentStatus.Succeeded),
+                ct);
     }
 }

@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Repositories.Interfaces;
 using Repositories.Persistence.Seeding;
 
 namespace Repositories.Persistence;
@@ -48,6 +50,8 @@ public sealed class DbInitializerHostedService : IHostedService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+        var walletRepository = scope.ServiceProvider.GetRequiredService<IWalletRepository>();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var seeder = scope.ServiceProvider.GetService<IAppSeeder>();
 
         try
@@ -60,6 +64,19 @@ public sealed class DbInitializerHostedService : IHostedService
 
             await EnsureRolesAsync(roleManager, _opt.Roles, cancellationToken);
             await EnsureAdminAsync(userManager, roleManager, _opt.Admin, cancellationToken);
+
+            var platformUserIdValue = configuration.GetValue<string>("Billing:PlatformUserId");
+            if (!string.IsNullOrWhiteSpace(platformUserIdValue) &&
+                Guid.TryParse(platformUserIdValue, out var platformUserId) &&
+                platformUserId != Guid.Empty)
+            {
+                await EnsurePlatformWalletAsync(userManager, walletRepository, db, platformUserId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogWarning("Billing:PlatformUserId is missing or invalid. Platform wallet seeding skipped.");
+            }
 
             if (seeder is not null)
             {
@@ -82,6 +99,94 @@ public sealed class DbInitializerHostedService : IHostedService
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     // ---------- helpers ----------
+
+    private async Task EnsurePlatformWalletAsync(
+        UserManager<User> userManager,
+        IWalletRepository walletRepository,
+        AppDbContext db,
+        Guid platformUserId,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var email = $"platform+{platformUserId:N}@studentgamerhub.local";
+        var userName = $"platform-{platformUserId:N}";
+        var platformUser = await userManager.FindByIdAsync(platformUserId.ToString());
+
+        if (platformUser is null)
+        {
+            platformUser = new User
+            {
+                Id = platformUserId,
+                UserName = userName,
+                Email = email,
+                EmailConfirmed = true,
+                FullName = "Platform Wallet",
+                CreatedAtUtc = DateTime.UtcNow,
+                IsDeleted = false
+            };
+
+            var createResult = await userManager.CreateAsync(platformUser);
+            if (!createResult.Succeeded)
+            {
+                _logger.LogError(
+                    "Failed to create platform user {PlatformUserId}: {Errors}",
+                    platformUserId,
+                    string.Join(", ", createResult.Errors.Select(e => e.Description)));
+                return;
+            }
+
+            _logger.LogInformation("Platform user created with id {PlatformUserId}.", platformUserId);
+        }
+        else
+        {
+            var needsUpdate = false;
+
+            if (!string.Equals(platformUser.Email, email, StringComparison.OrdinalIgnoreCase))
+            {
+                platformUser.Email = email;
+                platformUser.UserName = userName;
+                needsUpdate = true;
+            }
+
+            if (!platformUser.EmailConfirmed)
+            {
+                platformUser.EmailConfirmed = true;
+                needsUpdate = true;
+            }
+
+            if (platformUser.IsDeleted)
+            {
+                platformUser.IsDeleted = false;
+                platformUser.DeletedAtUtc = null;
+                platformUser.DeletedBy = null;
+                needsUpdate = true;
+            }
+
+            if (needsUpdate)
+            {
+                var updateResult = await userManager.UpdateAsync(platformUser);
+                if (!updateResult.Succeeded)
+                {
+                    _logger.LogWarning(
+                        "Failed to synchronize platform user {PlatformUserId}: {Errors}",
+                        platformUserId,
+                        string.Join(", ", updateResult.Errors.Select(e => e.Description)));
+                }
+            }
+        }
+
+        await walletRepository.CreateIfMissingAsync(platformUserId, ct).ConfigureAwait(false);
+        if (db.ChangeTracker.HasChanges())
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            _logger.LogInformation("Platform wallet created for user {PlatformUserId}.", platformUserId);
+        }
+        else
+        {
+            _logger.LogInformation("Platform wallet already exists for user {PlatformUserId}.", platformUserId);
+        }
+    }
 
     private async Task EnsureRolesAsync(RoleManager<Role> roleManager, IEnumerable<string> roles, CancellationToken ct)
     {

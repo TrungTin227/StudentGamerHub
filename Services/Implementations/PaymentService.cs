@@ -1,4 +1,4 @@
-﻿using DTOs.Payments.PayOs;
+using DTOs.Payments.PayOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Services.Application.Quests;
@@ -30,6 +30,7 @@ public sealed class PaymentService : IPaymentService
     private readonly BillingOptions _billingOptions;
     private readonly PayOsOptions _payOsOptions;
     private readonly IQuestService _questService;
+    private readonly ICommunityService _communityService;
 
     public PaymentService(
         IGenericUnitOfWork uow,
@@ -43,7 +44,8 @@ public sealed class PaymentService : IPaymentService
         IPayOsService payOsService,
         IOptionsSnapshot<BillingOptions> billingOptions,
         IOptionsSnapshot<PayOsOptions> payOsOptions,
-        IQuestService questService)
+        IQuestService questService,
+        ICommunityService communityService)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _paymentIntentRepository = paymentIntentRepository ?? throw new ArgumentNullException(nameof(paymentIntentRepository));
@@ -57,6 +59,7 @@ public sealed class PaymentService : IPaymentService
         _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
         _payOsOptions = payOsOptions?.Value ?? throw new ArgumentNullException(nameof(payOsOptions));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
+        _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
     }
 
     public Task<Result<Guid>> CreateTopUpIntentAsync(Guid organizerId, Guid eventId, long amountCents, CancellationToken ct = default)
@@ -83,6 +86,33 @@ public sealed class PaymentService : IPaymentService
             if (ev.OrganizerId != organizerId)
             {
                 return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can top up this event escrow."));
+            }
+
+            if (ev.EscrowMinCents <= 0)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Event escrow requirement must be greater than zero."));
+            }
+
+            var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, innerCt).ConfigureAwait(false);
+            var existingHold = escrow?.AmountHoldCents ?? 0;
+            var outstanding = Math.Max(0, ev.EscrowMinCents - existingHold);
+
+            if (outstanding <= 0)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Conflict, "Event escrow has already been fully funded."));
+            }
+
+            if (amountCents != outstanding)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
+            }
+
+            var hasActiveIntent = await _paymentIntentRepository
+                .HasActiveTopUpIntentAsync(ev.Id, organizerId, innerCt)
+                .ConfigureAwait(false);
+            if (hasActiveIntent)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Conflict, "An escrow top-up intent is already active for this event."));
             }
 
             var paymentIntent = new PaymentIntent
@@ -312,6 +342,30 @@ public sealed class PaymentService : IPaymentService
             return Result.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can top up this event escrow."));
         }
 
+        if (pi.AmountCents <= 0)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
+        }
+
+        if (ev.EscrowMinCents <= 0)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, "Event escrow requirement must be greater than zero."));
+        }
+
+        var existingEscrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false);
+        var existingHold = existingEscrow?.AmountHoldCents ?? 0;
+        var outstanding = Math.Max(0, ev.EscrowMinCents - existingHold);
+
+        if (outstanding <= 0)
+        {
+            return Result.Failure(new Error(Error.Codes.Conflict, "Event escrow has already been fully funded."));
+        }
+
+        if (pi.AmountCents != outstanding)
+        {
+            return Result.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
+        }
+
         await _walletRepository.CreateIfMissingAsync(userId, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -319,11 +373,6 @@ public sealed class PaymentService : IPaymentService
         if (wallet is null)
         {
             return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
-
-        if (pi.AmountCents <= 0)
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
         }
 
         var debited = await _walletRepository.AdjustBalanceAsync(userId, -pi.AmountCents, ct).ConfigureAwait(false);
@@ -348,23 +397,28 @@ public sealed class PaymentService : IPaymentService
 
         await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
 
-        var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false)
-                     ?? new Escrow
-                     {
-                         Id = Guid.NewGuid(),
-                         EventId = ev.Id,
-                         AmountHoldCents = 0,
-                         Status = EscrowStatus.Held,
-                         CreatedBy = userId,
-                     };
-
-        escrow.AmountHoldCents += pi.AmountCents;
-        if (escrow.Status != EscrowStatus.Held)
+        var escrowToUpdate = existingEscrow ?? new Escrow
         {
-            escrow.Status = EscrowStatus.Held;
+            Id = Guid.NewGuid(),
+            EventId = ev.Id,
+            AmountHoldCents = 0,
+            Status = EscrowStatus.Held,
+            CreatedBy = userId,
+        };
+
+        escrowToUpdate.AmountHoldCents = existingHold + pi.AmountCents;
+        if (escrowToUpdate.Status != EscrowStatus.Held)
+        {
+            escrowToUpdate.Status = EscrowStatus.Held;
         }
 
-        await _escrowRepository.UpsertAsync(escrow, ct).ConfigureAwait(false);
+        await _escrowRepository.UpsertAsync(escrowToUpdate, ct).ConfigureAwait(false);
+
+        var membershipResult = await EnsureCommunityMembershipAsync(ev.CommunityId, userId, ct).ConfigureAwait(false);
+        if (membershipResult.IsFailure)
+        {
+            return membershipResult;
+        }
 
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = userId;
@@ -429,14 +483,12 @@ public sealed class PaymentService : IPaymentService
             }
 
             var cancelUrl = ResolveCancelUrl(returnUrl) ?? resolvedReturnUrl;
-            var description = BuildDescription(pi);
-
-            // 🔑 đảm bảo có OrderCode số và gán vào PI (TrySetOrderCodeAsync)
             var orderCode = await EnsureOrderCodeAsync(pi, innerCt).ConfigureAwait(false);
+            var description = BuildDescription(pi, orderCode);
 
             var request = new PayOsCreatePaymentRequest
             {
-                OrderCode = orderCode,         // long ✅
+                OrderCode = orderCode,         // long ?
                 Amount = pi.AmountCents,
                 Description = description,
                 ReturnUrl = resolvedReturnUrl,
@@ -568,15 +620,35 @@ public sealed class PaymentService : IPaymentService
         return new Uri(baseUri, relative).ToString();
     }
 
-    private static string BuildDescription(PaymentIntent intent)
+    private static string BuildDescription(PaymentIntent intent, long orderCode)
     {
-        return intent.Purpose switch
+        var prefix = intent.Purpose switch
         {
-            PaymentPurpose.EventTicket when intent.EventId.HasValue => $"Event ticket {intent.EventId}",
-            PaymentPurpose.TopUp when intent.EventId.HasValue => $"Event escrow top-up {intent.EventId}",
-            PaymentPurpose.WalletTopUp => $"Wallet top-up {intent.Id}",
-            _ => $"Payment intent {intent.Id}"
+            PaymentPurpose.EventTicket => "Ticket",
+            PaymentPurpose.TopUp => "EscrowTop",
+            PaymentPurpose.WalletTopUp => "WalletTop",
+            _ => "Payment"
         };
+
+        var suffix = Math.Abs(orderCode % 1_000_000);
+        var description = $"{prefix}#{suffix:D6}";
+
+        return description.Length <= 25
+            ? description
+            : description[..25];
+    }
+
+    private async Task<Result> EnsureCommunityMembershipAsync(Guid? communityId, Guid userId, CancellationToken ct)
+    {
+        if (!communityId.HasValue)
+        {
+            return Result.Success();
+        }
+
+        var joinResult = await _communityService.JoinCommunityAsync(communityId.Value, userId, ct).ConfigureAwait(false);
+        return joinResult.IsSuccess
+            ? Result.Success()
+            : Result.Failure(joinResult.Error);
     }
 
     private async Task TriggerAttendQuestAsync(Guid userId, Guid eventId, CancellationToken ct)
@@ -633,3 +705,5 @@ public sealed class PaymentService : IPaymentService
             || message.Contains("payment_intent_purpose_allowed", StringComparison.OrdinalIgnoreCase);
     }
 }
+
+
