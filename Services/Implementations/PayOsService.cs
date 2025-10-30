@@ -5,7 +5,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Services.Application.Quests;
 using Services.Configuration;
+using Services.Interfaces;
 using StackExchange.Redis;
+using System;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -34,6 +36,7 @@ public sealed class PayOsService : IPayOsService
     private readonly IWalletRepository _walletRepository;
     private readonly IEscrowRepository _escrowRepository;
     private readonly IQuestService _questService;
+    private readonly ICommunityService _communityService;
 
     public PayOsService(
         HttpClient httpClient,
@@ -49,7 +52,8 @@ public sealed class PayOsService : IPayOsService
         ITransactionRepository transactionRepository,
         IWalletRepository walletRepository,
         IEscrowRepository escrowRepository,
-        IQuestService questService)
+        IQuestService questService,
+        ICommunityService communityService)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = configOptions?.Value ?? throw new ArgumentNullException(nameof(configOptions));
@@ -65,6 +69,7 @@ public sealed class PayOsService : IPayOsService
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
+        _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
     }
 
     private async Task<ReplayLease> AcquireReplayLeaseAsync(long orderCode, string fingerprint)
@@ -577,12 +582,27 @@ public sealed class PayOsService : IPayOsService
                  ?? await _eventQueryRepository.GetByIdAsync(pi.EventId.Value, ct).ConfigureAwait(false);
         if (ev is null) return Result.Failure(new Error(Error.Codes.NotFound, "Event not found for top-up."));
 
+        if (pi.AmountCents <= 0)
+            return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
+
+        if (ev.EscrowMinCents <= 0)
+            return Result.Failure(new Error(Error.Codes.Validation, "Event escrow requirement must be greater than zero."));
+
+        var existingEscrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false);
+        var existingHold = existingEscrow?.AmountHoldCents ?? 0;
+        var outstanding = Math.Max(0, ev.EscrowMinCents - existingHold);
+
+        if (outstanding <= 0)
+            return Result.Failure(new Error(Error.Codes.Conflict, "Event escrow has already been fully funded."));
+
+        if (pi.AmountCents != outstanding)
+            return Result.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
+
         await _walletRepository.CreateIfMissingAsync(pi.UserId, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var wallet = await _walletRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
         if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        if (pi.AmountCents <= 0) return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
 
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
@@ -616,18 +636,21 @@ public sealed class PayOsService : IPayOsService
         var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
         if (!credited) return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
 
-        var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false)
-                     ?? new Escrow
-                     {
-                         Id = Guid.NewGuid(),
-                         EventId = ev.Id,
-                         AmountHoldCents = 0,
-                         Status = EscrowStatus.Held,
-                         CreatedBy = pi.UserId,
-                     };
-        escrow.AmountHoldCents += pi.AmountCents;
-        if (escrow.Status != EscrowStatus.Held) escrow.Status = EscrowStatus.Held;
-        await _escrowRepository.UpsertAsync(escrow, ct).ConfigureAwait(false);
+        var escrowToUpdate = existingEscrow ?? new Escrow
+        {
+            Id = Guid.NewGuid(),
+            EventId = ev.Id,
+            AmountHoldCents = 0,
+            Status = EscrowStatus.Held,
+            CreatedBy = pi.UserId,
+        };
+        escrowToUpdate.AmountHoldCents = existingHold + pi.AmountCents;
+        if (escrowToUpdate.Status != EscrowStatus.Held) escrowToUpdate.Status = EscrowStatus.Held;
+        await _escrowRepository.UpsertAsync(escrowToUpdate, ct).ConfigureAwait(false);
+
+        var membershipResult = await EnsureCommunityMembershipAsync(ev.CommunityId, pi.UserId, ct).ConfigureAwait(false);
+        if (membershipResult.IsFailure)
+            return membershipResult;
 
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
@@ -702,6 +725,19 @@ public sealed class PayOsService : IPayOsService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return Result.Success();
+    }
+
+    private async Task<Result> EnsureCommunityMembershipAsync(Guid? communityId, Guid userId, CancellationToken ct)
+    {
+        if (!communityId.HasValue)
+        {
+            return Result.Success();
+        }
+
+        var joinResult = await _communityService.JoinCommunityAsync(communityId.Value, userId, ct).ConfigureAwait(false);
+        return joinResult.IsSuccess
+            ? Result.Success()
+            : Result.Failure(joinResult.Error);
     }
 
     private async Task TriggerAttendQuestAsync(Guid userId, Guid eventId, CancellationToken ct)

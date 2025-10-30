@@ -49,6 +49,9 @@ namespace Services.Common.DependencyInjection
                         .Validate(o => o.EventCreationFeeCents >= 0, "Billing:EventCreationFeeCents must be >= 0")
                         .Validate(o => o.MaxEventEscrowTopUpAmountCents > 0, "Billing:MaxEventEscrowTopUpAmountCents must be positive")
                         .Validate(o => o.MaxWalletTopUpAmountCents > 0, "Billing:MaxWalletTopUpAmountCents must be positive")
+                        .Validate(
+                            o => o.EventCreationFeeCents == 0 || (o.PlatformUserId.HasValue && o.PlatformUserId.Value != Guid.Empty),
+                            "Billing:PlatformUserId is required when EventCreationFeeCents > 0")
                         .ValidateOnStart();
                 // KHÔNG đăng ký singleton .Value để giữ hot-reload
             }

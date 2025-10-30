@@ -140,7 +140,7 @@ public sealed class EventService : IEventService
                     Method = TransactionMethod.Wallet,
                     Status = TransactionStatus.Succeeded,
                     Provider = SystemProvider,
-                    ProviderRef = entity.Id.ToString("N"),
+                    ProviderRef = $"{entity.Id:N}:OUT",
                     Metadata = CreateEventFeeMetadata(entity.Id, EventCreateFeeNote, platformUserId.Value),
                     CreatedBy = organizerId,
                 };
@@ -155,7 +155,7 @@ public sealed class EventService : IEventService
                     Method = TransactionMethod.Wallet,
                     Status = TransactionStatus.Succeeded,
                     Provider = SystemProvider,
-                    ProviderRef = entity.Id.ToString("N"),
+                    ProviderRef = $"{entity.Id:N}:IN",
                     Metadata = CreateEventFeeMetadata(entity.Id, EventCreateFeeNote, organizerId),
                     CreatedBy = platformUserId.Value,
                 };

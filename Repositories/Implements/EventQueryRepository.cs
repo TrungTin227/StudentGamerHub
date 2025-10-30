@@ -24,7 +24,7 @@ public sealed class EventQueryRepository : IEventQueryRepository
         {
             // Lấy lock hàng theo PK (FOR UPDATE) trong cùng transaction
             await _context.Database.ExecuteSqlInterpolatedAsync(
-                $@"SELECT 1 FROM ""Events"" WHERE ""Id"" = {id} AND ""IsDeleted"" = FALSE FOR UPDATE",
+                $@"SELECT 1 FROM ""events"" WHERE ""Id"" = {id} AND ""IsDeleted"" = FALSE FOR UPDATE",
                 ct);
         }
 

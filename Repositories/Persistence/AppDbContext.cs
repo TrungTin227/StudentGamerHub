@@ -547,9 +547,9 @@ namespace Repositories.Persistence
      ? "\"AmountCents\" > 0"
             : "[AmountCents] > 0");
 
-    var paymentPurposeConstraint = isNpgsql
-       ? "\"Purpose\" IN ('TopUp','EventTicket')"
-   : "[Purpose] IN ('TopUp','EventTicket')";
+        var paymentPurposeConstraint = isNpgsql
+            ? "\"Purpose\" IN ('TopUp','EventTicket','WalletTopUp')"
+        : "[Purpose] IN ('TopUp','EventTicket','WalletTopUp')";
     e.HasCheckConstraint("chk_payment_intent_purpose_allowed", paymentPurposeConstraint);
 
       var paymentStatusConstraint = isNpgsql

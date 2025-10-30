@@ -10,4 +10,5 @@ public interface IPaymentIntentRepository
     Task<int> CountActivePendingByEventAsync(Guid eventId, DateTime nowUtc, CancellationToken ct = default);
     Task<PaymentIntent?> GetByOrderCodeAsync(long orderCode, CancellationToken ct = default);
     Task<bool> TrySetOrderCodeAsync(Guid id, long orderCode, CancellationToken ct = default);
+    Task<bool> HasActiveTopUpIntentAsync(Guid eventId, Guid userId, CancellationToken ct = default);
 }
