@@ -151,8 +151,7 @@ public sealed class PaymentService : IPaymentService
             }
 
             // Ensure wallet exists before creating top-up intent - maintains one-wallet-per-user invariant
-            await _walletRepository.CreateIfMissingAsync(userId, innerCt).ConfigureAwait(false);
-            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await _walletRepository.EnsureAsync(userId, innerCt).ConfigureAwait(false);
 
             var paymentIntent = new PaymentIntent
             {
@@ -274,14 +273,7 @@ public sealed class PaymentService : IPaymentService
             }
         }
 
-        await _walletRepository.CreateIfMissingAsync(userId, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        var wallet = await _walletRepository.GetByUserIdAsync(userId, ct).ConfigureAwait(false);
-        if (wallet is null)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
+        var wallet = await _walletRepository.EnsureAsync(userId, ct).ConfigureAwait(false);
 
         if (pi.AmountCents > 0)
         {
@@ -370,14 +362,7 @@ public sealed class PaymentService : IPaymentService
             return Result.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
         }
 
-        await _walletRepository.CreateIfMissingAsync(userId, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        var wallet = await _walletRepository.GetByUserIdAsync(userId, ct).ConfigureAwait(false);
-        if (wallet is null)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
-        }
+        var wallet = await _walletRepository.EnsureAsync(userId, ct).ConfigureAwait(false);
 
         var debited = await _walletRepository.AdjustBalanceAsync(userId, -pi.AmountCents, ct).ConfigureAwait(false);
         if (!debited)

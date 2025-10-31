@@ -102,21 +102,8 @@ public sealed class EventService : IEventService
 
                 platformUserId = ensurePlatformUser.Value;
 
-                await _walletRepository.CreateIfMissingAsync(organizerId, innerCt).ConfigureAwait(false);
-                await _walletRepository.CreateIfMissingAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-
-                organizerWallet = await _walletRepository.GetByUserIdAsync(organizerId, innerCt).ConfigureAwait(false);
-                if (organizerWallet is null)
-                {
-                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Organizer wallet could not be loaded."));
-                }
-
-                platformWallet = await _walletRepository.GetByUserIdAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
-                if (platformWallet is null)
-                {
-                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet could not be loaded."));
-                }
+                organizerWallet = await _walletRepository.EnsureAsync(organizerId, innerCt).ConfigureAwait(false);
+                platformWallet = await _walletRepository.EnsureAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
 
                 if (organizerWallet.BalanceCents < feeCents)
                 {
@@ -295,14 +282,7 @@ public sealed class EventService : IEventService
 
             foreach (var reg in registrations)
             {
-                await _walletRepository.CreateIfMissingAsync(reg.UserId, innerCt).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-
-                var wallet = await _walletRepository.GetByUserIdAsync(reg.UserId, innerCt).ConfigureAwait(false);
-                if (wallet is null)
-                {
-                    return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded for refund."));
-                }
+                var wallet = await _walletRepository.EnsureAsync(reg.UserId, innerCt).ConfigureAwait(false);
 
                 if (ev.PriceCents > 0)
                 {

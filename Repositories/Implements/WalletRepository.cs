@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Repositories.WorkSeeds.Extensions;
 
 namespace Repositories.Implements;
 
@@ -57,7 +58,15 @@ public sealed class WalletRepository : IWalletRepository
     public async Task<Wallet> EnsureAsync(Guid userId, CancellationToken ct = default)
     {
         await CreateIfMissingAsync(userId, ct).ConfigureAwait(false);
-        await _context.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _context.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            _logger.LogDebug(ex, "Wallet ensure encountered concurrent creation for user {UserId}. Falling back to reload.", userId);
+            _context.ChangeTracker.Clear();
+        }
 
         var wallet = await GetByUserIdAsync(userId, ct).ConfigureAwait(false);
         if (wallet is null)

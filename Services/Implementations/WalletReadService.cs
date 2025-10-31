@@ -21,10 +21,9 @@ public sealed class WalletReadService : IWalletReadService
     public async Task<Result<WalletSummaryDto>> GetAsync(Guid userId, CancellationToken ct = default)
     {
         // Ensure wallet exists for the user - critical for maintaining one-wallet-per-user invariant
-        await _walletRepository.CreateIfMissingAsync(userId, ct).ConfigureAwait(false);
+        var wallet = await _walletRepository.EnsureAsync(userId, ct).ConfigureAwait(false);
 
-        var wallet = await _walletRepository.GetByUserIdAsync(userId, ct).ConfigureAwait(false);
-        var summary = new WalletSummaryDto(wallet is not null, wallet?.BalanceCents ?? 0);
+        var summary = new WalletSummaryDto(true, wallet.BalanceCents);
         return Result<WalletSummaryDto>.Success(summary);
     }
 
@@ -38,13 +37,7 @@ public sealed class WalletReadService : IWalletReadService
 
         var platformUserId = platformUserResult.Value;
 
-        await _walletRepository.CreateIfMissingAsync(platformUserId, ct).ConfigureAwait(false);
-
-        var wallet = await _walletRepository.GetByUserIdAsync(platformUserId, ct).ConfigureAwait(false);
-        if (wallet is null)
-        {
-            return Result<WalletSummaryDto>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet could not be loaded."));
-        }
+        var wallet = await _walletRepository.EnsureAsync(platformUserId, ct).ConfigureAwait(false);
 
         var summary = new WalletSummaryDto(true, wallet.BalanceCents);
         return Result<WalletSummaryDto>.Success(summary);
