@@ -28,7 +28,9 @@ using Services.Implementations;
 using Services.Interfaces;
 using StackExchange.Redis;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace WebApi.Payments.Tests.Infrastructure;
@@ -150,7 +152,8 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<global::Program>
 
             // Override IPayOsService to disable Redis dependency
             services.RemoveAll<IPayOsService>();
-            services.AddHttpClient("PayOsTestClient");
+            services.AddHttpClient("PayOsTestClient")
+                .ConfigurePrimaryHttpMessageHandler(_ => new StubPayOsHttpMessageHandler());
             services.AddTransient<IPayOsService>(sp =>
             {
                 var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("PayOsTestClient");
@@ -168,7 +171,8 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<global::Program>
                     sp.GetRequiredService<ITransactionRepository>(),
                     sp.GetRequiredService<IWalletRepository>(),
                     sp.GetRequiredService<IEscrowRepository>(),
-                    sp.GetRequiredService<IQuestService>());
+                    sp.GetRequiredService<IQuestService>(),
+                    sp.GetRequiredService<ICommunityService>());
             });
 
             // Ensure database schema is created
@@ -309,6 +313,22 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<global::Program>
             wallet.UpdatedAtUtc = DateTime.UtcNow;
             await _context.SaveChangesAsync(ct).ConfigureAwait(false);
             return true;
+        }
+    }
+
+    private sealed class StubPayOsHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"code\":\"00\",\"data\":{\"checkoutUrl\":\"https://checkout.payos.test/session\"}}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+
+            return Task.FromResult(response);
         }
     }
 }

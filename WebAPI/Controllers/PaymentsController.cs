@@ -3,10 +3,15 @@ using DTOs.Registrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.WebUtilities;
+using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Services.Interfaces;
+using Services.Configuration;
 
 namespace WebAPI.Controllers;
 
@@ -19,13 +24,20 @@ public sealed class PaymentsController : ControllerBase
     private readonly IPaymentReadService _paymentReadService;
     private readonly IPayOsService _payOsService;
     private readonly ILogger<PaymentsController> _logger;
+    private readonly PayOsOptions _payOsOptions;
 
-    public PaymentsController(IPaymentService paymentService, IPaymentReadService paymentReadService, IPayOsService payOsService, ILogger<PaymentsController> logger)
+    public PaymentsController(
+        IPaymentService paymentService,
+        IPaymentReadService paymentReadService,
+        IPayOsService payOsService,
+        ILogger<PaymentsController> logger,
+        IOptionsSnapshot<PayOsOptions> payOsOptions)
     {
         _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
         _paymentReadService = paymentReadService ?? throw new ArgumentNullException(nameof(paymentReadService));
         _payOsService = payOsService ?? throw new ArgumentNullException(nameof(payOsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _payOsOptions = payOsOptions?.Value ?? throw new ArgumentNullException(nameof(payOsOptions));
     }
 
     [HttpPost("{intentId:guid}/confirm")]
@@ -179,12 +191,12 @@ public sealed class PaymentsController : ControllerBase
             var intentResult = await _paymentReadService.ResolveIntentIdByOrderCodeAsync(orderCodeValue, ct).ConfigureAwait(false);
             if (intentResult.IsSuccess)
             {
-                return Redirect($"/payment/result?status=success&intentId={intentResult.Value}");
+                return Redirect(BuildResultUrl("success", intentResult.Value));
             }
             _logger.LogWarning("PayOS return unable to resolve intent for orderCode={OrderCode}", orderCodeValue);
         }
 
-        return Redirect("/payment/result?status=failed");
+        return Redirect(BuildResultUrl("failed", null));
     }
 
     private static bool IsSuccessStatus(string? status)
@@ -197,6 +209,29 @@ public sealed class PaymentsController : ControllerBase
         return status.Equals("PAID", StringComparison.OrdinalIgnoreCase)
             || status.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase)
             || status.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string BuildResultUrl(string status, Guid? intentId)
+    {
+        var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["status"] = status
+        };
+
+        if (intentId.HasValue)
+        {
+            query["intentId"] = intentId.Value.ToString();
+        }
+
+        var basePath = "/payment/result";
+        var frontendBase = _payOsOptions.FrontendBaseUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(frontendBase) && Uri.TryCreate(frontendBase, UriKind.Absolute, out var baseUri))
+        {
+            var targetUri = new Uri(baseUri, basePath);
+            return QueryHelpers.AddQueryString(targetUri.ToString(), query);
+        }
+
+        return QueryHelpers.AddQueryString(basePath, query);
     }
 }
 

@@ -501,14 +501,28 @@ public sealed class PaymentService : IPaymentService
     }
     private async Task<long> EnsureOrderCodeAsync(PaymentIntent pi, CancellationToken ct)
     {
-        if (pi.OrderCode.HasValue && pi.OrderCode.Value > 0) return pi.OrderCode.Value;
+        if (pi.OrderCode.HasValue && pi.OrderCode.Value > 0)
+        {
+            return pi.OrderCode.Value;
+        }
 
         for (var i = 0; i < 5; i++)
         {
             var candidate = NewOrderCode();
-            if (await _paymentIntentRepository.TrySetOrderCodeAsync(pi.Id, candidate, ct))
+            if (await _paymentIntentRepository.TrySetOrderCodeAsync(pi.Id, candidate, ct).ConfigureAwait(false))
+            {
+                pi.OrderCode = candidate;
                 return candidate;
+            }
         }
+
+        var refreshed = await _paymentIntentRepository.GetByIdAsync(pi.Id, ct).ConfigureAwait(false);
+        if (refreshed?.OrderCode is long existing && existing > 0)
+        {
+            pi.OrderCode = existing;
+            return existing;
+        }
+
         throw new InvalidOperationException("Could not reserve unique order code.");
     }
 

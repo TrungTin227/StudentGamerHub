@@ -71,7 +71,9 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
         {
             var updated = await _context.PaymentIntents
                 .Where(x => x.Id == id && x.OrderCode == null)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(pi => pi.OrderCode, orderCode), ct)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(pi => pi.OrderCode, orderCode),
+                    ct)
                 .ConfigureAwait(false);
 
             if (updated > 0)
@@ -83,6 +85,35 @@ public sealed class PaymentIntentRepository : IPaymentIntentRepository
                 .AsNoTracking()
                 .AnyAsync(x => x.Id == id && x.OrderCode.HasValue, ct)
                 .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("ExecuteUpdate", StringComparison.OrdinalIgnoreCase))
+        {
+            var entity = await _context.PaymentIntents
+                .FirstOrDefaultAsync(x => x.Id == id, ct)
+                .ConfigureAwait(false);
+
+            if (entity is null)
+            {
+                return false;
+            }
+
+            if (entity.OrderCode.HasValue)
+            {
+                return entity.OrderCode.Value == orderCode;
+            }
+
+            entity.OrderCode = orderCode;
+            try
+            {
+                await _context.SaveChangesAsync(ct).ConfigureAwait(false);
+                _context.Entry(entity).State = EntityState.Detached;
+                return true;
+            }
+            catch (DbUpdateException retryEx) when (retryEx.IsUniqueConstraintViolation())
+            {
+                _context.Entry(entity).State = EntityState.Detached;
+                return false;
+            }
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
