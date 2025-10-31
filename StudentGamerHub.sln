@@ -13,8 +13,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Services", "Services\Servic
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebAPI", "WebAPI\WebAPI.csproj", "{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Services.Payments.Tests", "Tests\Services.Payments.Tests\Services.Payments.Tests.csproj", "{A0C91642-5390-44D8-B0FA-0AC801CC56AA}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebApi.Payments.Tests", "Tests\WebApi.Payments.Tests\WebApi.Payments.Tests.csproj", "{B8B728E3-C87B-4B2B-86FC-D43934A1B929}"
 EndProject
 Global
@@ -42,10 +40,6 @@ Global
 		{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0B3B8B8F-0DD2-4A42-B282-3FA6D91725F4}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A0C91642-5390-44D8-B0FA-0AC801CC56AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A0C91642-5390-44D8-B0FA-0AC801CC56AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A0C91642-5390-44D8-B0FA-0AC801CC56AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A0C91642-5390-44D8-B0FA-0AC801CC56AA}.Release|Any CPU.Build.0 = Release|Any CPU
 		{B8B728E3-C87B-4B2B-86FC-D43934A1B929}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B8B728E3-C87B-4B2B-86FC-D43934A1B929}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B8B728E3-C87B-4B2B-86FC-D43934A1B929}.Release|Any CPU.ActiveCfg = Release|Any CPU

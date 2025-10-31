@@ -75,7 +75,7 @@ public sealed class DbInitializerHostedService : IHostedService
             }
             else
             {
-                _logger.LogWarning("Billing:PlatformUserId is missing or invalid. Platform wallet seeding skipped.");
+                _logger.LogInformation("Billing:PlatformUserId is not configured. Platform wallet will be created on demand.");
             }
 
             if (seeder is not null)

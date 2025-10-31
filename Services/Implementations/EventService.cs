@@ -2,6 +2,7 @@ using FluentValidation;
 using Microsoft.Extensions.Options;
 using Services.Common.Results;
 using Services.Configuration;
+using Services.Interfaces;
 using System.Text.Json;
 
 namespace Services.Implementations;
@@ -21,6 +22,7 @@ public sealed class EventService : IEventService
     private readonly ITransactionRepository _transactionRepository;
     private readonly IValidator<EventCreateRequestDto> _createValidator;
     private readonly BillingOptions _billingOptions;
+    private readonly IPlatformAccountService _platformAccountService;
     private const string SystemProvider = "SYSTEM";
     private const string EventCreateFeeNote = "EVENT_CREATE_FEE";
 
@@ -34,7 +36,8 @@ public sealed class EventService : IEventService
         IWalletRepository walletRepository,
         ITransactionRepository transactionRepository,
         IValidator<EventCreateRequestDto> createValidator,
-        IOptionsSnapshot<BillingOptions> billingOptions)
+        IOptionsSnapshot<BillingOptions> billingOptions,
+        IPlatformAccountService platformAccountService)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _eventCommandRepository = eventCommandRepository ?? throw new ArgumentNullException(nameof(eventCommandRepository));
@@ -46,6 +49,7 @@ public sealed class EventService : IEventService
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _createValidator = createValidator ?? throw new ArgumentNullException(nameof(createValidator));
         _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
+        _platformAccountService = platformAccountService ?? throw new ArgumentNullException(nameof(platformAccountService));
     }
 
     public async Task<Result<Guid>> CreateAsync(Guid organizerId, EventCreateRequestDto req, CancellationToken ct = default)
@@ -81,33 +85,25 @@ public sealed class EventService : IEventService
         return await _uow.ExecuteTransactionAsync<Guid>(async innerCt =>
         {
             var feeCents = Math.Max(0, _billingOptions.EventCreationFeeCents);
-            Guid? platformUserId = _billingOptions.PlatformUserId;
+            Guid? platformUserId = null;
 
             Wallet? organizerWallet = null;
             Wallet? platformWallet = null;
 
             if (feeCents > 0)
             {
-                if (!platformUserId.HasValue || platformUserId.Value == Guid.Empty)
+                var ensurePlatformUser = await _platformAccountService
+                    .GetOrCreatePlatformUserIdAsync(innerCt)
+                    .ConfigureAwait(false);
+                if (ensurePlatformUser.IsFailure)
                 {
-                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet is not configured."));
+                    return Result<Guid>.Failure(ensurePlatformUser.Error);
                 }
 
-                await _walletRepository.CreateIfMissingAsync(organizerId, innerCt).ConfigureAwait(false);
-                await _walletRepository.CreateIfMissingAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                platformUserId = ensurePlatformUser.Value;
 
-                organizerWallet = await _walletRepository.GetByUserIdAsync(organizerId, innerCt).ConfigureAwait(false);
-                if (organizerWallet is null)
-                {
-                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Organizer wallet could not be loaded."));
-                }
-
-                platformWallet = await _walletRepository.GetByUserIdAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
-                if (platformWallet is null)
-                {
-                    return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Platform wallet could not be loaded."));
-                }
+                organizerWallet = await _walletRepository.EnsureAsync(organizerId, innerCt).ConfigureAwait(false);
+                platformWallet = await _walletRepository.EnsureAsync(platformUserId.Value, innerCt).ConfigureAwait(false);
 
                 if (organizerWallet.BalanceCents < feeCents)
                 {
@@ -286,14 +282,7 @@ public sealed class EventService : IEventService
 
             foreach (var reg in registrations)
             {
-                await _walletRepository.CreateIfMissingAsync(reg.UserId, innerCt).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-
-                var wallet = await _walletRepository.GetByUserIdAsync(reg.UserId, innerCt).ConfigureAwait(false);
-                if (wallet is null)
-                {
-                    return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded for refund."));
-                }
+                var wallet = await _walletRepository.EnsureAsync(reg.UserId, innerCt).ConfigureAwait(false);
 
                 if (ev.PriceCents > 0)
                 {

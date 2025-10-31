@@ -535,11 +535,7 @@ public sealed class PayOsService : IPayOsService
             return Result.Success();
         }
 
-        await _walletRepository.CreateIfMissingAsync(registration.UserId, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        var wallet = await _walletRepository.GetByUserIdAsync(registration.UserId, ct).ConfigureAwait(false);
-        if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
+        var wallet = await _walletRepository.EnsureAsync(registration.UserId, ct).ConfigureAwait(false);
 
         var tx = new Transaction
         {
@@ -598,11 +594,7 @@ public sealed class PayOsService : IPayOsService
         if (pi.AmountCents != outstanding)
             return Result.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
 
-        await _walletRepository.CreateIfMissingAsync(pi.UserId, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        var wallet = await _walletRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
-        if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
+        var wallet = await _walletRepository.EnsureAsync(pi.UserId, ct).ConfigureAwait(false);
 
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
@@ -678,11 +670,7 @@ public sealed class PayOsService : IPayOsService
             return Result.Success();
         }
 
-        await _walletRepository.CreateIfMissingAsync(pi.UserId, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        var wallet = await _walletRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
-        if (wallet is null) return Result.Failure(new Error(Error.Codes.Unexpected, "Wallet could not be loaded."));
+        var wallet = await _walletRepository.EnsureAsync(pi.UserId, ct).ConfigureAwait(false);
 
         var tx = new Transaction
         {
