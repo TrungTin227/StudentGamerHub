@@ -62,6 +62,18 @@ public sealed class EventService : IEventService
             return Result<Guid>.Failure(validation.Error);
         }
 
+        var normalizedPriceCents = req.PriceCents;
+        if (normalizedPriceCents <= 0)
+        {
+            return Result<Guid>.Failure(new Error(Error.Codes.Validation, "PriceCents must be greater than zero."));
+        }
+
+        var normalizedEscrowMinCents = req.EscrowMinCents;
+        if (normalizedEscrowMinCents < 0)
+        {
+            return Result<Guid>.Failure(new Error(Error.Codes.Validation, "EscrowMinCents cannot be negative."));
+        }
+
         var entity = new Event
         {
             Id = Guid.NewGuid(),
@@ -73,9 +85,9 @@ public sealed class EventService : IEventService
             Location = string.IsNullOrWhiteSpace(req.Location) ? null : req.Location.Trim(),
             StartsAt = req.StartsAt,
             EndsAt = req.EndsAt,
-            PriceCents = req.PriceCents,
+            PriceCents = normalizedPriceCents,
             Capacity = req.Capacity,
-            EscrowMinCents = req.EscrowMinCents,
+            EscrowMinCents = normalizedEscrowMinCents,
             PlatformFeeRate = req.PlatformFeeRate,
             GatewayFeePolicy = req.GatewayFeePolicy,
             Status = EventStatus.Draft,

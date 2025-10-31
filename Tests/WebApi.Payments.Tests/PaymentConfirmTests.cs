@@ -39,6 +39,7 @@ public sealed class PaymentConfirmTests : IAsyncLifetime
             var user = TestEntityFactory.CreateUser(_userId);
             var wallet = TestEntityFactory.CreateWallet(_userId, balanceCents: 100_000);
             var ev = TestEntityFactory.CreateEvent(_userId);
+            ev.EscrowMinCents = amount;
 
             await db.Users.AddAsync(user);
             await db.Wallets.AddAsync(wallet);
@@ -95,6 +96,7 @@ public sealed class PaymentConfirmTests : IAsyncLifetime
             var user = TestEntityFactory.CreateUser(_userId);
             var wallet = TestEntityFactory.CreateWallet(_userId, balanceCents: 500_000);
             var ev = TestEntityFactory.CreateEvent(_userId);
+            ev.EscrowMinCents = amount;
 
             await db.Users.AddAsync(user);
             await db.Wallets.AddAsync(wallet);

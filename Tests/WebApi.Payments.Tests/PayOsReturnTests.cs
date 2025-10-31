@@ -55,7 +55,7 @@ public sealed class PayOsReturnTests : IAsyncLifetime
         var response = await client.GetAsync($"/api/payments/payos/return?status=PAID&orderCode={orderCode}");
 
         response.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        response.Headers.Location.Should().Be($"/payment/result?status=success&intentId={intentId}");
+        response.Headers.Location.Should().Be($"https://frontend.test.local/payment/result?status=success&intentId={intentId}");
     }
 
     [Theory]
@@ -70,6 +70,6 @@ public sealed class PayOsReturnTests : IAsyncLifetime
         var response = await client.GetAsync($"/api/payments/payos/return?status={status}&orderCode={orderCode}");
 
         response.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        response.Headers.Location.Should().Be("/payment/result?status=failed");
+        response.Headers.Location.Should().Be("https://frontend.test.local/payment/result?status=failed");
     }
 }
