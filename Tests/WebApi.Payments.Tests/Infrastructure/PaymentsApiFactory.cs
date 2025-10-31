@@ -264,6 +264,34 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<global::Program>
                 .AsNoTracking()
                 .FirstOrDefaultAsync(w => w.UserId == userId, ct);
 
+        public async Task<Wallet> EnsureAsync(Guid userId, CancellationToken ct = default)
+        {
+            await CreateIfMissingAsync(userId, ct).ConfigureAwait(false);
+            await _context.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            var wallet = await GetByUserIdAsync(userId, ct).ConfigureAwait(false);
+            if (wallet is null)
+            {
+                throw new InvalidOperationException($"Wallet for user {userId} could not be ensured.");
+            }
+
+            return wallet;
+        }
+
+        public void Detach(Wallet wallet)
+        {
+            if (wallet is null)
+            {
+                return;
+            }
+
+            var entry = _context.Entry(wallet);
+            if (entry.State != EntityState.Detached)
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
+
         public async Task<bool> AdjustBalanceAsync(Guid userId, long deltaCents, CancellationToken ct = default)
         {
             var wallet = await _context.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, ct).ConfigureAwait(false);

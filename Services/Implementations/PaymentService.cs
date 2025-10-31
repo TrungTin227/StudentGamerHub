@@ -150,6 +150,10 @@ public sealed class PaymentService : IPaymentService
                 return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount exceeds the allowed limit."));
             }
 
+            // Ensure wallet exists before creating top-up intent - maintains one-wallet-per-user invariant
+            await _walletRepository.CreateIfMissingAsync(userId, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
             var paymentIntent = new PaymentIntent
             {
                 Id = Guid.NewGuid(),
