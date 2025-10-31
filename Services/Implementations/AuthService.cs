@@ -1,5 +1,6 @@
 ﻿using FluentValidation;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Services.Common.Results;
 
 namespace Services.Implementations
@@ -41,7 +42,7 @@ namespace Services.Implementations
                 // Tìm user theo username/email
                 .BindAsync(async _ =>
                 {
-                    var user = await FindByUserNameOrEmailAsync(req.UserNameOrEmail).ConfigureAwait(false);
+                    var user = await FindByUserNameOrEmailAsync(req.UserNameOrEmail, ct).ConfigureAwait(false);
                     return Result<User>.FromNullable(
                         user,
                         new Error(Error.Codes.Unauthorized, "Invalid credentials."));
@@ -131,13 +132,37 @@ namespace Services.Implementations
             => RevokeAsync(new RevokeTokenRequest { RefreshToken = refreshToken }, ip, ct);
 
         // ---- Helpers ----
-        private async Task<User?> FindByUserNameOrEmailAsync(string userNameOrEmail)
+        private async Task<User?> FindByUserNameOrEmailAsync(string userNameOrEmail, CancellationToken ct)
         {
-            var byEmail = await _users.FindByEmailAsync(userNameOrEmail).ConfigureAwait(false);
-            if (byEmail is not null) return byEmail;
+            if (string.IsNullOrWhiteSpace(userNameOrEmail))
+            {
+                return null;
+            }
 
-            var byName = await _users.FindByNameAsync(userNameOrEmail).ConfigureAwait(false);
-            return byName;
+            if (userNameOrEmail.Contains('@'))
+            {
+                var normalizedEmail = _users.NormalizeEmail(userNameOrEmail);
+                if (!string.IsNullOrWhiteSpace(normalizedEmail))
+                {
+                    var byEmail = await _users.Users.AsNoTracking()
+                        .FirstOrDefaultAsync(u => u.NormalizedEmail == normalizedEmail, ct)
+                        .ConfigureAwait(false);
+                    if (byEmail is not null)
+                    {
+                        return byEmail;
+                    }
+                }
+            }
+
+            var normalizedUserName = _users.NormalizeName(userNameOrEmail);
+            if (string.IsNullOrWhiteSpace(normalizedUserName))
+            {
+                return null;
+            }
+
+            return await _users.Users.AsNoTracking()
+                .FirstOrDefaultAsync(u => u.NormalizedUserName == normalizedUserName, ct)
+                .ConfigureAwait(false);
         }
     }
 }
