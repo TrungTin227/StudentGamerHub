@@ -384,40 +384,72 @@ public static class ServiceCollectionExtensions
 
         });
 
-        services.TryAddSingleton<IConnectionMultiplexer>(sp =>
+        services.TryAddSingleton<IConnectionMultiplexer?>(sp =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
+            var logger = sp.GetService<ILogger<Program>>();
             var connectionString = configuration.GetValue<string>("Redis:ConnectionString")
                                    ?? configuration["Redis__ConnectionString"];
 
             if (string.IsNullOrWhiteSpace(connectionString))
             {
-                // Development fallback: return a null implementation
                 var env = sp.GetService<IHostEnvironment>();
                 if (env?.IsDevelopment() == true)
                 {
-                    throw new InvalidOperationException(
-                        "Redis:ConnectionString is not configured. " +
-                        "Please install Redis or configure connection string in appsettings.Development.json");
+                    logger?.LogWarning("Redis:ConnectionString is not configured. Using in-memory cache fallback. " +
+                        "To use Redis, install Redis and configure connection string in appsettings.Development.json");
                 }
-                throw new InvalidOperationException("Redis:ConnectionString (Redis__ConnectionString) is required");
+                else
+                {
+                    logger?.LogWarning("Redis:ConnectionString is not configured. Using in-memory cache fallback. " +
+                        "Some features (distributed caching, webhook replay protection across instances) may not work correctly in multi-instance deployments.");
+                }
+                return null;
             }
 
-            var options = ConfigurationOptions.Parse(connectionString);
-            options.AbortOnConnectFail = false;
-            options.ConnectTimeout = 5000;
-            options.SyncTimeout = 5000;
+            try
+            {
+                var options = ConfigurationOptions.Parse(connectionString);
+                options.AbortOnConnectFail = false;
+                options.ConnectTimeout = 5000;
+                options.SyncTimeout = 5000;
 
-            return ConnectionMultiplexer.Connect(options);
+                var redis = ConnectionMultiplexer.Connect(options);
+                var endpoints = redis.GetEndPoints().Select(ep => ep.ToString()).ToArray();
+                logger?.LogInformation("Redis connected successfully to {Endpoints}",
+                    string.Join(", ", endpoints));
+                return redis;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "Failed to connect to Redis at {ConnectionString}. Using in-memory cache fallback.",
+                    connectionString);
+                return null;
+            }
         });
 
         // Chat configuration and services
         services.Configure<Services.Configuration.ChatOptions>(configuration.GetSection("Chat"));
         services.AddSingleton<Services.Interfaces.IChatHistoryService, Services.Implementations.ChatHistoryService>();
 
-        // SignalR with Redis backplane
-        var redisConn = configuration.GetSection("Redis")["ConnectionString"] ?? "localhost:6379";
-        services.AddSignalR().AddStackExchangeRedis(redisConn, _ => { });
+        // SignalR with optional Redis backplane
+        var redisConn = configuration.GetValue<string>("Redis:ConnectionString")
+                        ?? configuration["Redis__ConnectionString"];
+
+        if (!string.IsNullOrWhiteSpace(redisConn))
+        {
+            // Use Redis backplane for distributed SignalR
+            services.AddSignalR().AddStackExchangeRedis(redisConn, options =>
+            {
+                options.Configuration.AbortOnConnectFail = false;
+                options.Configuration.ConnectTimeout = 5000;
+            });
+        }
+        else
+        {
+            // Use in-memory SignalR (single instance only)
+            services.AddSignalR();
+        }
 
         services.AddOpenApi(options =>
         {
