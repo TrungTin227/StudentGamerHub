@@ -1,3 +1,4 @@
+using DTOs.Memberships;
 using Microsoft.EntityFrameworkCore;
 using Services.Common.Mapping;
 using Services.DTOs.Memberships;
@@ -7,10 +8,34 @@ namespace Services.Implementations.Memberships;
 public sealed class MembershipReadService : IMembershipReadService
 {
     private readonly AppDbContext _db;
+    private readonly IUserMembershipRepository _userMembershipRepository;
 
-    public MembershipReadService(AppDbContext db)
+    public MembershipReadService(AppDbContext db, IUserMembershipRepository userMembershipRepository)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _userMembershipRepository = userMembershipRepository ?? throw new ArgumentNullException(nameof(userMembershipRepository));
+    }
+
+    public async Task<Result<UserMembershipInfoDto?>> GetCurrentMembershipAsync(Guid userId, CancellationToken ct = default)
+    {
+        if (userId == Guid.Empty)
+        {
+            return Result<UserMembershipInfoDto?>.Failure(
+                new Error(Error.Codes.Validation, "UserId is required."));
+        }
+
+        var utcNow = DateTime.UtcNow;
+        var membership = await _userMembershipRepository
+            .GetActiveAsync(userId, utcNow, ct)
+            .ConfigureAwait(false);
+
+        if (membership is null)
+        {
+            return Result<UserMembershipInfoDto?>.Success(null);
+        }
+
+        var dto = membership.ToInfoDto(utcNow);
+        return Result<UserMembershipInfoDto?>.Success(dto);
     }
 
     public async Task<Result<ClubRoomTreeHybridDto>> GetMyClubRoomTreeAsync(Guid userId, CancellationToken ct = default)
