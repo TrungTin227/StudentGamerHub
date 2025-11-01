@@ -1,5 +1,6 @@
 using System.Linq;
 using BusinessObjects;
+using BusinessObjects.Common;
 using BusinessObjects.Common.Results;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -8,6 +9,7 @@ using Repositories.Implements;
 using Repositories.Interfaces;
 using Repositories.Persistence;
 using Services.Implementations;
+using Services.Interfaces;
 using Xunit;
 
 namespace Services.Events.Tests;
@@ -22,13 +24,17 @@ public sealed class EventReadServiceTests
         var attendeeId = Guid.NewGuid();
         var now = DateTime.UtcNow;
 
+        ctx.Db.Users.AddRange(
+            CreateUser(organizerId, "organizer"),
+            CreateUser(attendeeId, "attendee"));
+
         var ev = new Event
         {
             Id = Guid.NewGuid(),
             OrganizerId = organizerId,
             Title = "LAN Party",
             Description = "Bring your laptop",
-            Mode = EventMode.Onsite,
+            Mode = EventMode.Offline,
             StartsAt = now.AddDays(2),
             EndsAt = now.AddDays(2).AddHours(4),
             Status = EventStatus.Open,
@@ -74,14 +80,18 @@ public sealed class EventReadServiceTests
     public async Task GetById_ShouldReturnNotFound_WhenSoftDeleted()
     {
         await using var ctx = await EventTestContext.CreateAsync();
+        var organizerId = Guid.NewGuid();
+
+        ctx.Db.Users.Add(CreateUser(organizerId, "deleted-organizer"));
+
         var ev = new Event
         {
             Id = Guid.NewGuid(),
-            OrganizerId = Guid.NewGuid(),
+            OrganizerId = organizerId,
             Title = "Deleted Event",
             Status = EventStatus.Draft,
             CreatedAtUtc = DateTime.UtcNow,
-            CreatedBy = Guid.NewGuid(),
+            CreatedBy = organizerId,
             IsDeleted = true,
             DeletedAtUtc = DateTime.UtcNow
         };
@@ -103,6 +113,17 @@ public sealed class EventReadServiceTests
         var communityId = Guid.NewGuid();
         var userId = Guid.NewGuid();
         var now = DateTime.UtcNow;
+
+        ctx.Db.Users.Add(CreateUser(organizerId, "search-organizer"));
+        ctx.Db.Communities.Add(new Community
+        {
+            Id = communityId,
+            Name = "LAN Hub",
+            Description = "Test community",
+            IsPublic = true,
+            CreatedAtUtc = DateTime.UtcNow,
+            CreatedBy = organizerId
+        });
 
         var matching = new Event
         {
@@ -173,6 +194,10 @@ public sealed class EventReadServiceTests
         var eventId = Guid.NewGuid();
         var attendeeId = Guid.NewGuid();
 
+        ctx.Db.Users.AddRange(
+            CreateUser(organizerId, "list-organizer"),
+            CreateUser(attendeeId, "list-attendee"));
+
         ctx.Db.Events.Add(new Event
         {
             Id = eventId,
@@ -215,27 +240,35 @@ public sealed class EventReadServiceTests
         var otherUserId = Guid.NewGuid();
         var event1 = Guid.NewGuid();
         var event2 = Guid.NewGuid();
+        var organizerAId = Guid.NewGuid();
+        var organizerBId = Guid.NewGuid();
+
+        ctx.Db.Users.AddRange(
+            CreateUser(userId, "mine-user"),
+            CreateUser(otherUserId, "mine-other"),
+            CreateUser(organizerAId, "mine-org-a"),
+            CreateUser(organizerBId, "mine-org-b"));
 
         ctx.Db.Events.AddRange(
             new Event
             {
                 Id = event1,
-                OrganizerId = Guid.NewGuid(),
+                OrganizerId = organizerAId,
                 Title = "Event A",
                 Status = EventStatus.Open,
                 StartsAt = DateTime.UtcNow.AddDays(1),
                 CreatedAtUtc = DateTime.UtcNow,
-                CreatedBy = Guid.NewGuid()
+                CreatedBy = organizerAId
             },
             new Event
             {
                 Id = event2,
-                OrganizerId = Guid.NewGuid(),
+                OrganizerId = organizerBId,
                 Title = "Event B",
                 Status = EventStatus.Open,
                 StartsAt = DateTime.UtcNow.AddDays(2),
                 CreatedAtUtc = DateTime.UtcNow,
-                CreatedBy = Guid.NewGuid()
+                CreatedBy = organizerBId
             });
 
         ctx.Db.EventRegistrations.AddRange(
@@ -287,6 +320,10 @@ public sealed class EventReadServiceTests
         var ownerId = Guid.NewGuid();
         var otherUserId = Guid.NewGuid();
 
+        ctx.Db.Users.AddRange(
+            CreateUser(ownerId, "payment-owner"),
+            CreateUser(otherUserId, "payment-other"));
+
         var intent = new PaymentIntent
         {
             Id = Guid.NewGuid(),
@@ -309,6 +346,22 @@ public sealed class EventReadServiceTests
         var failure = await ctx.PaymentReadService.GetAsync(otherUserId, intent.Id);
         failure.IsSuccess.Should().BeFalse();
         failure.Error!.Code.Should().Be(Error.Codes.NotFound);
+    }
+
+    private static User CreateUser(Guid id, string name)
+    {
+        var normalizedUserName = name.ToUpperInvariant();
+        var email = $"{name}@example.com";
+
+        return new User
+        {
+            Id = id,
+            UserName = name,
+            NormalizedUserName = normalizedUserName,
+            Email = email,
+            NormalizedEmail = email.ToUpperInvariant(),
+            SecurityStamp = Guid.NewGuid().ToString()
+        };
     }
 
     private sealed class EventTestContext : IAsyncDisposable
@@ -338,6 +391,7 @@ public sealed class EventReadServiceTests
         {
             var connection = new SqliteConnection("Filename=:memory:");
             await connection.OpenAsync();
+            RegisterSqliteGuidFunctions(connection);
 
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite(connection)
@@ -350,10 +404,11 @@ public sealed class EventReadServiceTests
             IRegistrationQueryRepository registrationQueryRepository = new RegistrationQueryRepository(db);
             var escrowRepository = new EscrowRepository(db);
             var paymentIntentRepository = new PaymentIntentRepository(db);
+            var transactionRepository = new TransactionRepository(db);
 
             var eventReadService = new EventReadService(eventQueryRepository, escrowRepository, registrationQueryRepository);
             var registrationReadService = new RegistrationReadService(eventQueryRepository, registrationQueryRepository);
-            var paymentReadService = new PaymentReadService(paymentIntentRepository);
+            var paymentReadService = new PaymentReadService(paymentIntentRepository, transactionRepository);
 
             return new EventTestContext(
                 connection,
@@ -361,6 +416,12 @@ public sealed class EventReadServiceTests
                 eventReadService,
                 registrationReadService,
                 paymentReadService);
+        }
+
+        private static void RegisterSqliteGuidFunctions(SqliteConnection connection)
+        {
+            connection.CreateFunction<Guid, Guid, Guid>("LEAST", static (a, b) => a.CompareTo(b) <= 0 ? a : b, isDeterministic: true);
+            connection.CreateFunction<Guid, Guid, Guid>("GREATEST", static (a, b) => a.CompareTo(b) >= 0 ? a : b, isDeterministic: true);
         }
 
         public async ValueTask DisposeAsync()

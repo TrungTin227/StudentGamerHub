@@ -2,6 +2,7 @@
 using DTOs.Memberships;
 using DTOs.Registrations;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
@@ -140,6 +141,7 @@ public sealed class PaymentsController : ControllerBase
     [HttpPost("payos/webhook")]
     [AllowAnonymous]
     [IgnoreAntiforgeryToken]
+    [DisableCors]
     [EnableRateLimiting("PaymentsWebhook")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<ActionResult> PayOsWebhook(CancellationToken ct)

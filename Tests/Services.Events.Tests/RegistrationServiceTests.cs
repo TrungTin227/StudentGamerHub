@@ -1,5 +1,6 @@
 using System.Linq;
 using BusinessObjects;
+using BusinessObjects.Common;
 using BusinessObjects.Common.Results;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -10,6 +11,7 @@ using Repositories.Persistence;
 using Repositories.WorkSeeds.Implements;
 using Repositories.WorkSeeds.Interfaces;
 using Services.Implementations;
+using Xunit;
 
 namespace Services.Events.Tests;
 
@@ -23,6 +25,12 @@ public sealed class RegistrationServiceTests
         var organizerId = Guid.NewGuid();
         var eventId = Guid.NewGuid();
         var attendees = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
+
+        ctx.Db.Users.Add(CreateUser(organizerId, "reg-organizer"));
+        for (var i = 0; i < attendees.Length; i++)
+        {
+            ctx.Db.Users.Add(CreateUser(attendees[i], $"reg-attendee-{i}"));
+        }
 
         ctx.Db.Events.Add(new Event
         {
@@ -93,6 +101,22 @@ public sealed class RegistrationServiceTests
         registrationStatuses.Should().Contain(EventRegistrationStatus.Canceled);
     }
 
+    private static User CreateUser(Guid id, string name)
+    {
+        var normalizedUserName = name.ToUpperInvariant();
+        var email = $"{name}@example.com";
+
+        return new User
+        {
+            Id = id,
+            UserName = name,
+            NormalizedUserName = normalizedUserName,
+            Email = email,
+            NormalizedEmail = email.ToUpperInvariant(),
+            SecurityStamp = Guid.NewGuid().ToString()
+        };
+    }
+
     private sealed class RegistrationServiceTestContext : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -112,6 +136,7 @@ public sealed class RegistrationServiceTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
+            RegisterSqliteGuidFunctions(connection);
 
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite(connection)
@@ -141,6 +166,12 @@ public sealed class RegistrationServiceTests
                 Service = service,
                 PaymentIntentRepository = paymentIntentRepository,
             };
+        }
+
+        private static void RegisterSqliteGuidFunctions(SqliteConnection connection)
+        {
+            connection.CreateFunction<Guid, Guid, Guid>("LEAST", static (a, b) => a.CompareTo(b) <= 0 ? a : b, isDeterministic: true);
+            connection.CreateFunction<Guid, Guid, Guid>("GREATEST", static (a, b) => a.CompareTo(b) >= 0 ? a : b, isDeterministic: true);
         }
 
         public async ValueTask DisposeAsync()

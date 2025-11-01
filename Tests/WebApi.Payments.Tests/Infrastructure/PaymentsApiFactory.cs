@@ -1,3 +1,4 @@
+using WebAPI;
 using BusinessObjects;
 using BusinessObjects.Common.Results;
 using DTOs.Quests;
@@ -35,7 +36,7 @@ using System.Text.Json.Serialization;
 
 namespace WebApi.Payments.Tests.Infrastructure;
 
-public sealed class PaymentsApiFactory : WebApplicationFactory<global::Program>
+public sealed class PaymentsApiFactory : WebApplicationFactory<Program>
 {
     public const string SecretKey = "integration-secret";
     public static readonly Guid DefaultUserId = Guid.Parse("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa");
@@ -170,6 +171,9 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<global::Program>
                     sp.GetRequiredService<IEventQueryRepository>(),
                     sp.GetRequiredService<ITransactionRepository>(),
                     sp.GetRequiredService<IWalletRepository>(),
+                    sp.GetRequiredService<IMembershipPlanRepository>(),
+                    sp.GetRequiredService<IMembershipEnrollmentService>(),
+                    sp.GetRequiredService<IPlatformAccountService>(),
                     sp.GetRequiredService<IEscrowRepository>(),
                     sp.GetRequiredService<IQuestService>(),
                     sp.GetRequiredService<ICommunityService>());
