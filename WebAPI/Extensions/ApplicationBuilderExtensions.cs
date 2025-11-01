@@ -11,7 +11,13 @@ public static class ApplicationBuilderExtensions
     {
         app.UseExceptionHandler();
 
-        app.UseHttpsRedirection();
+        // Only use HTTPS redirection in development
+        // In production (Render.com), the load balancer handles HTTPS
+        if (env.IsDevelopment())
+        {
+            app.UseHttpsRedirection();
+        }
+
         app.UseRouting();
         app.UseCors("Frontend");
         app.UseAuthentication();
