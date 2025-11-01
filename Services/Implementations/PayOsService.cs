@@ -225,8 +225,8 @@ public sealed class PayOsService : IPayOsService
             var webhookUrl = string.IsNullOrWhiteSpace(req.WebhookUrl) ? _options.WebhookUrl : req.WebhookUrl!;
             var description = req.Description ?? string.Empty;
 
-            // Signature khi t?o link: HMAC_SHA256 tr�n chu?i "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
-            var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl);
+            // Signature khi t?o link: HMAC_SHA256 tr�n chu?i "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=..&webhookUrl=.."
+            var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl, webhookUrl);
 
             var payload = new
             {
@@ -255,7 +255,7 @@ public sealed class PayOsService : IPayOsService
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("payOS create link failed {Status}. Body={Body}", response.StatusCode, body);
-                return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Failed to create PayOS payment link."));
+                return Result<string>.Failure(new Error(Error.Codes.Unexpected, $"Failed to create PayOS payment link. Status: {response.StatusCode}"));
             }
 
             PayOsPaymentResponse? parsed = null;
@@ -266,12 +266,13 @@ public sealed class PayOsService : IPayOsService
             catch (JsonException ex)
             {
                 _logger.LogError(ex, "Deserialize payOS response failed. Raw={Body}", body);
+                return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Failed to parse PayOS response."));
             }
 
             var checkoutUrl = parsed?.Data?.CheckoutUrl;
             if (string.IsNullOrWhiteSpace(checkoutUrl))
             {
-                _logger.LogWarning("payOS response missing checkoutUrl. Raw={Body}", body);
+                _logger.LogWarning("payOS response missing checkoutUrl. Parsed={@Parsed}, Raw={Body}", parsed, body);
                 return Result<string>.Failure(new Error(Error.Codes.Unexpected, "PayOS response missing checkout url."));
             }
 
@@ -412,10 +413,17 @@ public sealed class PayOsService : IPayOsService
     // ================
     // Verify helpers
     // ================
-    private string BuildCreateSignature(long orderCode, long amount, string description, string returnUrl, string cancelUrl)
+    private string BuildCreateSignature(long orderCode, long amount, string description, string returnUrl, string cancelUrl, string? webhookUrl = null)
     {
-        // th? t? alphabet: amount, cancelUrl, description, orderCode, returnUrl
+        // th? t? alphabet: amount, cancelUrl, description, orderCode, returnUrl, webhookUrl (if present)
         var data = $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
+
+        // Only include webhookUrl in signature if it's provided
+        if (!string.IsNullOrWhiteSpace(webhookUrl))
+        {
+            data += $"&webhookUrl={webhookUrl}";
+        }
+
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_options.SecretKey));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLowerInvariant();
     }
