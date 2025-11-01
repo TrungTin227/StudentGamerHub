@@ -13,12 +13,6 @@ public sealed class EventCreateRequestDtoValidator : AbstractValidator<EventCrea
         RuleFor(x => x.PriceCents)
             .GreaterThan(0);
 
-        RuleFor(x => x.EscrowMinCents)
-            .GreaterThanOrEqualTo(0);
-
-        RuleFor(x => x.PlatformFeeRate)
-            .InclusiveBetween(0m, 1m);
-
         RuleFor(x => x.EndsAt)
             .Must((dto, endsAt) => endsAt is null || dto.StartsAt < endsAt)
             .WithMessage("EndsAt must be greater than StartsAt when provided.");

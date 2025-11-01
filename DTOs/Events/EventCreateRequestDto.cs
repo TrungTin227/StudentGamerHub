@@ -9,7 +9,4 @@ public sealed record EventCreateRequestDto(
     DateTime StartsAt,
     DateTime? EndsAt,
     long PriceCents,
-    int? Capacity,
-    long EscrowMinCents,
-    decimal PlatformFeeRate,
-    GatewayFeePolicy GatewayFeePolicy);
+    int? Capacity);

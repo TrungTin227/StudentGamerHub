@@ -60,12 +60,6 @@ public sealed class EventService : IEventService
             return Result<Guid>.Failure(new Error(Error.Codes.Validation, "PriceCents must be greater than zero."));
         }
 
-        var normalizedEscrowMinCents = req.EscrowMinCents;
-        if (normalizedEscrowMinCents < 0)
-        {
-            return Result<Guid>.Failure(new Error(Error.Codes.Validation, "EscrowMinCents cannot be negative."));
-        }
-
         var entity = new Event
         {
             Id = Guid.NewGuid(),
@@ -79,9 +73,6 @@ public sealed class EventService : IEventService
             EndsAt = req.EndsAt,
             PriceCents = normalizedPriceCents,
             Capacity = req.Capacity,
-            EscrowMinCents = normalizedEscrowMinCents,
-            PlatformFeeRate = req.PlatformFeeRate,
-            GatewayFeePolicy = req.GatewayFeePolicy,
             Status = EventStatus.Draft,
             CreatedBy = organizerId,
         };
@@ -104,6 +95,11 @@ public sealed class EventService : IEventService
             {
                 return Result<Guid>.Failure(new Error(Error.Codes.Unexpected, "Membership plan information is missing."));
             }
+
+            var policy = ResolveMembershipEventPolicy(plan);
+            entity.EscrowMinCents = policy.EscrowMinCents;
+            entity.PlatformFeeRate = policy.PlatformFeeRate;
+            entity.GatewayFeePolicy = policy.GatewayFeePolicy;
 
             var resetApplied = membership.ResetMonthlyQuotaIfNeeded(utcNow);
             if (resetApplied)
@@ -145,6 +141,30 @@ public sealed class EventService : IEventService
             return Result<Guid>.Success(entity.Id);
         }, ct: ct).ConfigureAwait(false);
     }
+
+    private static MembershipEventPolicy ResolveMembershipEventPolicy(MembershipPlan plan)
+    {
+        var monthlyLimit = plan.MonthlyEventLimit;
+
+        if (monthlyLimit <= 0)
+        {
+            return new MembershipEventPolicy(0, 0m, GatewayFeePolicy.OrganizerPays);
+        }
+
+        if (monthlyLimit <= 3)
+        {
+            return new MembershipEventPolicy(0, 0.05m, GatewayFeePolicy.OrganizerPays);
+        }
+
+        if (monthlyLimit <= 10)
+        {
+            return new MembershipEventPolicy(0, 0.03m, GatewayFeePolicy.OrganizerPays);
+        }
+
+        return new MembershipEventPolicy(0, 0.02m, GatewayFeePolicy.OrganizerPays);
+    }
+
+    private readonly record struct MembershipEventPolicy(long EscrowMinCents, decimal PlatformFeeRate, GatewayFeePolicy GatewayFeePolicy);
 
     public async Task<Result> OpenAsync(Guid organizerId, Guid eventId, CancellationToken ct = default)
     {
