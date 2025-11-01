@@ -1,4 +1,5 @@
-using DTOs.Payments.PayOs;
+﻿using DTOs.Payments.PayOs;
+using DTOs.Memberships;
 using DTOs.Registrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -82,6 +83,30 @@ public sealed class PaymentsController : ControllerBase
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
     }
 
+    [HttpPost("buy-membership/{planId:guid}")]
+    [EnableRateLimiting("PaymentsWrite")]
+    [ProducesResponseType(typeof(MembershipPurchaseResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> BuyMembership(Guid planId, CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+        {
+            return this.ToActionResult(Result<MembershipPurchaseResultDto>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+        }
+
+        var result = await _paymentService
+            .BuyMembershipAsync(currentUserId.Value, planId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, dto => dto, StatusCodes.Status200OK);
+    }
 
 
     [HttpPost("payos/create")]
@@ -240,3 +265,5 @@ public sealed record PayOsCheckoutRequest
     public Guid IntentId { get; init; }
     public string? ReturnUrl { get; init; }
 }
+
+

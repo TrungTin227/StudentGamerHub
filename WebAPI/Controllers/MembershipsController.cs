@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Services.DTOs.Memberships;
+using DTOs.Memberships;
 using WebApi.Common;
 
 namespace WebAPI.Controllers;
@@ -12,10 +14,12 @@ namespace WebAPI.Controllers;
 public sealed class MembershipsController : ControllerBase
 {
     private readonly IMembershipReadService _membershipReadService;
+    private readonly IMembershipPlanService _membershipPlanService;
 
-    public MembershipsController(IMembershipReadService membershipReadService)
+    public MembershipsController(IMembershipReadService membershipReadService, IMembershipPlanService membershipPlanService)
     {
         _membershipReadService = membershipReadService ?? throw new ArgumentNullException(nameof(membershipReadService));
+        _membershipPlanService = membershipPlanService ?? throw new ArgumentNullException(nameof(membershipPlanService));
     }
 
     [HttpGet("tree")]
@@ -66,5 +70,101 @@ public sealed class MembershipsController : ControllerBase
             .ConfigureAwait(false);
 
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
+    }
+
+    [AllowAnonymous]
+    [HttpGet("public")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(IReadOnlyList<MembershipPlanSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult> GetPublicPlans(CancellationToken ct = default)
+    {
+        var result = await _membershipPlanService.GetPublicAsync(ct).ConfigureAwait(false);
+        return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
+    }
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(IReadOnlyList<MembershipPlanSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult> GetPlans([FromQuery] bool includeInactive = true, CancellationToken ct = default)
+    {
+        var result = await _membershipPlanService.GetAllAsync(includeInactive, ct).ConfigureAwait(false);
+        return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
+    }
+
+    [HttpGet("{planId:guid}")]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(MembershipPlanDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> GetPlan(Guid planId, CancellationToken ct = default)
+    {
+        var result = await _membershipPlanService.GetByIdAsync(planId, ct).ConfigureAwait(false);
+        return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("PaymentsWrite")]
+    [ProducesResponseType(typeof(MembershipPlanDetailDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> CreatePlan([FromBody] MembershipPlanCreateRequest request, CancellationToken ct = default)
+    {
+        if (request is null)
+        {
+            return this.ToActionResult(Result<MembershipPlanDetailDto>.Failure(new Error(Error.Codes.Validation, "Request body is required.")));
+        }
+
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue)
+        {
+            return this.ToActionResult(Result<MembershipPlanDetailDto>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+        }
+
+        var result = await _membershipPlanService.CreateAsync(request, actorId.Value, ct).ConfigureAwait(false);
+        object? routeValues = result.IsSuccess ? new { planId = result.Value!.Id } : null;
+        return this.ToCreatedAtAction(result, nameof(GetPlan), routeValues);
+    }
+
+    [HttpPut("{planId:guid}")]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("PaymentsWrite")]
+    [ProducesResponseType(typeof(MembershipPlanDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult> UpdatePlan(Guid planId, [FromBody] MembershipPlanUpdateRequest request, CancellationToken ct = default)
+    {
+        if (request is null)
+        {
+            return this.ToActionResult(Result<MembershipPlanDetailDto>.Failure(new Error(Error.Codes.Validation, "Request body is required.")));
+        }
+
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue)
+        {
+            return this.ToActionResult(Result<MembershipPlanDetailDto>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+        }
+
+        var result = await _membershipPlanService.UpdateAsync(planId, request, actorId.Value, ct).ConfigureAwait(false);
+        return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
+    }
+
+    [HttpDelete("{planId:guid}")]
+    [Authorize(Roles = "Admin")]
+    [EnableRateLimiting("PaymentsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> DeletePlan(Guid planId, CancellationToken ct = default)
+    {
+        var actorId = User.GetUserId();
+        if (!actorId.HasValue)
+        {
+            return this.ToActionResult(Result.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
+        }
+
+        var result = await _membershipPlanService.DeleteAsync(planId, actorId.Value, ct).ConfigureAwait(false);
+        return this.ToActionResult(result);
     }
 }

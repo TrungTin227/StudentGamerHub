@@ -38,6 +38,8 @@ namespace Repositories.Persistence
         public DbSet<Wallet> Wallets => Set<Wallet>();
         public DbSet<Transaction> Transactions => Set<Transaction>();
         public DbSet<PaymentIntent> PaymentIntents => Set<PaymentIntent>();
+        public DbSet<MembershipPlan> MembershipPlans => Set<MembershipPlan>();
+        public DbSet<UserMembership> UserMemberships => Set<UserMembership>();
 
         public DbSet<FriendLink> FriendLinks => Set<FriendLink>();
         public DbSet<Gift> Gifts => Set<Gift>();
@@ -46,6 +48,11 @@ namespace Repositories.Persistence
         protected override void OnModelCreating(ModelBuilder b)
         {
             base.OnModelCreating(b);
+
+            var basicPlanId = Guid.Parse("088f4b43-93fc-4c92-8b24-20f84a3d9210");
+            var proPlanId = Guid.Parse("31b8dcfb-2e5d-4b84-aefb-cbc5a8db7c39");
+            var ultimatePlanId = Guid.Parse("517899aa-03ec-4907-bd1b-b3be526a441a");
+            var membershipSeededAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
 
             // ====== Table names (lowercase) ======
             b.Entity<User>().ToTable("users");
@@ -71,6 +78,8 @@ namespace Repositories.Persistence
             b.Entity<Wallet>().ToTable("wallets");
             b.Entity<Transaction>().ToTable("transactions");
             b.Entity<PaymentIntent>().ToTable("payment_intents");
+            b.Entity<MembershipPlan>().ToTable("membership_plans");
+            b.Entity<UserMembership>().ToTable("user_memberships");
 
             b.Entity<FriendLink>().ToTable("friend_links");
             b.Entity<Gift>().ToTable("gifts");
@@ -105,6 +114,11 @@ namespace Repositories.Persistence
 
                 // Teammates search index
                 e.HasIndex(u => u.University);
+
+                e.HasOne(u => u.Membership)
+                 .WithOne(m => m.User)
+                 .HasForeignKey<UserMembership>(m => m.UserId)
+                 .OnDelete(DeleteBehavior.Cascade);
             });
 
             // ====== ROLE ======
@@ -532,31 +546,103 @@ namespace Repositories.Persistence
                  .HasForeignKey(x => x.EventId)
                  .OnDelete(DeleteBehavior.SetNull);
 
+                e.HasOne(x => x.MembershipPlan)
+                 .WithMany()
+                 .HasForeignKey(x => x.MembershipPlanId)
+                 .OnDelete(DeleteBehavior.SetNull);
+
                 e.HasIndex(x => x.UserId);
                 e.HasIndex(x => x.EventRegistrationId).IsUnique();
                 e.HasIndex(x => x.EventId);
+                e.HasIndex(x => x.MembershipPlanId);
      
-      // Index for OrderCode with filter for non-null values
-      e.HasIndex(x => x.OrderCode)
-          .IsUnique()
+                // Index for OrderCode with filter for non-null values
+                e.HasIndex(x => x.OrderCode)
+                 .IsUnique()
                  .HasFilter("\"OrderCode\" IS NOT NULL");
 
- e.HasCheckConstraint(
-          "chk_payment_intent_amount_positive",
-        isNpgsql
-     ? "\"AmountCents\" > 0"
-            : "[AmountCents] > 0");
+                e.HasCheckConstraint(
+                    "chk_payment_intent_amount_positive",
+                    isNpgsql
+                        ? "\"AmountCents\" > 0"
+                        : "[AmountCents] > 0");
 
-        var paymentPurposeConstraint = isNpgsql
-            ? "\"Purpose\" IN ('TopUp','EventTicket','WalletTopUp')"
-        : "[Purpose] IN ('TopUp','EventTicket','WalletTopUp')";
-    e.HasCheckConstraint("chk_payment_intent_purpose_allowed", paymentPurposeConstraint);
+                var paymentPurposeConstraint = isNpgsql
+                    ? "\"Purpose\" IN ('TopUp','EventTicket','WalletTopUp','Membership')"
+                    : "[Purpose] IN ('TopUp','EventTicket','WalletTopUp','Membership')";
+                e.HasCheckConstraint("chk_payment_intent_purpose_allowed", paymentPurposeConstraint);
 
-      var paymentStatusConstraint = isNpgsql
-  ? "\"Status\" IN ('RequiresPayment','Succeeded','Canceled','Expired')"
-              : "[Status] IN ('RequiresPayment','Succeeded','Canceled','Expired')";
+                var paymentStatusConstraint = isNpgsql
+                    ? "\"Status\" IN ('RequiresPayment','Succeeded','Canceled','Expired')"
+                    : "[Status] IN ('RequiresPayment','Succeeded','Canceled','Expired')";
                 e.HasCheckConstraint("chk_payment_intent_status_allowed", paymentStatusConstraint);
   });
+
+            b.Entity<MembershipPlan>(e =>
+            {
+                e.Property(x => x.Name).HasMaxLength(128).IsRequired();
+                e.Property(x => x.Description).HasMaxLength(1024);
+                e.Property(x => x.Price).HasPrecision(18, 2);
+                e.Property(x => x.DurationMonths).HasDefaultValue(1);
+                e.Property(x => x.IsActive).HasDefaultValue(true);
+
+                e.HasIndex(x => x.Name).IsUnique();
+                e.HasIndex(x => x.IsActive);
+
+                e.HasData(
+                    new MembershipPlan
+                    {
+                        Id = basicPlanId,
+                        Name = "Basic",
+                        Description = "Create up to 3 events per month.",
+                        MonthlyEventLimit = 3,
+                        Price = 99000m,
+                        DurationMonths = 1,
+                        IsActive = true,
+                        CreatedAtUtc = membershipSeededAt
+                    },
+                    new MembershipPlan
+                    {
+                        Id = proPlanId,
+                        Name = "Pro",
+                        Description = "Create up to 10 events per month.",
+                        MonthlyEventLimit = 10,
+                        Price = 199000m,
+                        DurationMonths = 1,
+                        IsActive = true,
+                        CreatedAtUtc = membershipSeededAt
+                    },
+                    new MembershipPlan
+                    {
+                        Id = ultimatePlanId,
+                        Name = "Ultimate",
+                        Description = "Unlimited event creation per month.",
+                        MonthlyEventLimit = -1,
+                        Price = 499000m,
+                        DurationMonths = 1,
+                        IsActive = true,
+                        CreatedAtUtc = membershipSeededAt
+                    });
+            });
+
+            b.Entity<UserMembership>(e =>
+            {
+                e.Property(x => x.RemainingEventQuota).HasDefaultValue(0);
+                e.Property(x => x.LastResetAtUtc);
+                e.HasIndex(x => x.MembershipPlanId);
+                e.HasIndex(x => x.EndDate);
+
+                e.HasCheckConstraint(
+                    "chk_user_membership_quota_nonneg",
+                    isNpgsql
+                        ? "\"RemainingEventQuota\" >= 0"
+                        : "[RemainingEventQuota] >= 0");
+
+                e.HasOne(x => x.MembershipPlan)
+                 .WithMany(x => x.UserMemberships)
+                 .HasForeignKey(x => x.MembershipPlanId)
+                 .OnDelete(DeleteBehavior.Restrict);
+            });
 
             // ====== Gifts ======
             b.Entity<Gift>(e =>

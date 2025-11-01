@@ -32,6 +32,7 @@ public sealed class User : IdentityUser<Guid>, IAuditable, ISoftDelete
     public ICollection<UserGame> UserGames { get; set; } = new HashSet<UserGame>();
 
     public Wallet? Wallet { get; set; }
+    public UserMembership? Membership { get; set; }
 }
 
 
@@ -284,10 +285,70 @@ public sealed class PaymentIntent : AuditableEntity
     public Guid? EventId { get; set; }
     public Event? Event { get; set; }
 
+    public Guid? MembershipPlanId { get; set; }
+    public MembershipPlan? MembershipPlan { get; set; }
+
     public PaymentIntentStatus Status { get; set; } = PaymentIntentStatus.RequiresPayment;
     public string ClientSecret { get; set; } = default!;
     public DateTime ExpiresAt { get; set; }
     public long? OrderCode { get; set; } // nullable để migrate dần (sau có thể chuyển sang NOT NULL)
+}
+
+public sealed class MembershipPlan : AuditableEntity
+{
+    public string Name { get; set; } = default!;
+    public string? Description { get; set; }
+    public int MonthlyEventLimit { get; set; }
+    public decimal Price { get; set; }
+    public int DurationMonths { get; set; }
+    public bool IsActive { get; set; } = true;
+    public ICollection<UserMembership> UserMemberships { get; set; } = new HashSet<UserMembership>();
+}
+
+[Index(nameof(UserId), IsUnique = true)]
+public sealed class UserMembership : AuditableEntity
+{
+    public Guid UserId { get; set; }
+    public User? User { get; set; }
+
+    public Guid MembershipPlanId { get; set; }
+    public MembershipPlan? MembershipPlan { get; set; }
+
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public int RemainingEventQuota { get; set; }
+    public DateTime? LastResetAtUtc { get; set; }
+
+    public bool ResetMonthlyQuotaIfNeeded(DateTime nowUtc)
+    {
+        if (MembershipPlan is null)
+        {
+            throw new InvalidOperationException("Membership plan must be loaded to reset quotas.");
+        }
+
+        if (MembershipPlan.MonthlyEventLimit == -1)
+        {
+            return false;
+        }
+
+        if (LastResetAtUtc.HasValue)
+        {
+            var lastReset = LastResetAtUtc.Value;
+            if (lastReset.Year == nowUtc.Year && lastReset.Month == nowUtc.Month)
+            {
+                return false;
+            }
+
+            if (lastReset > nowUtc)
+            {
+                return false;
+            }
+        }
+
+        RemainingEventQuota = MembershipPlan.MonthlyEventLimit;
+        LastResetAtUtc = nowUtc;
+        return true;
+    }
 }
 // GIFTS (đổi quà bằng Points)
 public sealed class Gift : AuditableEntity
@@ -310,3 +371,5 @@ public sealed class BugReport : AuditableEntity
     public string? ImageUrl { get; set; }
     public BugStatus Status { get; set; } = BugStatus.Open;
 }
+
+

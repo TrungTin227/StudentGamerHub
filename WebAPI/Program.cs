@@ -36,3 +36,10 @@ app.UseRateLimiter();
 app.MapRealtimeEndpoints();
 
 app.Run();
+
+public partial class Program { }
+
+namespace WebAPI
+{
+    public partial class Program { }
+}

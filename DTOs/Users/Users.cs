@@ -1,4 +1,5 @@
 ﻿using DTOs.Games;
+using DTOs.Memberships;
 
 namespace DTOs.Users
 {
@@ -36,7 +37,9 @@ namespace DTOs.Users
     DateTime CreatedAtUtc,
     DateTime? UpdatedAtUtc,
     string[] Roles,
-    IEnumerable<GameBriefDto> Games 
+    IEnumerable<GameBriefDto> Games,
+    UserMembershipInfoDto? ActiveMembership 
 );
 
 }
+

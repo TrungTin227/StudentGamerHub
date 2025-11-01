@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -13,13 +13,11 @@ public sealed class EventsController : ControllerBase
 
     private readonly IEventService _eventService;
     private readonly IEventReadService _eventReadService;
-    private readonly IPaymentService _paymentService;
 
-    public EventsController(IEventService eventService, IEventReadService eventReadService, IPaymentService paymentService)
+    public EventsController(IEventService eventService, IEventReadService eventReadService)
     {
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
         _eventReadService = eventReadService ?? throw new ArgumentNullException(nameof(eventReadService));
-        _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
     }
 
     [HttpPost]
@@ -52,18 +50,13 @@ public sealed class EventsController : ControllerBase
 
         if (!result.IsSuccess)
         {
-            if (result.Error.Code == Error.Codes.Forbidden && TryParseDeficit(result.Error.Message, out var deficit))
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new { deficitCents = deficit });
-            }
-
             return this.ToActionResult(result);
         }
 
         var id = result.Value;
 
         // 201 Created + Location: /api/events/{eventId}
-        // body tuỳ bạn, ở đây trả về eventId tối giản.
+        // body tu? b?n, ? d�y tr? v? eventId t?i gi?n.
         return CreatedAtRoute(
             routeName: "GetEventById",
             routeValues: new { eventId = id },
@@ -90,43 +83,7 @@ public sealed class EventsController : ControllerBase
         }
 
         var result = await _eventService.OpenAsync(organizerId.Value, eventId, ct).ConfigureAwait(false);
-        if (!result.IsSuccess && result.Error.Code == Error.Codes.Forbidden &&
-            TryParseTopUpNeeded(result.Error.Message, out var needed))
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { topUpNeededCents = needed });
-        }
-
         return this.ToActionResult(result);
-    }
-
-    [HttpPost("{eventId:guid}/escrow/topups")]
-    [EnableRateLimiting("PaymentsWrite")]
-    [ProducesResponseType(typeof(object), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> CreateEscrowTopUp(Guid eventId, [FromBody] EventEscrowTopUpRequestDto? request, CancellationToken ct)
-    {
-        if (request is null)
-        {
-            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Validation, "Request body is required.")));
-        }
-
-        var organizerId = User.GetUserId();
-        if (!organizerId.HasValue)
-        {
-            return this.ToActionResult(Result<Guid>.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
-        }
-
-        var result = await _paymentService
-            .CreateTopUpIntentAsync(organizerId.Value, eventId, request.AmountCents, ct)
-            .ConfigureAwait(false);
-
-        return this.ToActionResult(result, v => new { paymentIntentId = v }, StatusCodes.Status201Created);
     }
 
     [HttpPost("{eventId:guid}/cancel")]
@@ -279,73 +236,9 @@ public sealed class EventsController : ControllerBase
 
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
     }
-
-    private static bool TryParseTopUpNeeded(string? message, out long needed)
+    private static bool TryParseSort(string? sort, out bool sortAscending, out string? error)
     {
-        needed = 0;
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return false;
-        }
-
-        const string token = "topUpNeededCents=";
-        var index = message.IndexOf(token, StringComparison.OrdinalIgnoreCase);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        var start = index + token.Length;
-        var span = message.AsSpan(start);
-        int endIndex = -1;
-        for (int i = 0; i < span.Length; i++)
-        {
-            var c = span[i];
-            if (c == ' ' || c == '.' || c == ',' || c == ';')
-            {
-                endIndex = i;
-                break;
-            }
-        }
-        var numberSpan = endIndex >= 0 ? span[..endIndex] : span;
-        return long.TryParse(numberSpan, out needed);
-    }
-
-    private static bool TryParseDeficit(string? message, out long deficit)
-    {
-        deficit = 0;
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return false;
-        }
-
-        const string token = "deficitCents=";
-        var index = message.IndexOf(token, StringComparison.OrdinalIgnoreCase);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        var start = index + token.Length;
-        var span = message.AsSpan(start);
-        int endIndex = -1;
-        for (int i = 0; i < span.Length; i++)
-        {
-            var c = span[i];
-            if (c == ' ' || c == '.' || c == ',' || c == ';')
-            {
-                endIndex = i;
-                break;
-            }
-        }
-
-        var numberSpan = endIndex >= 0 ? span[..endIndex] : span;
-        return long.TryParse(numberSpan, out deficit);
-    }
-
-    private static bool TryParseSort(string? sort, out bool sortAsc, out string? error)
-    {
-        sortAsc = true;
+        sortAscending = true;
         error = null;
 
         if (string.IsNullOrWhiteSpace(sort))
@@ -354,21 +247,29 @@ public sealed class EventsController : ControllerBase
         }
 
         var normalized = sort.Trim();
-        var lower = normalized.ToLowerInvariant();
 
-        if (lower is "startsat" or "startsat:asc" or "startsat_asc" or "startsat asc" or "asc" or "+startsat")
+        if (normalized.Equals("createdAt", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("createdAt:asc", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("created_at", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("created_at:asc", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("asc", StringComparison.OrdinalIgnoreCase))
         {
-            sortAsc = true;
+            sortAscending = true;
             return true;
         }
 
-        if (lower is "-startsat" or "startsat:desc" or "startsat_desc" or "startsat desc" or "desc")
+        if (normalized.Equals("createdAt:desc", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("created_at:desc", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("-createdAt", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("desc", StringComparison.OrdinalIgnoreCase))
         {
-            sortAsc = false;
+            sortAscending = false;
             return true;
         }
 
-        error = $"Invalid sort '{sort}'. Allowed values: StartsAt, -StartsAt.";
+        error = "Sort must be one of: createdAt, createdAt:asc, createdAt:desc.";
         return false;
     }
+
+
 }

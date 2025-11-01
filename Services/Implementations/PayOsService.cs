@@ -1,4 +1,4 @@
-﻿using DTOs.Payments.PayOs;
+using DTOs.Payments.PayOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -34,6 +34,9 @@ public sealed class PayOsService : IPayOsService
     private readonly IEventQueryRepository _eventQueryRepository;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IWalletRepository _walletRepository;
+    private readonly IMembershipPlanRepository _membershipPlanRepository;
+    private readonly IMembershipEnrollmentService _membershipEnrollmentService;
+    private readonly IPlatformAccountService _platformAccountService;
     private readonly IEscrowRepository _escrowRepository;
     private readonly IQuestService _questService;
     private readonly ICommunityService _communityService;
@@ -51,6 +54,9 @@ public sealed class PayOsService : IPayOsService
         IEventQueryRepository eventQueryRepository,
         ITransactionRepository transactionRepository,
         IWalletRepository walletRepository,
+        IMembershipPlanRepository membershipPlanRepository,
+        IMembershipEnrollmentService membershipEnrollmentService,
+        IPlatformAccountService platformAccountService,
         IEscrowRepository escrowRepository,
         IQuestService questService,
         ICommunityService communityService)
@@ -67,6 +73,9 @@ public sealed class PayOsService : IPayOsService
         _eventQueryRepository = eventQueryRepository ?? throw new ArgumentNullException(nameof(eventQueryRepository));
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
+        _membershipPlanRepository = membershipPlanRepository ?? throw new ArgumentNullException(nameof(membershipPlanRepository));
+        _membershipEnrollmentService = membershipEnrollmentService ?? throw new ArgumentNullException(nameof(membershipEnrollmentService));
+        _platformAccountService = platformAccountService ?? throw new ArgumentNullException(nameof(platformAccountService));
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
@@ -215,7 +224,7 @@ public sealed class PayOsService : IPayOsService
             var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_options.CancelUrl ?? returnUrl) : req.CancelUrl!;
             var description = req.Description ?? string.Empty;
 
-            // Signature khi tạo link: HMAC_SHA256 trên chuỗi "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
+            // Signature khi t?o link: HMAC_SHA256 tr�n chu?i "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
             var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl);
 
             var payload = new
@@ -372,6 +381,7 @@ public sealed class PayOsService : IPayOsService
                 {
                     PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(pi, providerRef, innerCt).ConfigureAwait(false),
                     PaymentPurpose.TopUp => await ConfirmEscrowTopUpAsync(pi, providerRef, innerCt).ConfigureAwait(false),
+                    PaymentPurpose.Membership => await ConfirmMembershipPurchaseAsync(pi, providerRef, innerCt).ConfigureAwait(false),
                     PaymentPurpose.WalletTopUp => await ConfirmWalletTopUpAsync(pi, providerRef, innerCt).ConfigureAwait(false),
                     _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose."))
                 };
@@ -402,7 +412,7 @@ public sealed class PayOsService : IPayOsService
     // ================
     private string BuildCreateSignature(long orderCode, long amount, string description, string returnUrl, string cancelUrl)
     {
-        // thứ tự alphabet: amount, cancelUrl, description, orderCode, returnUrl
+        // th? t? alphabet: amount, cancelUrl, description, orderCode, returnUrl
         var data = $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_options.SecretKey));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLowerInvariant();
@@ -418,7 +428,7 @@ public sealed class PayOsService : IPayOsService
             return false;
         }
 
-        // 1) Convert Data -> Dictionary và sort theo key
+        // 1) Convert Data -> Dictionary v� sort theo key
         var json = JsonSerializer.Serialize(payload.Data);
         var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json)!;
 
@@ -430,7 +440,7 @@ public sealed class PayOsService : IPayOsService
                 if (je.ValueKind == JsonValueKind.Null) return "";
                 if (je.ValueKind == JsonValueKind.Array)
                 {
-                    // mảng -> serialize lại sau khi chuẩn hoá object con (sort key)
+                    // m?ng -> serialize l?i sau khi chu?n ho� object con (sort key)
                     var arr = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(je.GetRawText()) ?? new();
                     var normalized = arr.Select(o =>
                         o.OrderBy(x => x.Key, StringComparer.Ordinal)
@@ -652,6 +662,90 @@ public sealed class PayOsService : IPayOsService
         return Result.Success();
     }
 
+    private async Task<Result> ConfirmMembershipPurchaseAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
+    {
+        if (pi.AmountCents <= 0)
+            return Result.Failure(new Error(Error.Codes.Validation, "Membership amount must be positive."));
+
+        if (!pi.MembershipPlanId.HasValue)
+            return Result.Failure(new Error(Error.Codes.Validation, "Membership plan information is required."));
+
+        var plan = await _membershipPlanRepository.GetByIdAsync(pi.MembershipPlanId.Value, ct).ConfigureAwait(false);
+        if (plan is null)
+            return Result.Failure(new Error(Error.Codes.NotFound, "Membership plan referenced by payment intent was not found."));
+
+        var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
+        if (txExists)
+        {
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            return Result.Success();
+        }
+
+        var ensurePlatformUser = await _platformAccountService.GetOrCreatePlatformUserIdAsync(ct).ConfigureAwait(false);
+        if (ensurePlatformUser.IsFailure)
+        {
+            return ensurePlatformUser;
+        }
+
+        var platformUserId = ensurePlatformUser.Value;
+        var platformWallet = await _walletRepository.EnsureAsync(platformUserId, ct).ConfigureAwait(false);
+
+        var tx = new Transaction
+        {
+            Id = Guid.NewGuid(),
+            WalletId = platformWallet.Id,
+            AmountCents = pi.AmountCents,
+            Direction = TransactionDirection.In,
+            Method = TransactionMethod.Gateway,
+            Status = TransactionStatus.Succeeded,
+            Provider = Provider,
+            ProviderRef = providerRef,
+            Metadata = CreateMembershipMetadata(plan.Id, plan.Name),
+            CreatedBy = platformUserId,
+        };
+
+        try
+        {
+            await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            _logger.LogWarning(ex, "Duplicate payOS tx detected. ProviderRef={ProviderRef}", providerRef);
+
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+            {
+                pi.Status = PaymentIntentStatus.Succeeded;
+                pi.UpdatedBy = pi.UserId;
+                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            return Result.Success();
+        }
+
+        var credited = await _walletRepository.AdjustBalanceAsync(platformUserId, pi.AmountCents, ct).ConfigureAwait(false);
+        if (!credited)
+        {
+            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit platform wallet."));
+        }
+
+        _ = await _membershipEnrollmentService.AssignAsync(pi.UserId, plan, pi.UserId, ct).ConfigureAwait(false);
+
+        pi.Status = PaymentIntentStatus.Succeeded;
+        pi.UpdatedBy = pi.UserId;
+        await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return Result.Success();
+    }
+
     private async Task<Result> ConfirmWalletTopUpAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
     {
         if (pi.AmountCents <= 0)
@@ -743,6 +837,18 @@ public sealed class PayOsService : IPayOsService
         {
             _logger.LogWarning(ex, "Failed to trigger ATTEND_EVENT quest for user {UserId} event {EventId}.", userId, eventId);
         }
+    }
+
+    private static JsonDocument CreateMembershipMetadata(Guid planId, string planName)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["note"] = "MEMBERSHIP_PURCHASE",
+            ["membershipPlanId"] = planId,
+            ["planName"] = planName
+        };
+
+        return JsonSerializer.SerializeToDocument(payload);
     }
 
     private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)

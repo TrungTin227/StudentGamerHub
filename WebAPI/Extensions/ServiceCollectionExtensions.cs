@@ -1,9 +1,10 @@
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 using System.Threading.RateLimiting;
+using Services.Implementations;
 using Services.Implementations.Memberships;
 using Services.Interfaces;
 
@@ -457,3 +458,4 @@ public static class ServiceCollectionExtensions
         return services;
     }
 }
+

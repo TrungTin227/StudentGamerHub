@@ -25,12 +25,14 @@ public sealed class PaymentService : IPaymentService
     private readonly IEventQueryRepository _eventQueryRepository;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IWalletRepository _walletRepository;
-    private readonly IEscrowRepository _escrowRepository;
+    private readonly IMembershipPlanRepository _membershipPlanRepository;
+    private readonly IMembershipEnrollmentService _membershipEnrollmentService;
     private readonly IPayOsService _payOsService;
     private readonly BillingOptions _billingOptions;
     private readonly PayOsOptions _payOsOptions;
     private readonly IQuestService _questService;
     private readonly ICommunityService _communityService;
+    private readonly IPlatformAccountService _platformAccountService;
 
     public PaymentService(
         IGenericUnitOfWork uow,
@@ -40,12 +42,14 @@ public sealed class PaymentService : IPaymentService
         IEventQueryRepository eventQueryRepository,
         ITransactionRepository transactionRepository,
         IWalletRepository walletRepository,
-        IEscrowRepository escrowRepository,
+        IMembershipPlanRepository membershipPlanRepository,
+        IMembershipEnrollmentService membershipEnrollmentService,
         IPayOsService payOsService,
         IOptionsSnapshot<BillingOptions> billingOptions,
         IOptionsSnapshot<PayOsOptions> payOsOptions,
         IQuestService questService,
-        ICommunityService communityService)
+        ICommunityService communityService,
+        IPlatformAccountService platformAccountService)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _paymentIntentRepository = paymentIntentRepository ?? throw new ArgumentNullException(nameof(paymentIntentRepository));
@@ -54,86 +58,147 @@ public sealed class PaymentService : IPaymentService
         _eventQueryRepository = eventQueryRepository ?? throw new ArgumentNullException(nameof(eventQueryRepository));
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
-        _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
+        _membershipPlanRepository = membershipPlanRepository ?? throw new ArgumentNullException(nameof(membershipPlanRepository));
+        _membershipEnrollmentService = membershipEnrollmentService ?? throw new ArgumentNullException(nameof(membershipEnrollmentService));
         _payOsService = payOsService ?? throw new ArgumentNullException(nameof(payOsService));
         _billingOptions = billingOptions?.Value ?? throw new ArgumentNullException(nameof(billingOptions));
         _payOsOptions = payOsOptions?.Value ?? throw new ArgumentNullException(nameof(payOsOptions));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
+        _platformAccountService = platformAccountService ?? throw new ArgumentNullException(nameof(platformAccountService));
     }
 
-    public Task<Result<Guid>> CreateTopUpIntentAsync(Guid organizerId, Guid eventId, long amountCents, CancellationToken ct = default)
+    public Task<Result<MembershipPurchaseResultDto>> BuyMembershipAsync(Guid userId, Guid planId, CancellationToken ct = default)
     {
-        return _uow.ExecuteTransactionAsync<Guid>(async innerCt =>
+        return _uow.ExecuteTransactionAsync<MembershipPurchaseResultDto>(async innerCt =>
         {
-            if (amountCents <= 0)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
-            }
-
-            var maxEscrow = _billingOptions.MaxEventEscrowTopUpAmountCents;
-            if (maxEscrow > 0 && amountCents > maxEscrow)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Top-up amount exceeds the allowed limit."));
-            }
-
-            var ev = await _eventQueryRepository.GetByIdAsync(eventId, innerCt).ConfigureAwait(false);
-            if (ev is null)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.NotFound, "Event not found."));
-            }
-
-            if (ev.OrganizerId != organizerId)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can top up this event escrow."));
-            }
-
-            if (ev.EscrowMinCents <= 0)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.Validation, "Event escrow requirement must be greater than zero."));
-            }
-
-            var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, innerCt).ConfigureAwait(false);
-            var existingHold = escrow?.AmountHoldCents ?? 0;
-            var outstanding = Math.Max(0, ev.EscrowMinCents - existingHold);
-
-            if (outstanding <= 0)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.Conflict, "Event escrow has already been fully funded."));
-            }
-
-            if (amountCents != outstanding)
-            {
-                return Result<Guid>.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
-            }
-
-            var hasActiveIntent = await _paymentIntentRepository
-                .HasActiveTopUpIntentAsync(ev.Id, organizerId, innerCt)
+            var plan = await _membershipPlanRepository
+                .GetByIdAsync(planId, innerCt)
                 .ConfigureAwait(false);
-            if (hasActiveIntent)
+
+            if (plan is null)
             {
-                return Result<Guid>.Failure(new Error(Error.Codes.Conflict, "An escrow top-up intent is already active for this event."));
+                return Result<MembershipPurchaseResultDto>.Failure(new Error(Error.Codes.NotFound, "Membership plan not found."));
             }
 
-            var paymentIntent = new PaymentIntent
+            if (!plan.IsActive)
+            {
+                return Result<MembershipPurchaseResultDto>.Failure(new Error(Error.Codes.Conflict, "Membership plan is inactive."));
+            }
+
+            var wallet = await _walletRepository
+                .EnsureAsync(userId, innerCt)
+                .ConfigureAwait(false);
+
+            var priceCents = ConvertPriceToCents(plan.Price);
+
+            if (priceCents <= 0)
+            {
+                var membershipInfo = await _membershipEnrollmentService
+                    .AssignAsync(userId, plan, userId, innerCt)
+                    .ConfigureAwait(false);
+
+                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+                var successDto = new MembershipPurchaseResultDto(false, null, membershipInfo);
+                return Result<MembershipPurchaseResultDto>.Success(successDto);
+            }
+
+            if (wallet.BalanceCents >= priceCents)
+            {
+                var ensurePlatformUser = await _platformAccountService
+                    .GetOrCreatePlatformUserIdAsync(innerCt)
+                    .ConfigureAwait(false);
+
+                if (ensurePlatformUser.IsFailure)
+                {
+                    return Result<MembershipPurchaseResultDto>.Failure(ensurePlatformUser.Error);
+                }
+
+                var platformUserId = ensurePlatformUser.Value;
+
+                var debited = await _walletRepository
+                    .AdjustBalanceAsync(userId, -priceCents, innerCt)
+                    .ConfigureAwait(false);
+                if (!debited)
+                {
+                    return Result<MembershipPurchaseResultDto>.Failure(new Error(Error.Codes.Forbidden, "Insufficient wallet balance."));
+                }
+
+                var credited = await _walletRepository
+                    .AdjustBalanceAsync(platformUserId, priceCents, innerCt)
+                    .ConfigureAwait(false);
+                if (!credited)
+                {
+                    return Result<MembershipPurchaseResultDto>.Failure(new Error(Error.Codes.Unexpected, "Failed to credit platform wallet."));
+                }
+
+                var platformWallet = await _walletRepository
+                    .EnsureAsync(platformUserId, innerCt)
+                    .ConfigureAwait(false);
+
+                var outTx = new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    WalletId = wallet.Id,
+                    AmountCents = priceCents,
+                    Direction = TransactionDirection.Out,
+                    Method = TransactionMethod.Wallet,
+                    Status = TransactionStatus.Succeeded,
+                    Provider = LocalProvider,
+                    Metadata = CreateMembershipMetadata(plan.Id, plan.Name),
+                    CreatedBy = userId,
+                };
+
+                var inTx = new Transaction
+                {
+                    Id = Guid.NewGuid(),
+                    WalletId = platformWallet.Id,
+                    AmountCents = priceCents,
+                    Direction = TransactionDirection.In,
+                    Method = TransactionMethod.Wallet,
+                    Status = TransactionStatus.Succeeded,
+                    Provider = LocalProvider,
+                    Metadata = CreateMembershipMetadata(plan.Id, plan.Name),
+                    CreatedBy = platformUserId,
+                };
+
+                await _transactionRepository.CreateAsync(outTx, innerCt).ConfigureAwait(false);
+                await _transactionRepository.CreateAsync(inTx, innerCt).ConfigureAwait(false);
+
+                var membershipInfo = await _membershipEnrollmentService
+                    .AssignAsync(userId, plan, userId, innerCt)
+                    .ConfigureAwait(false);
+
+                await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+                var successDto = new MembershipPurchaseResultDto(false, null, membershipInfo);
+                return Result<MembershipPurchaseResultDto>.Success(successDto);
+            }
+
+            var now = DateTime.UtcNow;
+            var pendingIntent = new PaymentIntent
             {
                 Id = Guid.NewGuid(),
-                UserId = organizerId,
-                AmountCents = amountCents,
-                Purpose = PaymentPurpose.TopUp,
-                EventId = ev.Id,
+                UserId = userId,
+                AmountCents = priceCents,
+                Purpose = PaymentPurpose.Membership,
+                MembershipPlanId = plan.Id,
                 Status = PaymentIntentStatus.RequiresPayment,
                 ClientSecret = Guid.NewGuid().ToString("N"),
-                ExpiresAt = DateTime.UtcNow.AddMinutes(15),
-                CreatedBy = organizerId,
+                ExpiresAt = now.AddMinutes(15),
+                CreatedAtUtc = now,
+                CreatedBy = userId,
             };
 
-            await _paymentIntentRepository.CreateAsync(paymentIntent, innerCt).ConfigureAwait(false);
+            await _paymentIntentRepository.CreateAsync(pendingIntent, innerCt).ConfigureAwait(false);
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
-            return Result<Guid>.Success(paymentIntent.Id);
+            var dto = new MembershipPurchaseResultDto(true, pendingIntent.Id, null);
+            return Result<MembershipPurchaseResultDto>.Success(dto);
         }, ct: ct);
     }
+
 
     public Task<Result<Guid>> CreateWalletTopUpIntentAsync(Guid userId, long amountCents, CancellationToken ct = default)
     {
@@ -212,11 +277,12 @@ public sealed class PaymentService : IPaymentService
             return pi.Purpose switch
             {
                 PaymentPurpose.EventTicket => await ConfirmEventTicketAsync(userId, pi, innerCt).ConfigureAwait(false),
-                PaymentPurpose.TopUp => await ConfirmTopUpAsync(userId, pi, innerCt).ConfigureAwait(false),
+                PaymentPurpose.TopUp => Result.Failure(new Error(Error.Codes.Validation, "Event escrow top-ups are no longer supported.")),
+                PaymentPurpose.Membership => Result.Failure(new Error(Error.Codes.Validation, "Membership purchases are settled immediately and do not require manual confirmation.")),
                 PaymentPurpose.WalletTopUp => Result.Failure(new Error(Error.Codes.Validation, "WalletTopUpRequiresProviderCallback")),
                 _ => Result.Failure(new Error(Error.Codes.Validation, "Unsupported payment purpose.")),
             };
-        }, ct: ct).ConfigureAwait(false);
+        }, ct: ct);
     }
 
     private async Task<Result> ConfirmEventTicketAsync(Guid userId, PaymentIntent pi, CancellationToken ct)
@@ -250,7 +316,6 @@ public sealed class PaymentService : IPaymentService
         {
             return Result.Failure(new Error(Error.Codes.Conflict, "Registration is no longer active."));
         }
-
         var ev = await _eventQueryRepository.GetForUpdateAsync(registration.EventId, ct).ConfigureAwait(false)
                   ?? await _eventQueryRepository.GetByIdAsync(registration.EventId, ct).ConfigureAwait(false);
 
@@ -314,106 +379,6 @@ public sealed class PaymentService : IPaymentService
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await TriggerAttendQuestAsync(registration.UserId, registration.EventId, ct).ConfigureAwait(false);
-
-        return Result.Success();
-    }
-
-    private async Task<Result> ConfirmTopUpAsync(Guid userId, PaymentIntent pi, CancellationToken ct)
-    {
-        if (!pi.EventId.HasValue)
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, "Top-up intent missing EventId."));
-        }
-
-        var ev = await _eventQueryRepository.GetForUpdateAsync(pi.EventId.Value, ct).ConfigureAwait(false)
-                  ?? await _eventQueryRepository.GetByIdAsync(pi.EventId.Value, ct).ConfigureAwait(false);
-
-        if (ev is null)
-        {
-            return Result.Failure(new Error(Error.Codes.NotFound, "Event not found for top-up."));
-        }
-
-        if (ev.OrganizerId != userId)
-        {
-            return Result.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can top up this event escrow."));
-        }
-
-        if (pi.AmountCents <= 0)
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
-        }
-
-        if (ev.EscrowMinCents <= 0)
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, "Event escrow requirement must be greater than zero."));
-        }
-
-        var existingEscrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false);
-        var existingHold = existingEscrow?.AmountHoldCents ?? 0;
-        var outstanding = Math.Max(0, ev.EscrowMinCents - existingHold);
-
-        if (outstanding <= 0)
-        {
-            return Result.Failure(new Error(Error.Codes.Conflict, "Event escrow has already been fully funded."));
-        }
-
-        if (pi.AmountCents != outstanding)
-        {
-            return Result.Failure(new Error(Error.Codes.Validation, $"Escrow top-up must equal the outstanding requirement of {outstanding} cents."));
-        }
-
-        var wallet = await _walletRepository.EnsureAsync(userId, ct).ConfigureAwait(false);
-
-        var debited = await _walletRepository.AdjustBalanceAsync(userId, -pi.AmountCents, ct).ConfigureAwait(false);
-        if (!debited)
-        {
-            return Result.Failure(new Error(Error.Codes.Forbidden, "Insufficient wallet balance."));
-        }
-
-        var tx = new Transaction
-        {
-            Id = Guid.NewGuid(),
-            WalletId = wallet.Id,
-            EventId = ev.Id,
-            AmountCents = pi.AmountCents,
-            Direction = TransactionDirection.Out,
-            Method = TransactionMethod.Wallet,
-            Status = TransactionStatus.Succeeded,
-            Provider = LocalProvider,
-            Metadata = CreateMetadata("ESCROW_TOP_UP", ev.Id, null),
-            CreatedBy = userId,
-        };
-
-        await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
-
-        var escrowToUpdate = existingEscrow ?? new Escrow
-        {
-            Id = Guid.NewGuid(),
-            EventId = ev.Id,
-            AmountHoldCents = 0,
-            Status = EscrowStatus.Held,
-            CreatedBy = userId,
-        };
-
-        escrowToUpdate.AmountHoldCents = existingHold + pi.AmountCents;
-        if (escrowToUpdate.Status != EscrowStatus.Held)
-        {
-            escrowToUpdate.Status = EscrowStatus.Held;
-        }
-
-        await _escrowRepository.UpsertAsync(escrowToUpdate, ct).ConfigureAwait(false);
-
-        var membershipResult = await EnsureCommunityMembershipAsync(ev.CommunityId, userId, ct).ConfigureAwait(false);
-        if (membershipResult.IsFailure)
-        {
-            return membershipResult;
-        }
-
-        pi.Status = PaymentIntentStatus.Succeeded;
-        pi.UpdatedBy = userId;
-
-        await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return Result.Success();
     }
@@ -497,7 +462,7 @@ public sealed class PaymentService : IPaymentService
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             return Result<string>.Success(linkResult.Value!);
-        }, ct: ct).ConfigureAwait(false);
+        }, ct: ct);
     }
     private async Task<long> EnsureOrderCodeAsync(PaymentIntent pi, CancellationToken ct)
     {
@@ -629,6 +594,7 @@ public sealed class PaymentService : IPaymentService
         {
             PaymentPurpose.EventTicket => "Ticket",
             PaymentPurpose.TopUp => "EscrowTop",
+            PaymentPurpose.Membership => "Membership",
             PaymentPurpose.WalletTopUp => "WalletTop",
             _ => "Payment"
         };
@@ -671,6 +637,28 @@ public sealed class PaymentService : IPaymentService
         }
     }
 
+    private static long ConvertPriceToCents(decimal price)
+    {
+        if (price <= 0)
+        {
+            return 0;
+        }
+
+        return (long)Math.Round(price, MidpointRounding.AwayFromZero);
+    }
+
+    private static JsonDocument CreateMembershipMetadata(Guid planId, string planName)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["note"] = "MEMBERSHIP_PURCHASE",
+            ["membershipPlanId"] = planId,
+            ["planName"] = planName
+        };
+
+        return JsonSerializer.SerializeToDocument(payload);
+    }
+
     private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)
     {
         var payload = new Dictionary<string, object?>
@@ -708,5 +696,29 @@ public sealed class PaymentService : IPaymentService
             || message.Contains("payment_intent_purpose_allowed", StringComparison.OrdinalIgnoreCase);
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

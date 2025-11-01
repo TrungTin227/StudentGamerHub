@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Repositories.Models;
 
@@ -104,7 +104,7 @@ namespace Services.Common.Mapping
         }
 
         /// <summary>
-        /// Map entity -> UserListItemDto (UTC -> VN khi hiển thị).
+        /// Map entity -> UserListItemDto (UTC -> VN khi hiá»ƒn thá»‹).
         /// </summary>
         public static UserListItemDto ToListItemDto(
             this User u,
@@ -133,13 +133,13 @@ namespace Services.Common.Mapping
         }
 
         /// <summary>
-        /// Map entity -> UserDetailDto (UTC -> VN khi hiển thị).
+        /// Map entity -> UserDetailDto (UTC -> VN khi hiá»ƒn thá»‹).
         /// </summary>
         public static async Task<UserDetailDto> ToDetailDtoAsync(
-    this User u,
-    UserManager<User> userManager,
-    ITimeZoneService tz,
-    CancellationToken ct = default)
+            this User u,
+            UserManager<User> userManager,
+            ITimeZoneService tz,
+            CancellationToken ct = default)
         {
             var roles = await userManager.GetRolesAsync(u);
 
@@ -147,23 +147,29 @@ namespace Services.Common.Mapping
                 ? tz.ToVn(u.LockoutEnd.Value.UtcDateTime)
                 : null;
 
-            var nowVn = tz.ToVn(DateTime.UtcNow);
+            var utcNow = DateTime.UtcNow;
+            var nowVn = tz.ToVn(utcNow);
             bool isLocked = lockoutEndVnDateTime.HasValue && lockoutEndVnDateTime.Value > nowVn;
 
-            // 👇 Load thêm games nếu chưa được include
-            var userWithGames = await userManager.Users
+            var userWithDetails = await userManager.Users
                 .Include(x => x.UserGames)
-                .ThenInclude(ug => ug.Game)
+                    .ThenInclude(ug => ug.Game)
+                .Include(x => x.Membership)
+                    .ThenInclude(m => m!.MembershipPlan)
                 .AsNoTracking()
                 .FirstAsync(x => x.Id == u.Id, ct);
 
-            var games = userWithGames.UserGames.Select(ug => new GameBriefDto(
+            var games = userWithDetails.UserGames.Select(ug => new GameBriefDto(
                 ug.GameId,
                 ug.Game?.Name ?? string.Empty,
                 ug.InGameName,
                 ug.AddedAt,
                 ug.Skill
             ));
+
+            var membershipInfo = userWithDetails.Membership is { MembershipPlan: not null } membership
+                ? membership.ToInfoDto(utcNow)
+                : null;
 
             return new UserDetailDto(
                 Id: u.Id,
@@ -182,8 +188,12 @@ namespace Services.Common.Mapping
                 CreatedAtUtc: tz.ToVn(u.CreatedAtUtc),
                 UpdatedAtUtc: tz.ToVn(u.UpdatedAtUtc ?? DateTime.MinValue),
                 Roles: roles.ToArray(),
-                Games: games.ToArray()
+                Games: games.ToArray(),
+                ActiveMembership: membershipInfo
             );
         }
     }
 }
+
+
+

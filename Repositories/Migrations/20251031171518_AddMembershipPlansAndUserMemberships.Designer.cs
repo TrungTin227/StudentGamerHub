@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Repositories.Persistence;
@@ -12,9 +13,11 @@ using Repositories.Persistence;
 namespace Repositories.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251031171518_AddMembershipPlansAndUserMemberships")]
+    partial class AddMembershipPlansAndUserMemberships
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -745,7 +748,7 @@ namespace Repositories.Migrations
                         new
                         {
                             Id = new Guid("088f4b43-93fc-4c92-8b24-20f84a3d9210"),
-                            CreatedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Create up to 3 events per month.",
                             DurationMonths = 1,
                             IsActive = true,
@@ -757,7 +760,7 @@ namespace Repositories.Migrations
                         new
                         {
                             Id = new Guid("31b8dcfb-2e5d-4b84-aefb-cbc5a8db7c39"),
-                            CreatedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Create up to 10 events per month.",
                             DurationMonths = 1,
                             IsActive = true,
@@ -769,12 +772,12 @@ namespace Repositories.Migrations
                         new
                         {
                             Id = new Guid("517899aa-03ec-4907-bd1b-b3be526a441a"),
-                            CreatedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            CreatedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Unlimited event creation per month.",
                             DurationMonths = 1,
                             IsActive = true,
                             IsDeleted = false,
-                            MonthlyEventLimit = -1,
+                            MonthlyEventLimit = 0,
                             Name = "Ultimate",
                             Price = 499000m
                         });
@@ -1396,9 +1399,6 @@ namespace Repositories.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("LastResetAtUtc")
-                        .HasColumnType("timestamp without time zone");
 
                     b.Property<Guid>("MembershipPlanId")
                         .HasColumnType("uuid");

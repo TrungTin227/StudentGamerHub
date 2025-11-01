@@ -20,7 +20,7 @@
     public enum TransactionDirection { In, Out }   // In: tiền vào ví, Out: tiền ra ví
     public enum TransactionMethod { Wallet, Card, Gateway }
     public enum TransactionStatus { Pending, Succeeded, Failed, Refunded, Disputed }
-    public enum PaymentPurpose { TopUp, EventTicket, WalletTopUp }
+    public enum PaymentPurpose { TopUp, EventTicket, WalletTopUp, Membership }
     public enum PaymentIntentStatus { RequiresPayment, Processing, Succeeded, Canceled }
     public enum BugStatus { Open, InProgress, Resolved, Rejected }
     public enum RoomJoinPolicy
