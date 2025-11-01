@@ -22,6 +22,7 @@ public static class ApplicationBuilderExtensions
         app.UseCors("Frontend");
         app.UseAuthentication();
         app.UseAuthorization();
+        app.UseRateLimiter();
 
         if (env.IsDevelopment())
         {

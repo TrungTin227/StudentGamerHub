@@ -16,16 +16,8 @@ public static class OperationalServiceExtensions
             o.EnableForHttps = true;
         });
 
-        services.AddRateLimiter(o =>               // basic rate limiting
-            o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-                RateLimitPartition.GetFixedWindowLimiter(
-                    partitionKey: ctx.User?.Identity?.Name ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
-                    factory: _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = 100,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0
-                    })));
+        // GlobalLimiter removed - using endpoint-specific rate limiting policies instead
+        // to avoid conflicts and allow proper webhook handling
 
         services.AddRequestTimeouts(o =>           // timeouts cho endpoint
         {

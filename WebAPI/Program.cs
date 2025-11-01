@@ -28,10 +28,9 @@ var app = builder.Build();
 
 // Thứ tự gọi 2 pipeline này đã rất tốt.
 // UseOperationalPipeline xử lý các vấn đề cross-cutting ở tầng thấp (proxy, HSTS, rate limiting).
-// UseWebApi xử lý các vấn đề của khung sườn API (lỗi, OpenAPI, HTTPS, CORS, Auth, Controllers).
+// UseWebApi xử lý các vấn đề của khung sườn API (lỗi, OpenAPI, HTTPS, CORS, Auth, RateLimiter, Controllers).
 app.UseOperationalPipeline(app.Environment);
 app.UseWebApi(app.Environment);
-app.UseRateLimiter();
 
 app.MapRealtimeEndpoints();
 
