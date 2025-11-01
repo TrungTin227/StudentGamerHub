@@ -268,15 +268,26 @@ public sealed class PayOsService : IPayOsService
                 return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Failed to parse PayOS response."));
             }
 
-            // Check if PayOS returned an error (Success = false or Code != "00")
-            if (parsed is null || !parsed.Success || !string.Equals(parsed.Code, "00", StringComparison.OrdinalIgnoreCase))
+            // Log the parsed response for debugging
+            _logger.LogInformation("PayOS response parsed. Code={Code}, Desc={Desc}, Success={Success}, HasData={HasData}, Raw={Body}",
+                parsed?.Code, parsed?.Desc, parsed?.Success, parsed?.Data != null, body);
+
+            // Check if PayOS returned an error
+            // PayOS returns Code "00" for success, other codes for errors
+            if (parsed is null)
             {
-                var errorMessage = parsed?.Desc ?? "Unknown error from PayOS";
-                var errorCode = parsed?.Code ?? "UNKNOWN";
-                _logger.LogWarning("payOS returned error. Code={Code}, Desc={Desc}, Raw={Body}", errorCode, errorMessage, body);
+                _logger.LogWarning("payOS response is null. Raw={Body}", body);
+                return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Failed to parse PayOS response."));
+            }
+
+            // Check for error codes from PayOS
+            if (!string.Equals(parsed.Code, "00", StringComparison.OrdinalIgnoreCase))
+            {
+                var errorMessage = parsed.Desc ?? "Unknown error from PayOS";
+                _logger.LogWarning("payOS returned error code. Code={Code}, Desc={Desc}, Raw={Body}", parsed.Code, errorMessage, body);
 
                 // Return a more specific error message based on the error code
-                return errorCode switch
+                return parsed.Code switch
                 {
                     "231" => Result<string>.Failure(new Error(Error.Codes.Conflict, "Payment order already exists. Please use a different order code or cancel the existing payment.")),
                     _ => Result<string>.Failure(new Error(Error.Codes.Validation, $"PayOS error: {errorMessage}"))
