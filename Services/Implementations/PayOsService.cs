@@ -222,9 +222,10 @@ public sealed class PayOsService : IPayOsService
             var orderCode = req.OrderCode; // LONG
             var returnUrl = string.IsNullOrWhiteSpace(req.ReturnUrl) ? _options.ReturnUrl : req.ReturnUrl!;
             var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_options.CancelUrl ?? returnUrl) : req.CancelUrl!;
+            var webhookUrl = string.IsNullOrWhiteSpace(req.WebhookUrl) ? _options.WebhookUrl : req.WebhookUrl!;
             var description = req.Description ?? string.Empty;
 
-            // Signature khi t?o link: HMAC_SHA256 trên chu?i "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
+            // Signature khi t?o link: HMAC_SHA256 trï¿½n chu?i "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=.."
             var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl);
 
             var payload = new
@@ -234,6 +235,7 @@ public sealed class PayOsService : IPayOsService
                 description = description,
                 returnUrl = returnUrl,
                 cancelUrl = cancelUrl,
+                webhookUrl = webhookUrl,
                 buyerName = req.BuyerName,
                 buyerEmail = req.BuyerEmail,
                 buyerPhone = req.BuyerPhone,
@@ -428,7 +430,7 @@ public sealed class PayOsService : IPayOsService
             return false;
         }
 
-        // 1) Convert Data -> Dictionary và sort theo key
+        // 1) Convert Data -> Dictionary vï¿½ sort theo key
         var json = JsonSerializer.Serialize(payload.Data);
         var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json)!;
 
@@ -440,7 +442,7 @@ public sealed class PayOsService : IPayOsService
                 if (je.ValueKind == JsonValueKind.Null) return "";
                 if (je.ValueKind == JsonValueKind.Array)
                 {
-                    // m?ng -> serialize l?i sau khi chu?n hoá object con (sort key)
+                    // m?ng -> serialize l?i sau khi chu?n hoï¿½ object con (sort key)
                     var arr = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(je.GetRawText()) ?? new();
                     var normalized = arr.Select(o =>
                         o.OrderBy(x => x.Key, StringComparer.Ordinal)
