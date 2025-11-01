@@ -319,7 +319,10 @@ public sealed class PayOsService : IPayOsService
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (!ValidatePayOsSignature(rawBody, signatureHeader, _options.SecretKey))
+        // Check if this is a manual sync (bypass signature validation)
+        var isManualSync = string.Equals(payload.Signature, "manual-sync", StringComparison.OrdinalIgnoreCase);
+
+        if (!isManualSync && !ValidatePayOsSignature(rawBody, signatureHeader, _options.SecretKey))
         {
             _logger.LogWarning("SignatureInvalid OrderCode={OrderCode}", payload.Data?.OrderCode);
             return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid signature."));
@@ -340,16 +343,21 @@ public sealed class PayOsService : IPayOsService
 
         var timestamp = ParseWebhookTimestamp(payload.Data.TransactionDateTime);
         var tolerance = _options.WebhookTolerance <= TimeSpan.Zero ? TimeSpan.FromMinutes(5) : _options.WebhookTolerance;
-        if (!timestamp.HasValue)
-        {
-            _logger.LogWarning("WebhookTimestampInvalid OrderCode={OrderCode} Raw={Raw}", orderCode, payload.Data.TransactionDateTime);
-            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp is invalid."));
-        }
 
-        if ((DateTimeOffset.UtcNow - timestamp.Value).Duration() > tolerance)
+        // Skip timestamp validation for manual sync
+        if (!isManualSync)
         {
-            _logger.LogWarning("WebhookTimestampOutOfRange OrderCode={OrderCode} Timestamp={Timestamp} ToleranceSeconds={Tolerance}", orderCode, timestamp.Value, tolerance.TotalSeconds);
-            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp outside allowed window."));
+            if (!timestamp.HasValue)
+            {
+                _logger.LogWarning("WebhookTimestampInvalid OrderCode={OrderCode} Raw={Raw}", orderCode, payload.Data.TransactionDateTime);
+                return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp is invalid."));
+            }
+
+            if ((DateTimeOffset.UtcNow - timestamp.Value).Duration() > tolerance)
+            {
+                _logger.LogWarning("WebhookTimestampOutOfRange OrderCode={OrderCode} Timestamp={Timestamp} ToleranceSeconds={Tolerance}", orderCode, timestamp.Value, tolerance.TotalSeconds);
+                return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp outside allowed window."));
+            }
         }
 
         var providerRef = payload.Data.Reference
@@ -363,14 +371,22 @@ public sealed class PayOsService : IPayOsService
             return Result<PayOsWebhookOutcome>.Success(PayOsWebhookOutcome.Ignored);
         }
 
-        if (!VerifyWebhookSignature(payload))
+        // Skip payload signature validation for manual sync
+        if (!isManualSync && !VerifyWebhookSignature(payload))
         {
             _logger.LogWarning("PayloadSignatureInvalid OrderCode={OrderCode}", orderCode);
             await lease.ReleaseAsync().ConfigureAwait(false);
             return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid payload signature."));
         }
 
-        _logger.LogInformation("WebhookReceived OrderCode={OrderCode} Code={Code} Success={Success}", orderCode, payload.Code, payload.Success);
+        if (isManualSync)
+        {
+            _logger.LogInformation("ManualSyncWebhook OrderCode={OrderCode} Code={Code} Success={Success}", orderCode, payload.Code, payload.Success);
+        }
+        else
+        {
+            _logger.LogInformation("WebhookReceived OrderCode={OrderCode} Code={Code} Success={Success}", orderCode, payload.Code, payload.Success);
+        }
 
         var isPaid = payload.Success && string.Equals(payload.Code, "00", StringComparison.OrdinalIgnoreCase);
 
@@ -516,6 +532,83 @@ public sealed class PayOsService : IPayOsService
     {
         var baseUrl = string.IsNullOrWhiteSpace(_options.BaseUrl) ? "https://api-merchant.payos.vn" : _options.BaseUrl;
         return baseUrl.TrimEnd('/') + "/v2/payment-requests";
+    }
+
+    public async Task<Result<PayOsPaymentInfo>> GetPaymentInfoAsync(long orderCode, CancellationToken ct = default)
+    {
+        try
+        {
+            var endpoint = $"{BuildPaymentsEndpointV2()}/{orderCode}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            request.Headers.TryAddWithoutValidation("x-client-id", _options.ClientId);
+            request.Headers.TryAddWithoutValidation("x-api-key", _options.ApiKey);
+
+            var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("PayOS get payment info failed {Status}. OrderCode={OrderCode}, Body={Body}",
+                    response.StatusCode, orderCode, body);
+                return Result<PayOsPaymentInfo>.Failure(new Error(Error.Codes.Unexpected,
+                    $"Failed to get payment info from PayOS. Status: {response.StatusCode}"));
+            }
+
+            PayOsGetPaymentResponse? parsed = null;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<PayOsGetPaymentResponse>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Deserialize PayOS get payment response failed. Raw={Body}", body);
+                return Result<PayOsPaymentInfo>.Failure(new Error(Error.Codes.Unexpected, "Failed to parse PayOS response."));
+            }
+
+            if (parsed?.Data is null)
+            {
+                _logger.LogWarning("PayOS get payment response missing data. Raw={Body}", body);
+                return Result<PayOsPaymentInfo>.Failure(new Error(Error.Codes.Unexpected, "PayOS response missing data."));
+            }
+
+            var info = new PayOsPaymentInfo
+            {
+                OrderCode = parsed.Data.OrderCode,
+                Amount = parsed.Data.Amount,
+                Status = parsed.Data.Status ?? "",
+                Reference = parsed.Data.Reference ?? parsed.Data.Id,
+                TransactionDateTime = parsed.Data.TransactionDateTime
+            };
+
+            return Result<PayOsPaymentInfo>.Success(info);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error getting PayOS payment info. OrderCode={OrderCode}", orderCode);
+            return Result<PayOsPaymentInfo>.Failure(new Error(Error.Codes.Unexpected, "Unexpected error while getting payment info."));
+        }
+    }
+
+    private sealed record PayOsGetPaymentResponse
+    {
+        public string? Code { get; init; }
+        public string? Desc { get; init; }
+        public PayOsGetPaymentData? Data { get; init; }
+    }
+
+    private sealed record PayOsGetPaymentData
+    {
+        public string? Id { get; init; }
+        public long OrderCode { get; init; }
+        public long Amount { get; init; }
+        public long AmountPaid { get; init; }
+        public long AmountRemaining { get; init; }
+        public string? Status { get; init; }
+        public string? CreatedAt { get; init; }
+        public string? TransactionDateTime { get; init; }
+        public string? Reference { get; init; }
     }
 
     // =========================

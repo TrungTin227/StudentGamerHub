@@ -11,4 +11,6 @@ public sealed record PaymentIntentDto(
     string ClientSecret,
     string? ProviderName,
     string? TransactionId,
-    string? MetadataJson);
+    string? MetadataJson,
+    long OrderCode,
+    DateTime CreatedAt);

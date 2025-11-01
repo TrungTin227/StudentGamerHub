@@ -45,7 +45,9 @@ public sealed class PaymentReadService : IPaymentReadService
             pi.ClientSecret,
             providerName,
             transactionReference,
-            metadataJson);
+            metadataJson,
+            pi.OrderCode ?? 0,
+            pi.CreatedAtUtc);
 
         return Result<PaymentIntentDto>.Success(dto);
     }
