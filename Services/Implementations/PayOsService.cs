@@ -222,11 +222,11 @@ public sealed class PayOsService : IPayOsService
             var orderCode = req.OrderCode; // LONG
             var returnUrl = string.IsNullOrWhiteSpace(req.ReturnUrl) ? _options.ReturnUrl : req.ReturnUrl!;
             var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_options.CancelUrl ?? returnUrl) : req.CancelUrl!;
-            var webhookUrl = string.IsNullOrWhiteSpace(req.WebhookUrl) ? _options.WebhookUrl : req.WebhookUrl!;
             var description = req.Description ?? string.Empty;
 
-            // Signature khi t?o link: HMAC_SHA256 tr�n chu?i "amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=..&webhookUrl=.."
-            var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl, webhookUrl);
+            // PayOS v2 API does not accept webhookUrl in request body - configure it in PayOS dashboard instead
+            // Signature without webhookUrl
+            var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl, null);
 
             var payload = new
             {
@@ -235,7 +235,6 @@ public sealed class PayOsService : IPayOsService
                 description = description,
                 returnUrl = returnUrl,
                 cancelUrl = cancelUrl,
-                webhookUrl = webhookUrl,
                 buyerName = req.BuyerName,
                 buyerEmail = req.BuyerEmail,
                 buyerPhone = req.BuyerPhone,
@@ -269,7 +268,22 @@ public sealed class PayOsService : IPayOsService
                 return Result<string>.Failure(new Error(Error.Codes.Unexpected, "Failed to parse PayOS response."));
             }
 
-            var checkoutUrl = parsed?.Data?.CheckoutUrl;
+            // Check if PayOS returned an error (Success = false or Code != "00")
+            if (parsed is null || !parsed.Success || !string.Equals(parsed.Code, "00", StringComparison.OrdinalIgnoreCase))
+            {
+                var errorMessage = parsed?.Desc ?? "Unknown error from PayOS";
+                var errorCode = parsed?.Code ?? "UNKNOWN";
+                _logger.LogWarning("payOS returned error. Code={Code}, Desc={Desc}, Raw={Body}", errorCode, errorMessage, body);
+
+                // Return a more specific error message based on the error code
+                return errorCode switch
+                {
+                    "231" => Result<string>.Failure(new Error(Error.Codes.Conflict, "Payment order already exists. Please use a different order code or cancel the existing payment.")),
+                    _ => Result<string>.Failure(new Error(Error.Codes.Validation, $"PayOS error: {errorMessage}"))
+                };
+            }
+
+            var checkoutUrl = parsed.Data?.CheckoutUrl;
             if (string.IsNullOrWhiteSpace(checkoutUrl))
             {
                 _logger.LogWarning("payOS response missing checkoutUrl. Parsed={@Parsed}, Raw={Body}", parsed, body);
