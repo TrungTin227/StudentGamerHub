@@ -322,10 +322,14 @@ public sealed class PayOsService : IPayOsService
         // Check if this is a manual sync (bypass signature validation)
         var isManualSync = string.Equals(payload.Signature, "manual-sync", StringComparison.OrdinalIgnoreCase);
 
-        if (!isManualSync && !ValidatePayOsSignature(rawBody, signatureHeader, _options.SecretKey))
+        // Validate HTTP header signature only if present (optional, as PayOS sends signature in JSON body)
+        if (!isManualSync && !string.IsNullOrWhiteSpace(signatureHeader))
         {
-            _logger.LogWarning("SignatureInvalid OrderCode={OrderCode}", payload.Data?.OrderCode);
-            return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid signature."));
+            if (!ValidatePayOsSignature(rawBody, signatureHeader, _options.SecretKey))
+            {
+                _logger.LogWarning("SignatureInvalid (Header) OrderCode={OrderCode}", payload.Data?.OrderCode);
+                return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid signature."));
+            }
         }
 
         if (payload.Data is null)
