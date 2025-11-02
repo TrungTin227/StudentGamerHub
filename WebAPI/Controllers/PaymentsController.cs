@@ -214,18 +214,21 @@ public sealed class PaymentsController : ControllerBase
         }
 
         var result = await _payOsService.HandleWebhookAsync(payload, rawBody, signatureHeader, ct).ConfigureAwait(false);
-        Result<string> mapped;
+
+        // IMPORTANT: Webhooks must ALWAYS return 200 OK to prevent PayOS from retrying
+        // Log errors but don't return error status codes
         if (result.IsSuccess)
         {
             var statusLabel = result.Value == PayOsWebhookOutcome.Ignored ? "ignored" : "ok";
-            mapped = Result<string>.Success(statusLabel);
+            return Ok(new { status = statusLabel });
         }
         else
         {
-            mapped = Result<string>.Failure(result.Error);
+            // Log the error but still return 200 OK
+            _logger.LogWarning("PayOS webhook processing failed. Error={ErrorCode}: {ErrorMessage}, OrderCode={OrderCode}",
+                result.Error.Code, result.Error.Message, payload.Data?.OrderCode);
+            return Ok(new { status = "error", error = result.Error.Message });
         }
-
-        return this.ToActionResult(mapped, v => new { status = v }, StatusCodes.Status200OK);
     }
 
     [HttpGet("payos/return")]
