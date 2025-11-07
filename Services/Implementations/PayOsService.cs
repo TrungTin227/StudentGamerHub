@@ -370,7 +370,7 @@ public sealed class PayOsService : IPayOsService
         }
 
         // Skip payload signature validation for manual sync
-        if (!isManualSync && !VerifyWebhookSignature(payload))
+        if (!isManualSync && !VerifyWebhookSignature(payload, rawBody))
         {
             _logger.LogWarning("PayloadSignatureInvalid OrderCode={OrderCode}", orderCode);
             await lease.ReleaseAsync().ConfigureAwait(false);
@@ -467,63 +467,76 @@ public sealed class PayOsService : IPayOsService
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLowerInvariant();
     }
 
-    public bool VerifyWebhookSignature(PayOsWebhookPayload payload)
+    public bool VerifyWebhookSignature(PayOsWebhookPayload payload, string rawBody)
     {
         if (payload is null || payload.Data is null || string.IsNullOrWhiteSpace(payload.Signature))
             return false;
         if (string.IsNullOrWhiteSpace(_options.SecretKey))
         {
-            _logger.LogWarning("payOS checksum key is not configured.");
+            _logger.LogWarning("PayOS secret key is not configured.");
             return false;
         }
-
-        // 1) Convert Data -> Dictionary v� sort theo key
-        var json = JsonSerializer.Serialize(payload.Data);
-        var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json)!;
-
-        string Normalize(object? v)
-        {
-            if (v is null) return "";
-            if (v is JsonElement je)
-            {
-                if (je.ValueKind == JsonValueKind.Null) return "";
-                if (je.ValueKind == JsonValueKind.Array)
-                {
-                    // m?ng -> serialize l?i sau khi chu?n ho� object con (sort key)
-                    var arr = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(je.GetRawText()) ?? new();
-                    var normalized = arr.Select(o =>
-                        o.OrderBy(x => x.Key, StringComparer.Ordinal)
-                         .ToDictionary(x => x.Key, x => x.Value));
-                    return JsonSerializer.Serialize(normalized);
-                }
-                if (je.ValueKind == JsonValueKind.Object)
-                {
-                    var obj = JsonSerializer.Deserialize<Dictionary<string, object?>>(je.GetRawText()) ?? new();
-                    var normalized = obj.OrderBy(x => x.Key, StringComparer.Ordinal)
-                                        .ToDictionary(x => x.Key, x => x.Value);
-                    return JsonSerializer.Serialize(normalized);
-                }
-                return je.ToString() ?? "";
-            }
-            return v.ToString() ?? "";
-        }
-
-        var ordered = dict.OrderBy(kv => kv.Key, StringComparer.Ordinal);
-        var query = string.Join("&", ordered.Select(kv => $"{kv.Key}={Normalize(kv.Value)}"));
-
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_options.SecretKey));
-        var expectedHex = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(query))).ToLowerInvariant();
 
         try
         {
-            return CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(expectedHex),
-                Convert.FromHexString(payload.Signature));
+            // Extract the "data" property from raw JSON body
+            using var doc = JsonDocument.Parse(rawBody);
+            if (!doc.RootElement.TryGetProperty("data", out var dataElement))
+            {
+                _logger.LogWarning("PayOS webhook missing 'data' property in raw body");
+                return false;
+            }
+
+            // Get raw JSON text of the data element
+            var dataJson = dataElement.GetRawText();
+
+            // Parse and sort keys alphabetically (PayOS standard)
+            var dataDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(dataJson);
+            if (dataDict is null)
+            {
+                _logger.LogWarning("Failed to deserialize data element to dictionary");
+                return false;
+            }
+
+            var sortedDict = dataDict.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                                     .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+            // Serialize sorted dictionary to compact JSON (no whitespace)
+            var sortedJson = JsonSerializer.Serialize(sortedDict, new JsonSerializerOptions
+            {
+                WriteIndented = false
+            });
+
+            // Compute HMAC-SHA256 signature
+            var expectedSignature = ComputeHmacSha256(sortedJson, _options.SecretKey);
+
+            // Compare case-insensitive
+            var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
+
+            if (!isValid)
+            {
+                _logger.LogWarning("⚠️ PayOS signature mismatch. Expected={Expected}, Received={Received}, OrderCode={OrderCode}, DataJson={Data}",
+                    expectedSignature, payload.Signature, payload.Data.OrderCode, sortedJson);
+            }
+            else
+            {
+                _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
+            }
+
+            return isValid;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Error verifying PayOS webhook signature for order {OrderCode}", payload.Data?.OrderCode);
             return false;
         }
+    }
+
+    private static string ComputeHmacSha256(string data, string secret)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
+        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 
     private string BuildPaymentsEndpointV2()

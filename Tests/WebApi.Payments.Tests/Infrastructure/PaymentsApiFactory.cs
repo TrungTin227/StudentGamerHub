@@ -4,6 +4,7 @@ using BusinessObjects.Common.Results;
 using DTOs.Quests;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.TestHost;
@@ -24,6 +25,7 @@ using Repositories.Persistence.Seeding;
 using Repositories.WorkSeeds.Extensions;
 using Repositories.WorkSeeds.Interfaces;
 using Services.Application.Quests;
+using Services.Common.Emailing.Interfaces;
 using Services.Configuration;
 using Services.Implementations;
 using Services.Interfaces;
@@ -176,7 +178,11 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<Program>
                     sp.GetRequiredService<IPlatformAccountService>(),
                     sp.GetRequiredService<IEscrowRepository>(),
                     sp.GetRequiredService<IQuestService>(),
-                    sp.GetRequiredService<ICommunityService>());
+                    sp.GetRequiredService<ICommunityService>(),
+                    sp.GetRequiredService<UserManager<User>>(),
+                    sp.GetRequiredService<IEmailQueue>(),
+                    sp.GetRequiredService<IMembershipEmailFactory>(),
+                    sp.GetRequiredService<IUserMembershipRepository>());
             });
 
             // Ensure database schema is created
