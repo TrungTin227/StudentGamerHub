@@ -80,7 +80,11 @@ namespace Services.Common.Emailing.DependencyInjection
                 services.AddSingleton<IEmailQueue, InlineEmailQueue>();
             }
 
-            // 7) Identity adapter
+            // 7) Email factories
+            services.AddSingleton<IAuthEmailFactory, AuthEmailFactory>();
+            services.AddSingleton<IMembershipEmailFactory, MembershipEmailFactory>();
+
+            // 8) Identity adapter
             if (addIdentityAdapter)
             {
                 services.AddScoped(

@@ -1,9 +1,11 @@
 using DTOs.Payments.PayOs;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Services.Application.Quests;
+using Services.Common.Emailing.Interfaces;
 using Services.Configuration;
 using Services.Interfaces;
 using StackExchange.Redis;
@@ -40,6 +42,10 @@ public sealed class PayOsService : IPayOsService
     private readonly IEscrowRepository _escrowRepository;
     private readonly IQuestService _questService;
     private readonly ICommunityService _communityService;
+    private readonly UserManager<User> _userManager;
+    private readonly IEmailQueue _emailQueue;
+    private readonly IMembershipEmailFactory _membershipEmailFactory;
+    private readonly IUserMembershipRepository _userMembershipRepository;
 
     public PayOsService(
         HttpClient httpClient,
@@ -59,7 +65,11 @@ public sealed class PayOsService : IPayOsService
         IPlatformAccountService platformAccountService,
         IEscrowRepository escrowRepository,
         IQuestService questService,
-        ICommunityService communityService)
+        ICommunityService communityService,
+        UserManager<User> userManager,
+        IEmailQueue emailQueue,
+        IMembershipEmailFactory membershipEmailFactory,
+        IUserMembershipRepository userMembershipRepository)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = configOptions?.Value ?? throw new ArgumentNullException(nameof(configOptions));
@@ -79,6 +89,10 @@ public sealed class PayOsService : IPayOsService
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
+        _userManager = userManager ?? throw new ArgumentNullException(nameof(userManager));
+        _emailQueue = emailQueue ?? throw new ArgumentNullException(nameof(emailQueue));
+        _membershipEmailFactory = membershipEmailFactory ?? throw new ArgumentNullException(nameof(membershipEmailFactory));
+        _userMembershipRepository = userMembershipRepository ?? throw new ArgumentNullException(nameof(userMembershipRepository));
     }
 
     private async Task<ReplayLease> AcquireReplayLeaseAsync(long orderCode, string fingerprint)
@@ -854,6 +868,27 @@ public sealed class PayOsService : IPayOsService
         pi.UpdatedBy = pi.UserId;
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // Send membership confirmation email
+        try
+        {
+            var user = await _userManager.FindByIdAsync(pi.UserId.ToString()).ConfigureAwait(false);
+            if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
+            {
+                var membership = await _userMembershipRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
+                if (membership is not null)
+                {
+                    var emailMessage = _membershipEmailFactory.BuildMembershipPurchaseConfirmation(user, plan, membership);
+                    await _emailQueue.EnqueueAsync(emailMessage, ct).ConfigureAwait(false);
+                    _logger.LogInformation("Membership confirmation email queued for user {UserId}, plan {PlanName}", pi.UserId, plan.Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail the transaction if email fails
+            _logger.LogWarning(ex, "Failed to send membership confirmation email for user {UserId}", pi.UserId);
+        }
 
         return Result.Success();
     }

@@ -1,7 +1,10 @@
 using DTOs.Payments.PayOs;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Services.Application.Quests;
+using Services.Common.Emailing.Interfaces;
 using Services.Configuration;
 using Services.Interfaces;
 using System;
@@ -33,6 +36,11 @@ public sealed class PaymentService : IPaymentService
     private readonly IQuestService _questService;
     private readonly ICommunityService _communityService;
     private readonly IPlatformAccountService _platformAccountService;
+    private readonly UserManager<User> _userManager;
+    private readonly IEmailQueue _emailQueue;
+    private readonly IMembershipEmailFactory _membershipEmailFactory;
+    private readonly IUserMembershipRepository _userMembershipRepository;
+    private readonly ILogger<PaymentService> _logger;
 
     public PaymentService(
         IGenericUnitOfWork uow,
@@ -49,7 +57,12 @@ public sealed class PaymentService : IPaymentService
         IOptionsSnapshot<PayOsOptions> payOsOptions,
         IQuestService questService,
         ICommunityService communityService,
-        IPlatformAccountService platformAccountService)
+        IPlatformAccountService platformAccountService,
+        UserManager<User> userManager,
+        IEmailQueue emailQueue,
+        IMembershipEmailFactory membershipEmailFactory,
+        IUserMembershipRepository userMembershipRepository,
+        ILogger<PaymentService> logger)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _paymentIntentRepository = paymentIntentRepository ?? throw new ArgumentNullException(nameof(paymentIntentRepository));
@@ -66,6 +79,11 @@ public sealed class PaymentService : IPaymentService
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
         _platformAccountService = platformAccountService ?? throw new ArgumentNullException(nameof(platformAccountService));
+        _userManager = userManager ?? throw new ArgumentNullException(nameof(userManager));
+        _emailQueue = emailQueue ?? throw new ArgumentNullException(nameof(emailQueue));
+        _membershipEmailFactory = membershipEmailFactory ?? throw new ArgumentNullException(nameof(membershipEmailFactory));
+        _userMembershipRepository = userMembershipRepository ?? throw new ArgumentNullException(nameof(userMembershipRepository));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public Task<Result<MembershipPurchaseResultDto>> BuyMembershipAsync(Guid userId, Guid planId, CancellationToken ct = default)
@@ -99,6 +117,9 @@ public sealed class PaymentService : IPaymentService
                     .ConfigureAwait(false);
 
                 await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+                // Send membership confirmation email for free membership
+                await SendMembershipConfirmationEmailAsync(userId, plan, innerCt).ConfigureAwait(false);
 
                 var successDto = new MembershipPurchaseResultDto(false, null, membershipInfo);
                 return Result<MembershipPurchaseResultDto>.Success(successDto);
@@ -171,6 +192,9 @@ public sealed class PaymentService : IPaymentService
                     .ConfigureAwait(false);
 
                 await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+                // Send membership confirmation email for wallet payment
+                await SendMembershipConfirmationEmailAsync(userId, plan, innerCt).ConfigureAwait(false);
 
                 var successDto = new MembershipPurchaseResultDto(false, null, membershipInfo);
                 return Result<MembershipPurchaseResultDto>.Success(successDto);
@@ -634,6 +658,29 @@ public sealed class PaymentService : IPaymentService
         catch
         {
             // Best-effort: quest completion failures should not block payment confirmation.
+        }
+    }
+
+    private async Task SendMembershipConfirmationEmailAsync(Guid userId, MembershipPlan plan, CancellationToken ct)
+    {
+        try
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString()).ConfigureAwait(false);
+            if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
+            {
+                var membership = await _userMembershipRepository.GetByUserIdAsync(userId, ct).ConfigureAwait(false);
+                if (membership is not null)
+                {
+                    var emailMessage = _membershipEmailFactory.BuildMembershipPurchaseConfirmation(user, plan, membership);
+                    await _emailQueue.EnqueueAsync(emailMessage, ct).ConfigureAwait(false);
+                    _logger.LogInformation("Membership confirmation email queued for user {UserId}, plan {PlanName}", userId, plan.Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail the transaction if email fails
+            _logger.LogWarning(ex, "Failed to send membership confirmation email for user {UserId}", userId);
         }
     }
 
