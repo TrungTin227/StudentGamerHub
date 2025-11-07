@@ -490,21 +490,30 @@ public sealed class PayOsService : IPayOsService
             // Get raw JSON text of the data element directly - NO re-serialization or sorting
             var dataJson = dataElement.GetRawText();
 
+            // Log the EXACT raw data JSON and secret key info for debugging
+            _logger.LogInformation("📋 PayOS Webhook Debug Info:");
+            _logger.LogInformation("  - Data JSON (length={Len}): {DataJson}", dataJson.Length, dataJson);
+            _logger.LogInformation("  - Secret Key (first 8 chars): {SecretPrefix}...", _options.SecretKey.Substring(0, Math.Min(8, _options.SecretKey.Length)));
+            _logger.LogInformation("  - Secret Key (length): {KeyLen}", _options.SecretKey.Length);
+            _logger.LogInformation("  - PayOS Signature: {Signature}", payload.Signature);
+
             // Compute HMAC-SHA256 signature directly on the raw data JSON
             var expectedSignature = ComputeHmacSha256(dataJson, _options.SecretKey);
 
-          // Compare case-insensitive
-    var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
+            _logger.LogInformation("  - Computed Signature: {ExpectedSig}", expectedSignature);
 
-    if (!isValid)
+            // Compare case-insensitive
+            var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
+
+            if (!isValid)
             {
-      _logger.LogWarning("⚠️ PayOS signature mismatch. Expected={Expected}, Received={Received}, OrderCode={OrderCode}, RawDataJson={Data}",
-          expectedSignature, payload.Signature, payload.Data.OrderCode, dataJson);
+                _logger.LogWarning("⚠️ PayOS signature mismatch!\n  Expected: {Expected}\n  Received: {Received}\n  OrderCode: {OrderCode}",
+                    expectedSignature, payload.Signature, payload.Data.OrderCode);
             }
- else
+            else
             {
- _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
-   }
+                _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
+            }
 
             return isValid;
         }
