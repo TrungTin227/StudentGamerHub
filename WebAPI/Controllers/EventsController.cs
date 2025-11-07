@@ -63,6 +63,36 @@ public sealed class EventsController : ControllerBase
             value: new { eventId = id });
     }
 
+    [HttpPut("{eventId:guid}")]
+    [EnableRateLimiting("EventsWrite")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> Update(Guid eventId, [FromBody] EventUpdateRequestDto request, CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return this.ToActionResult(Result.Failure(
+                new Error(Error.Codes.Validation, "Request body is required.")));
+        }
+
+        var organizerId = User.GetUserId();
+        if (!organizerId.HasValue)
+        {
+            return this.ToActionResult(Result.Failure(
+                new Error(Error.Codes.Unauthorized, "User identity is required.")));
+        }
+
+        var result = await _eventService.UpdateAsync(organizerId.Value, eventId, request, ct)
+                                        .ConfigureAwait(false);
+
+        return this.ToActionResult(result);
+    }
 
     [HttpPost("{eventId:guid}/open")]
     [EnableRateLimiting("EventsWrite")]

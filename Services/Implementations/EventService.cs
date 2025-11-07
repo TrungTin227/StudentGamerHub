@@ -19,6 +19,7 @@ public sealed class EventService : IEventService
     private readonly ITransactionRepository _transactionRepository;
     private readonly IUserMembershipRepository _userMembershipRepository;
     private readonly IValidator<EventCreateRequestDto> _createValidator;
+    private readonly IValidator<EventUpdateRequestDto> _updateValidator;
 
     public EventService(
         IGenericUnitOfWork uow,
@@ -30,7 +31,8 @@ public sealed class EventService : IEventService
         IWalletRepository walletRepository,
         ITransactionRepository transactionRepository,
         IUserMembershipRepository userMembershipRepository,
-        IValidator<EventCreateRequestDto> createValidator)
+        IValidator<EventCreateRequestDto> createValidator,
+        IValidator<EventUpdateRequestDto> updateValidator)
     {
         _uow = uow ?? throw new ArgumentNullException(nameof(uow));
         _eventCommandRepository = eventCommandRepository ?? throw new ArgumentNullException(nameof(eventCommandRepository));
@@ -42,6 +44,7 @@ public sealed class EventService : IEventService
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _userMembershipRepository = userMembershipRepository ?? throw new ArgumentNullException(nameof(userMembershipRepository));
         _createValidator = createValidator ?? throw new ArgumentNullException(nameof(createValidator));
+        _updateValidator = updateValidator ?? throw new ArgumentNullException(nameof(updateValidator));
     }
 
     public async Task<Result<Guid>> CreateAsync(Guid organizerId, EventCreateRequestDto req, CancellationToken ct = default)
@@ -297,6 +300,111 @@ public sealed class EventService : IEventService
             }
 
             ev.Status = EventStatus.Canceled;
+            ev.UpdatedBy = organizerId;
+            ev.UpdatedAtUtc = DateTime.UtcNow;
+
+            await _eventCommandRepository.UpdateAsync(ev, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            return Result.Success();
+        }, ct: ct).ConfigureAwait(false);
+    }
+
+    public async Task<Result> UpdateAsync(Guid organizerId, Guid eventId, EventUpdateRequestDto req, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+
+        var validation = await _updateValidator.ValidateToResultAsync(req, ct).ConfigureAwait(false);
+        if (validation.IsFailure)
+        {
+            return validation;
+        }
+
+        return await _uow.ExecuteTransactionAsync(async innerCt =>
+        {
+            var ev = await _eventQueryRepository.GetForUpdateAsync(eventId, innerCt).ConfigureAwait(false)
+                     ?? await _eventQueryRepository.GetByIdAsync(eventId, innerCt).ConfigureAwait(false);
+
+            if (ev is null)
+            {
+                return Result.Failure(new Error(Error.Codes.NotFound, "Event not found."));
+            }
+
+            if (ev.OrganizerId != organizerId)
+            {
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can update this event."));
+            }
+
+            // Only allow updates if event is Draft or Open
+            if (ev.Status != EventStatus.Draft && ev.Status != EventStatus.Open)
+            {
+                return Result.Failure(new Error(Error.Codes.Conflict, "Event can only be updated while in Draft or Open status."));
+            }
+
+            // Apply partial updates
+            if (req.CommunityId.HasValue || req.CommunityId == null)
+            {
+                // Explicitly allow setting to null or updating to a new community
+                ev.CommunityId = req.CommunityId;
+            }
+
+            if (req.Title is not null)
+            {
+                ev.Title = req.Title.Trim();
+            }
+
+            if (req.Description is not null)
+            {
+                ev.Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
+            }
+
+            if (req.Mode.HasValue)
+            {
+                ev.Mode = req.Mode.Value;
+            }
+
+            if (req.Location is not null)
+            {
+                ev.Location = string.IsNullOrWhiteSpace(req.Location) ? null : req.Location.Trim();
+            }
+
+            if (req.StartsAt.HasValue)
+            {
+                ev.StartsAt = req.StartsAt.Value;
+            }
+
+            if (req.EndsAt.HasValue)
+            {
+                ev.EndsAt = req.EndsAt.Value;
+            }
+
+            if (req.PriceCents.HasValue)
+            {
+                // Don't allow price changes if there are already confirmed registrations
+                var (confirmedRegs, _) = await _registrationQueryRepository
+                    .ListByEventAsync(eventId, new[] { EventRegistrationStatus.Confirmed, EventRegistrationStatus.CheckedIn }, 1, 1, innerCt)
+                    .ConfigureAwait(false);
+
+                if (confirmedRegs.Count > 0)
+                {
+                    return Result.Failure(new Error(Error.Codes.Conflict, "Cannot change price after registrations are confirmed."));
+                }
+
+                ev.PriceCents = req.PriceCents.Value;
+            }
+
+            if (req.Capacity.HasValue)
+            {
+                // Don't allow reducing capacity below current confirmed count
+                var confirmedCount = await _eventQueryRepository.CountConfirmedAsync(eventId, innerCt).ConfigureAwait(false);
+                if (req.Capacity.Value < confirmedCount)
+                {
+                    return Result.Failure(new Error(Error.Codes.Conflict, $"Cannot set capacity below current confirmed registration count ({confirmedCount})."));
+                }
+
+                ev.Capacity = req.Capacity.Value;
+            }
+
             ev.UpdatedBy = organizerId;
             ev.UpdatedAtUtc = DateTime.UtcNow;
 
