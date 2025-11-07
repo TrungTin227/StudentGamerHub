@@ -64,4 +64,11 @@ public sealed record PayOsWebhookData
 
     [JsonPropertyName("virtualAccountNumber")]
     public string? VirtualAccountNumber { get; init; }
+
+    // PayOS adds these fields to the data object in webhook payload
+    [JsonPropertyName("code")]
+    public string? Code { get; init; }
+
+    [JsonPropertyName("desc")]
+    public string? Desc { get; init; }
 }
