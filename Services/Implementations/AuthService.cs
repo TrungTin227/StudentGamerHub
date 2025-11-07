@@ -154,7 +154,7 @@ namespace Services.Implementations
                 }
             }
 
-            var normalizedUserName = _users.NormalizeName(userNameOrEmail);
+            var normalizedUserName = _users.KeyNormalizer?.NormalizeName(userNameOrEmail);
             if (string.IsNullOrWhiteSpace(normalizedUserName))
             {
                 return null;
