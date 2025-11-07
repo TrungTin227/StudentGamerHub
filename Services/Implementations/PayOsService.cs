@@ -487,41 +487,24 @@ public sealed class PayOsService : IPayOsService
                 return false;
             }
 
-            // Get raw JSON text of the data element
+            // Get raw JSON text of the data element directly - NO re-serialization or sorting
             var dataJson = dataElement.GetRawText();
 
-            // Parse and sort keys alphabetically (PayOS standard)
-            var dataDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(dataJson);
-            if (dataDict is null)
+            // Compute HMAC-SHA256 signature directly on the raw data JSON
+            var expectedSignature = ComputeHmacSha256(dataJson, _options.SecretKey);
+
+          // Compare case-insensitive
+    var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
+
+    if (!isValid)
             {
-                _logger.LogWarning("Failed to deserialize data element to dictionary");
-                return false;
+      _logger.LogWarning("⚠️ PayOS signature mismatch. Expected={Expected}, Received={Received}, OrderCode={OrderCode}, RawDataJson={Data}",
+          expectedSignature, payload.Signature, payload.Data.OrderCode, dataJson);
             }
-
-            var sortedDict = dataDict.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                                     .ToDictionary(kv => kv.Key, kv => kv.Value);
-
-            // Serialize sorted dictionary to compact JSON (no whitespace)
-            var sortedJson = JsonSerializer.Serialize(sortedDict, new JsonSerializerOptions
+ else
             {
-                WriteIndented = false
-            });
-
-            // Compute HMAC-SHA256 signature
-            var expectedSignature = ComputeHmacSha256(sortedJson, _options.SecretKey);
-
-            // Compare case-insensitive
-            var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
-
-            if (!isValid)
-            {
-                _logger.LogWarning("⚠️ PayOS signature mismatch. Expected={Expected}, Received={Received}, OrderCode={OrderCode}, DataJson={Data}",
-                    expectedSignature, payload.Signature, payload.Data.OrderCode, sortedJson);
-            }
-            else
-            {
-                _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
-            }
+ _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
+   }
 
             return isValid;
         }
