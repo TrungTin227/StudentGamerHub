@@ -500,33 +500,45 @@ signature = createSig
                 return false;
             }
 
-            // Get raw JSON text of the data element directly - NO re-serialization or sorting
-            var dataJson = dataElement.GetRawText();
+            // Parse data object to dictionary, then sort keys alphabetically
+    var dataDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(dataElement.GetRawText());
+    if (dataDict == null)
+            {
+         _logger.LogWarning("Failed to parse data element as dictionary");
+       return false;
+    }
 
-            // Log the EXACT raw data JSON and secret key info for debugging
-            _logger.LogInformation("📋 PayOS Webhook Debug Info:");
-            _logger.LogInformation("  - Data JSON (length={Len}): {DataJson}", dataJson.Length, dataJson);
-            _logger.LogInformation("  - Secret Key (first 8 chars): {SecretPrefix}...", _options.SecretKey.Substring(0, Math.Min(8, _options.SecretKey.Length)));
-            _logger.LogInformation("  - Secret Key (length): {KeyLen}", _options.SecretKey.Length);
-            _logger.LogInformation("  - PayOS Signature: {Signature}", payload.Signature);
+            // Sort keys alphabetically and build query string: key1=value1&key2=value2&...
+    var sortedPairs = dataDict
+   .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+         .Select(kv => $"{kv.Key}={NormalizeValue(kv.Value)}");
+      
+            var sortedData = string.Join("&", sortedPairs);
 
-            // Compute HMAC-SHA256 signature directly on the raw data JSON
-            var expectedSignature = ComputeHmacSha256(dataJson, _options.SecretKey);
+      // Log the sorted data for debugging
+    _logger.LogInformation("📋 PayOS Webhook Debug Info:");
+            _logger.LogInformation("  - Sorted Data (length={Len}): {SortedData}", sortedData.Length, sortedData);
+   _logger.LogInformation("  - Secret Key (first 8 chars): {SecretPrefix}...", _options.SecretKey.Substring(0, Math.Min(8, _options.SecretKey.Length)));
+     _logger.LogInformation("  - Secret Key (length): {KeyLen}", _options.SecretKey.Length);
+    _logger.LogInformation("  - PayOS Signature: {Signature}", payload.Signature);
 
-            _logger.LogInformation("  - Computed Signature: {ExpectedSig}", expectedSignature);
+            // Compute HMAC-SHA256 signature on the sorted query string
+            var expectedSignature = ComputeHmacSha256(sortedData, _options.SecretKey);
 
-            // Compare case-insensitive
-            var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
+          _logger.LogInformation("  - Computed Signature: {ExpectedSig}", expectedSignature);
+
+        // Compare case-insensitive
+     var isValid = string.Equals(expectedSignature, payload.Signature, StringComparison.OrdinalIgnoreCase);
 
             if (!isValid)
-            {
-                _logger.LogWarning("⚠️ PayOS signature mismatch!\n  Expected: {Expected}\n  Received: {Received}\n  OrderCode: {OrderCode}",
-                    expectedSignature, payload.Signature, payload.Data.OrderCode);
+     {
+         _logger.LogWarning("⚠️ PayOS signature mismatch!\n  Expected: {Expected}\n  Received: {Received}\n  OrderCode: {OrderCode}",
+   expectedSignature, payload.Signature, payload.Data.OrderCode);
             }
-            else
-            {
-                _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
-            }
+      else
+         {
+   _logger.LogInformation("✅ PayOS signature verified successfully for order {OrderCode}", payload.Data.OrderCode);
+        }
 
             return isValid;
         }
@@ -537,11 +549,27 @@ signature = createSig
         }
     }
 
+    // Helper method to normalize JsonElement values for signature calculation
+    private static string NormalizeValue(JsonElement element)
+    {
+        return element.ValueKind switch
+      {
+            JsonValueKind.Null => string.Empty,
+  JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonValueKind.Number => element.GetRawText(),
+            JsonValueKind.True => "true",
+ JsonValueKind.False => "false",
+JsonValueKind.Array => JsonSerializer.Serialize(element),
+    JsonValueKind.Object => JsonSerializer.Serialize(element),
+      _ => element.GetRawText()
+        };
+    }
+
     private static string ComputeHmacSha256(string data, string secret)
     {
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+  using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
-        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+   return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 
     private string BuildPaymentsEndpointV2()
