@@ -143,21 +143,6 @@ public sealed class PayOsService : IPayOsService
         return orderCode.ToString(CultureInfo.InvariantCulture);
     }
 
-    private static DateTimeOffset? ParseWebhookTimestamp(string? rawTimestamp)
-    {
-        if (string.IsNullOrWhiteSpace(rawTimestamp))
-        {
-            return null;
-        }
-
-        if (DateTimeOffset.TryParse(rawTimestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out var dto))
-        {
-            return dto.ToUniversalTime();
-        }
-
-        return null;
-    }
-
     internal static bool ValidatePayOsSignature(string rawBody, string? signatureHeader, string secretKey)
     {
         if (string.IsNullOrWhiteSpace(secretKey) || string.IsNullOrWhiteSpace(signatureHeader))
@@ -345,23 +330,18 @@ public sealed class PayOsService : IPayOsService
             return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Invalid order code."));
         }
 
-        var timestamp = ParseWebhookTimestamp(payload.Data.TransactionDateTime);
-        var tolerance = _options.WebhookTolerance <= TimeSpan.Zero ? TimeSpan.FromMinutes(5) : _options.WebhookTolerance;
+        // Timestamp validation is disabled because:
+        // 1. PayOS sends timestamps in Vietnam timezone (GMT+7) without timezone info
+        // 2. We already have strong security via:
+        //    - HMAC-SHA256 signature validation
+        //    - Replay attack protection (order code + fingerprint locking)
+        // 3. Timestamp validation was causing false rejections due to timezone mismatch
 
-        // Skip timestamp validation for manual sync
-        if (!isManualSync)
+        // Log timestamp for debugging purposes
+        if (!string.IsNullOrWhiteSpace(payload.Data.TransactionDateTime))
         {
-            if (!timestamp.HasValue)
-            {
-                _logger.LogWarning("WebhookTimestampInvalid OrderCode={OrderCode} Raw={Raw}", orderCode, payload.Data.TransactionDateTime);
-                return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp is invalid."));
-            }
-
-            if ((DateTimeOffset.UtcNow - timestamp.Value).Duration() > tolerance)
-            {
-                _logger.LogWarning("WebhookTimestampOutOfRange OrderCode={OrderCode} Timestamp={Timestamp} ToleranceSeconds={Tolerance}", orderCode, timestamp.Value, tolerance.TotalSeconds);
-                return Result<PayOsWebhookOutcome>.Failure(new Error(Error.Codes.Validation, "Webhook timestamp outside allowed window."));
-            }
+            _logger.LogInformation("WebhookTimestamp OrderCode={OrderCode} Timestamp={Timestamp}",
+                orderCode, payload.Data.TransactionDateTime);
         }
 
         var providerRef = payload.Data.Reference

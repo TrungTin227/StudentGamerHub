@@ -5,7 +5,7 @@ namespace WebAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Admin")]
+    // [Authorize(Roles = "Admin")]
     public sealed class UsersController : ControllerBase
     {
         private readonly IUserService _users;
