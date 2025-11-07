@@ -38,7 +38,6 @@ public sealed class PayOsService : IPayOsService
     private readonly IWalletRepository _walletRepository;
     private readonly IMembershipPlanRepository _membershipPlanRepository;
     private readonly IMembershipEnrollmentService _membershipEnrollmentService;
-    private readonly IPlatformAccountService _platformAccountService;
     private readonly IEscrowRepository _escrowRepository;
     private readonly IQuestService _questService;
     private readonly ICommunityService _communityService;
@@ -62,7 +61,6 @@ public sealed class PayOsService : IPayOsService
         IWalletRepository walletRepository,
         IMembershipPlanRepository membershipPlanRepository,
         IMembershipEnrollmentService membershipEnrollmentService,
-        IPlatformAccountService platformAccountService,
         IEscrowRepository escrowRepository,
         IQuestService questService,
         ICommunityService communityService,
@@ -85,7 +83,6 @@ public sealed class PayOsService : IPayOsService
         _walletRepository = walletRepository ?? throw new ArgumentNullException(nameof(walletRepository));
         _membershipPlanRepository = membershipPlanRepository ?? throw new ArgumentNullException(nameof(membershipPlanRepository));
         _membershipEnrollmentService = membershipEnrollmentService ?? throw new ArgumentNullException(nameof(membershipEnrollmentService));
-        _platformAccountService = platformAccountService ?? throw new ArgumentNullException(nameof(platformAccountService));
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _questService = questService ?? throw new ArgumentNullException(nameof(questService));
         _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
@@ -846,48 +843,108 @@ JsonValueKind.Array => JsonSerializer.Serialize(element),
         if (plan is null)
             return Result.Failure(new Error(Error.Codes.NotFound, "Membership plan referenced by payment intent was not found."));
 
-        var ensurePlatformUser = await _platformAccountService.GetOrCreatePlatformUserIdAsync(ct).ConfigureAwait(false);
-        if (ensurePlatformUser.IsFailure)
+ // FIX: Use pi.UserId (the actual buyer) instead of platformUserId for the transaction
+  // The buyer's user ID should be used to:
+        // 1. Create the transaction in their wallet
+        // 2. Assign the membership to them
+        // 3. Send confirmation email to them
+        
+        // Check if transaction already exists (idempotency)
+      var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
+        if (txExists)
         {
-            return ensurePlatformUser;
+            if (pi.Status != PaymentIntentStatus.Succeeded)
+     {
+          pi.Status = PaymentIntentStatus.Succeeded;
+    pi.UpdatedBy = pi.UserId;
+     await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+          await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+          
+  // Make sure membership is assigned even if transaction exists
+    var existingMembership = await _userMembershipRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
+     if (existingMembership is null || existingMembership.MembershipPlanId != plan.Id)
+    {
+         _ = await _membershipEnrollmentService.AssignAsync(pi.UserId, plan, pi.UserId, ct).ConfigureAwait(false);
+ await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+     }
+      
+     return Result.Success();
         }
 
-        var platformUserId = ensurePlatformUser.Value;
+        // Create transaction for the BUYER (pi.UserId), not platform
+        var wallet = await _walletRepository.EnsureAsync(pi.UserId, ct).ConfigureAwait(false);
 
-        // Sử dụng phương thức chung để xử lý transaction
-        var txResult = await ProcessPaymentTransactionAsync(
-            pi,
-            providerRef,
-            platformUserId,
-            CreateMembershipMetadata(plan.Id, plan.Name),
-            ct).ConfigureAwait(false);
-
-        if (txResult.IsFailure)
-            return txResult;
-
-        // Logic đặc thù cho membership: assign plan + send email
-        _ = await _membershipEnrollmentService.AssignAsync(pi.UserId, plan, pi.UserId, ct).ConfigureAwait(false);
+  var tx = new Transaction
+        {
+       Id = Guid.NewGuid(),
+    WalletId = wallet.Id,
+            AmountCents = pi.AmountCents,
+            Direction = TransactionDirection.In,  // Money coming IN from payment gateway
+     Method = TransactionMethod.Gateway,
+   Status = TransactionStatus.Succeeded,
+  Provider = Provider,
+ ProviderRef = providerRef,
+   Metadata = CreateMembershipMetadata(plan.Id, plan.Name),
+     CreatedBy = pi.UserId,  // Buyer creates the transaction
+        };
 
         try
-        {
-            var user = await _userManager.FindByIdAsync(pi.UserId.ToString()).ConfigureAwait(false);
-            if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
-            {
-                var membership = await _userMembershipRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
-                if (membership is not null)
-                {
-                    var emailMessage = _membershipEmailFactory.BuildMembershipPurchaseConfirmation(user, plan, membership);
-                    await _emailQueue.EnqueueAsync(emailMessage, ct).ConfigureAwait(false);
-                    _logger.LogInformation("Membership confirmation email queued for user {UserId}, plan {PlanName}", pi.UserId, plan.Name);
-                }
-            }
+     {
+            await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+     await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+     catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            _logger.LogWarning(ex, "Failed to send membership confirmation email for user {UserId}", pi.UserId);
+    _logger.LogWarning(ex, "Duplicate payOS tx detected. ProviderRef={ProviderRef}", providerRef);
+    if (pi.Status != PaymentIntentStatus.Succeeded)
+          {
+       pi.Status = PaymentIntentStatus.Succeeded;
+       pi.UpdatedBy = pi.UserId;
+ await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+     await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+            return Result.Success();
         }
 
-        return Result.Success();
+      // Assign membership to the BUYER (pi.UserId)
+        _ = await _membershipEnrollmentService.AssignAsync(pi.UserId, plan, pi.UserId, ct).ConfigureAwait(false);
+
+        // Update payment intent status
+        pi.Status = PaymentIntentStatus.Succeeded;
+        pi.UpdatedBy = pi.UserId;
+        await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // Send membership confirmation email
+ try
+   {
+ var user = await _userManager.FindByIdAsync(pi.UserId.ToString()).ConfigureAwait(false);
+     if (user is not null && !string.IsNullOrWhiteSpace(user.Email))
+    {
+   var membership = await _userMembershipRepository.GetByUserIdAsync(pi.UserId, ct).ConfigureAwait(false);
+      if (membership is not null)
+            {
+        var emailMessage = _membershipEmailFactory.BuildMembershipPurchaseConfirmation(user, plan, membership);
+ await _emailQueue.EnqueueAsync(emailMessage, ct).ConfigureAwait(false);
+  _logger.LogInformation("✅ Membership confirmation email queued for user {UserId}, plan {PlanName}", pi.UserId, plan.Name);
+    }
+     else
+    {
+            _logger.LogWarning("⚠️ Membership not found for user {UserId} after assignment", pi.UserId);
+    }
+            }
+  else
+ {
+                _logger.LogWarning("⚠️ User {UserId} not found or has no email for membership confirmation", pi.UserId);
+}
+        }
+        catch (Exception ex)
+      {
+       _logger.LogWarning(ex, "Failed to send membership confirmation email for user {UserId}", pi.UserId);
+        }
+
+return Result.Success();
     }
 
     private async Task<Result> ConfirmWalletTopUpAsync(PaymentIntent pi, string providerRef, CancellationToken ct)
@@ -895,124 +952,105 @@ JsonValueKind.Array => JsonSerializer.Serialize(element),
         if (pi.AmountCents <= 0)
             return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
 
-        // Sử dụng phương thức chung để xử lý transaction
-        return await ProcessPaymentTransactionAsync(
-                pi,
-                providerRef,
-                pi.UserId,
-                CreateMetadata("WALLET_TOP_UP", null, null),
-                ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Phương thức chung xử lý: check duplicate tx, tạo transaction, credit wallet, cập nhật PI status
-    /// </summary>
-    private async Task<Result> ProcessPaymentTransactionAsync(
-        PaymentIntent pi,
-        string providerRef,
-        Guid walletOwnerId,
-        JsonDocument metadata,
-        CancellationToken ct)
-    {
-        // 1. Check transaction đã tồn tại
+     // Check if transaction already exists (idempotency)
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
-        if (txExists)
+      if (txExists)
         {
             if (pi.Status != PaymentIntentStatus.Succeeded)
-            {
-                pi.Status = PaymentIntentStatus.Succeeded;
-                pi.UpdatedBy = pi.UserId;
-                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+  {
+       pi.Status = PaymentIntentStatus.Succeeded;
+  pi.UpdatedBy = pi.UserId;
+         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
                 await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-            }
-            return Result.Success();
-        }
+ }
+    return Result.Success();
+}
 
-        // 2. Tạo transaction mới
-        var wallet = await _walletRepository.EnsureAsync(walletOwnerId, ct).ConfigureAwait(false);
+        // Create transaction for the user
+        var wallet = await _walletRepository.EnsureAsync(pi.UserId, ct).ConfigureAwait(false);
 
-        var tx = new Transaction
+      var tx = new Transaction
         {
             Id = Guid.NewGuid(),
             WalletId = wallet.Id,
-            AmountCents = pi.AmountCents,
+  AmountCents = pi.AmountCents,
             Direction = TransactionDirection.In,
-            Method = TransactionMethod.Gateway,
+    Method = TransactionMethod.Gateway,
             Status = TransactionStatus.Succeeded,
             Provider = Provider,
             ProviderRef = providerRef,
-            Metadata = metadata,
-            CreatedBy = walletOwnerId,
+            Metadata = CreateMetadata("WALLET_TOP_UP", null, null),
+     CreatedBy = pi.UserId,
         };
 
         try
         {
-            await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
+ await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
             await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            _logger.LogWarning(ex, "Duplicate payOS tx detected. ProviderRef={ProviderRef}", providerRef);
+         _logger.LogWarning(ex, "Duplicate payOS tx detected. ProviderRef={ProviderRef}", providerRef);
             if (pi.Status != PaymentIntentStatus.Succeeded)
             {
-                pi.Status = PaymentIntentStatus.Succeeded;
-                pi.UpdatedBy = pi.UserId;
-                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+   pi.Status = PaymentIntentStatus.Succeeded;
+     pi.UpdatedBy = pi.UserId;
+             await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
             }
             return Result.Success();
-        }
+   }
 
-        // 3. Credit wallet
-        var credited = await _walletRepository.AdjustBalanceAsync(walletOwnerId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
+        // Credit wallet
+      var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
+      if (!credited)
+    return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
 
-        // 4. Cập nhật PaymentIntent status
-        pi.Status = PaymentIntentStatus.Succeeded;
+        // Update payment intent status
+    pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
-        await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+      await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
+     await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return Result.Success();
+  return Result.Success();
     }
 
     private async Task<Result> EnsureCommunityMembershipAsync(Guid? communityId, Guid userId, CancellationToken ct)
     {
         if (!communityId.HasValue)
         {
-            return Result.Success();
+          return Result.Success();
         }
 
         var joinResult = await _communityService.JoinCommunityAsync(communityId.Value, userId, ct).ConfigureAwait(false);
         return joinResult.IsSuccess
-            ? Result.Success()
+  ? Result.Success()
             : Result.Failure(joinResult.Error);
     }
 
-    private async Task TriggerAttendQuestAsync(Guid userId, Guid eventId, CancellationToken ct)
+  private async Task TriggerAttendQuestAsync(Guid userId, Guid eventId, CancellationToken ct)
     {
-        try
+   try
         {
-            var questResult = await _questService.MarkAttendEventAsync(userId, eventId, ct).ConfigureAwait(false);
-            _ = questResult;
+     var questResult = await _questService.MarkAttendEventAsync(userId, eventId, ct).ConfigureAwait(false);
+   _ = questResult;
         }
-        catch (OperationCanceledException)
+    catch (OperationCanceledException)
+   {
+  throw;
+        }
+  catch (Exception ex)
         {
-            throw;
+   _logger.LogWarning(ex, "Failed to trigger ATTEND_EVENT quest for user {UserId} event {EventId}.", userId, eventId);
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to trigger ATTEND_EVENT quest for user {UserId} event {EventId}.", userId, eventId);
-        }
-    }
+ }
 
     private static JsonDocument CreateMembershipMetadata(Guid planId, string planName)
     {
         var payload = new Dictionary<string, object?>
-        {
-            ["note"] = "MEMBERSHIP_PURCHASE",
-            ["membershipPlanId"] = planId,
+    {
+      ["note"] = "MEMBERSHIP_PURCHASE",
+       ["membershipPlanId"] = planId,
             ["planName"] = planName
         };
 
@@ -1021,9 +1059,9 @@ JsonValueKind.Array => JsonSerializer.Serialize(element),
 
     private static JsonDocument CreateMetadata(string note, Guid? eventId, Guid? counterpartyUserId)
     {
-        var payload = new Dictionary<string, object?> { ["note"] = note };
+   var payload = new Dictionary<string, object?> { ["note"] = note };
         if (eventId.HasValue) payload["eventId"] = eventId.Value;
         if (counterpartyUserId.HasValue) payload["counterpartyUserId"] = counterpartyUserId.Value;
-        return JsonSerializer.SerializeToDocument(payload);
+  return JsonSerializer.SerializeToDocument(payload);
     }
 }

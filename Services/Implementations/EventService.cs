@@ -85,9 +85,14 @@ public sealed class EventService : IEventService
 
             var utcNow = DateTime.UtcNow;
 
-            if (membership is null || membership.EndDate < utcNow)
+            if (membership is null)
             {
-                return Result<Guid>.Failure(new Error("ActiveMembershipRequired", "An active membership is required to create events."));
+                return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, "You need an active membership plan to create events. Please purchase a membership plan first."));
+            }
+
+            if (membership.EndDate < utcNow)
+            {
+                return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, "Your membership has expired. Please renew your membership to create events."));
             }
 
             var plan = membership.MembershipPlan;
@@ -120,7 +125,7 @@ public sealed class EventService : IEventService
 
                 if (remaining is null)
                 {
-                    return Result<Guid>.Failure(new Error("EventLimitReachedForCurrentMembership", "Event limit reached for the current membership period."));
+                    return Result<Guid>.Failure(new Error(Error.Codes.Forbidden, $"You have reached your monthly event creation limit for the '{plan.Name}' plan. Your quota will reset next month or you can upgrade to a plan with higher limits."));
                 }
             }
 
