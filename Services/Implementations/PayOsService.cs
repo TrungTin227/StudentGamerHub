@@ -805,20 +805,6 @@ public sealed class PayOsService : IPayOsService
         if (plan is null)
             return Result.Failure(new Error(Error.Codes.NotFound, "Membership plan referenced by payment intent was not found."));
 
-        var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
-        if (txExists)
-        {
-            if (pi.Status != PaymentIntentStatus.Succeeded)
-            {
-                pi.Status = PaymentIntentStatus.Succeeded;
-                pi.UpdatedBy = pi.UserId;
-                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-            }
-
-            return Result.Success();
-        }
-
         var ensurePlatformUser = await _platformAccountService.GetOrCreatePlatformUserIdAsync(ct).ConfigureAwait(false);
         if (ensurePlatformUser.IsFailure)
         {
@@ -826,55 +812,21 @@ public sealed class PayOsService : IPayOsService
         }
 
         var platformUserId = ensurePlatformUser.Value;
-        var platformWallet = await _walletRepository.EnsureAsync(platformUserId, ct).ConfigureAwait(false);
 
-        var tx = new Transaction
-        {
-            Id = Guid.NewGuid(),
-            WalletId = platformWallet.Id,
-            AmountCents = pi.AmountCents,
-            Direction = TransactionDirection.In,
-            Method = TransactionMethod.Gateway,
-            Status = TransactionStatus.Succeeded,
-            Provider = Provider,
-            ProviderRef = providerRef,
-            Metadata = CreateMembershipMetadata(plan.Id, plan.Name),
-            CreatedBy = platformUserId,
-        };
+        // Sử dụng phương thức chung để xử lý transaction
+        var txResult = await ProcessPaymentTransactionAsync(
+            pi,
+            providerRef,
+            platformUserId,
+            CreateMembershipMetadata(plan.Id, plan.Name),
+            ct).ConfigureAwait(false);
 
-        try
-        {
-            await _transactionRepository.CreateAsync(tx, ct).ConfigureAwait(false);
-        }
-        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
-        {
-            _logger.LogWarning(ex, "Duplicate payOS tx detected. ProviderRef={ProviderRef}", providerRef);
+        if (txResult.IsFailure)
+            return txResult;
 
-            if (pi.Status != PaymentIntentStatus.Succeeded)
-            {
-                pi.Status = PaymentIntentStatus.Succeeded;
-                pi.UpdatedBy = pi.UserId;
-                await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-            }
-
-            return Result.Success();
-        }
-
-        var credited = await _walletRepository.AdjustBalanceAsync(platformUserId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited)
-        {
-            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit platform wallet."));
-        }
-
+        // Logic đặc thù cho membership: assign plan + send email
         _ = await _membershipEnrollmentService.AssignAsync(pi.UserId, plan, pi.UserId, ct).ConfigureAwait(false);
 
-        pi.Status = PaymentIntentStatus.Succeeded;
-        pi.UpdatedBy = pi.UserId;
-        await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        // Send membership confirmation email
         try
         {
             var user = await _userManager.FindByIdAsync(pi.UserId.ToString()).ConfigureAwait(false);
@@ -891,7 +843,6 @@ public sealed class PayOsService : IPayOsService
         }
         catch (Exception ex)
         {
-            // Log but don't fail the transaction if email fails
             _logger.LogWarning(ex, "Failed to send membership confirmation email for user {UserId}", pi.UserId);
         }
 
@@ -903,6 +854,26 @@ public sealed class PayOsService : IPayOsService
         if (pi.AmountCents <= 0)
             return Result.Failure(new Error(Error.Codes.Validation, "Top-up amount must be positive."));
 
+        // Sử dụng phương thức chung để xử lý transaction
+        return await ProcessPaymentTransactionAsync(
+                pi,
+                providerRef,
+                pi.UserId,
+                CreateMetadata("WALLET_TOP_UP", null, null),
+                ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Phương thức chung xử lý: check duplicate tx, tạo transaction, credit wallet, cập nhật PI status
+    /// </summary>
+    private async Task<Result> ProcessPaymentTransactionAsync(
+        PaymentIntent pi,
+        string providerRef,
+        Guid walletOwnerId,
+        JsonDocument metadata,
+        CancellationToken ct)
+    {
+        // 1. Check transaction đã tồn tại
         var txExists = await _transactionRepository.ExistsByProviderRefAsync(Provider, providerRef, ct).ConfigureAwait(false);
         if (txExists)
         {
@@ -916,7 +887,8 @@ public sealed class PayOsService : IPayOsService
             return Result.Success();
         }
 
-        var wallet = await _walletRepository.EnsureAsync(pi.UserId, ct).ConfigureAwait(false);
+        // 2. Tạo transaction mới
+        var wallet = await _walletRepository.EnsureAsync(walletOwnerId, ct).ConfigureAwait(false);
 
         var tx = new Transaction
         {
@@ -928,8 +900,8 @@ public sealed class PayOsService : IPayOsService
             Status = TransactionStatus.Succeeded,
             Provider = Provider,
             ProviderRef = providerRef,
-            Metadata = CreateMetadata("WALLET_TOP_UP", null, null),
-            CreatedBy = pi.UserId,
+            Metadata = metadata,
+            CreatedBy = walletOwnerId,
         };
 
         try
@@ -950,9 +922,12 @@ public sealed class PayOsService : IPayOsService
             return Result.Success();
         }
 
-        var credited = await _walletRepository.AdjustBalanceAsync(pi.UserId, pi.AmountCents, ct).ConfigureAwait(false);
-        if (!credited) return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
+        // 3. Credit wallet
+        var credited = await _walletRepository.AdjustBalanceAsync(walletOwnerId, pi.AmountCents, ct).ConfigureAwait(false);
+        if (!credited)
+            return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to credit wallet."));
 
+        // 4. Cập nhật PaymentIntent status
         pi.Status = PaymentIntentStatus.Succeeded;
         pi.UpdatedBy = pi.UserId;
         await _paymentIntentRepository.UpdateAsync(pi, ct).ConfigureAwait(false);
