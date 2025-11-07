@@ -223,38 +223,45 @@ public sealed class PayOsService : IPayOsService
             var cancelUrl = string.IsNullOrWhiteSpace(req.CancelUrl) ? (_options.CancelUrl ?? returnUrl) : req.CancelUrl!;
             var description = req.Description ?? string.Empty;
 
-            // PayOS v2 API does not accept webhookUrl in request body - configure it in PayOS dashboard instead
-            // Signature without webhookUrl
+         // PayOS v2 API does not accept webhookUrl in request body - configure it in PayOS dashboard instead
+        // Signature without webhookUrl
             var createSig = BuildCreateSignature(orderCode, req.Amount, description, returnUrl, cancelUrl, null);
 
-            var payload = new
-            {
-                orderCode = orderCode,
-                amount = req.Amount,
-                description = description,
-                returnUrl = returnUrl,
-                cancelUrl = cancelUrl,
-                buyerName = req.BuyerName,
-                buyerEmail = req.BuyerEmail,
-                buyerPhone = req.BuyerPhone,
-                signature = createSig
-            };
+        var payload = new
+  {
+       orderCode = orderCode,
+     amount = req.Amount,
+     description = description,
+      returnUrl = returnUrl,
+        cancelUrl = cancelUrl,
+     buyerName = req.BuyerName,
+       buyerEmail = req.BuyerEmail,
+            buyerPhone = req.BuyerPhone,
+signature = createSig
+};
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, BuildPaymentsEndpointV2())
+ // Log request payload for debugging
+  var payloadJson = JsonSerializer.Serialize(payload);
+            _logger.LogInformation("📤 PayOS Create Payment Request:\n  Endpoint: {Endpoint}\n  ClientId: {ClientId}\n  Payload: {Payload}", 
+                BuildPaymentsEndpointV2(), 
+    _options.ClientId,
+            payloadJson);
+
+     using var request = new HttpRequestMessage(HttpMethod.Post, BuildPaymentsEndpointV2())
             {
-                Content = JsonContent.Create(payload)
-            };
-            request.Headers.TryAddWithoutValidation("x-client-id", _options.ClientId);
-            request.Headers.TryAddWithoutValidation("x-api-key", _options.ApiKey);
+       Content = JsonContent.Create(payload)
+     };
+        request.Headers.TryAddWithoutValidation("x-client-id", _options.ClientId);
+     request.Headers.TryAddWithoutValidation("x-api-key", _options.ApiKey);
 
             var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+   var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
-            if (!response.IsSuccessStatusCode)
+  if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("payOS create link failed {Status}. Body={Body}", response.StatusCode, body);
-                return Result<string>.Failure(new Error(Error.Codes.Unexpected, $"Failed to create PayOS payment link. Status: {response.StatusCode}"));
-            }
+ _logger.LogWarning("payOS create link failed {Status}. Body={Body}", response.StatusCode, body);
+  return Result<string>.Failure(new Error(Error.Codes.Unexpected, $"Failed to create PayOS payment link. Status: {response.StatusCode}"));
+    }
 
             PayOsPaymentResponse? parsed = null;
             try
@@ -285,13 +292,19 @@ public sealed class PayOsService : IPayOsService
                 var errorMessage = parsed.Desc ?? "Unknown error from PayOS";
                 _logger.LogWarning("payOS returned error code. Code={Code}, Desc={Desc}, Raw={Body}", parsed.Code, errorMessage, body);
 
-                // Return a more specific error message based on the error code
-                return parsed.Code switch
-                {
-                    "231" => Result<string>.Failure(new Error(Error.Codes.Conflict, "Payment order already exists. Please use a different order code or cancel the existing payment.")),
-                    _ => Result<string>.Failure(new Error(Error.Codes.Validation, $"PayOS error: {errorMessage}"))
-                };
-            }
+    // Return a more specific error message based on the error code
+         return parsed.Code switch
+            {
+                "231" => Result<string>.Failure(new Error(Error.Codes.Conflict, "Payment order already exists. Please use a different order code or cancel the existing payment.")),
+      "214" => Result<string>.Failure(new Error(Error.Codes.ServiceUnavailable, 
+             "PayOS payment gateway is currently unavailable. This usually means:\n" +
+           "1. Your linked bank accounts (VietQR PRO/Kienlongbank) are not yet activated in PayOS Dashboard\n" +
+          "2. Your PayOS account needs verification for production use\n" +
+    "3. The selected payment method is temporarily disabled\n\n" +
+     "Please check your PayOS Dashboard (https://my.payos.vn/) to verify bank account status.")),
+     _ => Result<string>.Failure(new Error(Error.Codes.Validation, $"PayOS error: {errorMessage}"))
+          };
+       }
 
             var checkoutUrl = parsed.Data?.CheckoutUrl;
             if (string.IsNullOrWhiteSpace(checkoutUrl))

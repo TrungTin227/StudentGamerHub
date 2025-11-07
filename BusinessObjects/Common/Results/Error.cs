@@ -14,6 +14,7 @@
             public const string Forbidden = "forbidden";
             public const string Unauthorized = "unauthorized";
             public const string Unexpected = "unexpected_error";
+            public const string ServiceUnavailable = "service_unavailable";
         }
     }
 }

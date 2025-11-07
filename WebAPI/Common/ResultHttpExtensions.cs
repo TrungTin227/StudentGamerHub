@@ -97,6 +97,7 @@ public static class ResultHttpExtensions
         "conflict" => ((int)HttpStatusCode.Conflict, "https://httpstatuses.com/409"),
         "forbidden" => ((int)HttpStatusCode.Forbidden, "https://httpstatuses.com/403"),
         "unauthorized" => ((int)HttpStatusCode.Unauthorized, "https://httpstatuses.com/401"),
+        "service_unavailable" => ((int)HttpStatusCode.ServiceUnavailable, "https://httpstatuses.com/503"),
         _ => ((int)HttpStatusCode.InternalServerError, "https://httpstatuses.com/500")
     };
 }
