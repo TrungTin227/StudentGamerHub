@@ -475,7 +475,8 @@ public static class ServiceCollectionExtensions
                         "https://localhost:5173",
                         "http://127.0.0.1:5173",
                         "https://127.0.0.1:5173",
-                        "https://fe-student-gamer-hub.vercel.app")
+                        "https://fe-student-gamer-hub.vercel.app",
+                        "https://admin-student-gamer-hub.vercel.app")
                  .AllowAnyMethod()
                  .AllowAnyHeader()
                  .AllowCredentials();
