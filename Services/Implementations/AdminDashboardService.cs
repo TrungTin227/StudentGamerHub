@@ -6,6 +6,7 @@ using DTOs.Admin.Filters;
 using DTOs.Common.Filters;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Repositories.Persistence;
 using Services.Interfaces;
@@ -16,15 +17,20 @@ public sealed class AdminDashboardService : IAdminDashboardService
 {
     private readonly AppDbContext _context;
     private readonly UserManager<User> _userManager;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<AdminDashboardService> _logger;
+    private const string DashboardSummaryCacheKey = "AdminDashboardSummary";
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(3);
 
     public AdminDashboardService(
         AppDbContext context,
         UserManager<User> userManager,
+        IMemoryCache cache,
         ILogger<AdminDashboardService> logger)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _userManager = userManager ?? throw new ArgumentNullException(nameof(userManager));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -32,6 +38,13 @@ public sealed class AdminDashboardService : IAdminDashboardService
     {
         try
         {
+            // Try to get from cache first
+            if (_cache.TryGetValue(DashboardSummaryCacheKey, out AdminDashboardSummaryDto? cachedSummary) && cachedSummary != null)
+            {
+                return Result<AdminDashboardSummaryDto>.Success(cachedSummary);
+            }
+
+            // If not in cache, compute it
             var now = DateTime.UtcNow;
             var thirtyDaysAgo = now.AddDays(-30);
             var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -86,6 +99,9 @@ public sealed class AdminDashboardService : IAdminDashboardService
                 GeneratedAtUtc = now
             };
 
+            // Cache the result for 3 minutes
+            _cache.Set(DashboardSummaryCacheKey, summary, CacheDuration);
+
             return Result<AdminDashboardSummaryDto>.Success(summary);
         }
         catch (Exception ex)
@@ -104,7 +120,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
         try
         {
             var now = DateTime.UtcNow;
-            var query = _context.Users.AsQueryable();
+            var query = _context.Users.AsNoTracking();
 
             // Apply filters
             if (!filter.IncludeDeleted)
@@ -146,7 +162,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
             // Total count
             var totalCount = await query.CountAsync(ct);
 
-            // Get paged data
+            // Get paged users with only basic fields (no scalar subqueries)
             var users = await query
                 .OrderByDescending(u => u.CreatedAtUtc)
                 .Skip((pageRequest.Page - 1) * pageRequest.Size)
@@ -156,47 +172,84 @@ public sealed class AdminDashboardService : IAdminDashboardService
                     User = u,
                     WalletBalance = u.Wallet != null ? u.Wallet.BalanceCents : 0,
                     MembershipPlan = u.Membership != null ? u.Membership.MembershipPlan!.Name : null,
-                    MembershipExpiresAt = u.Membership != null ? u.Membership.EndDate : (DateTime?)null,
-                    EventsCreated = _context.Events.Count(e => e.OrganizerId == u.Id),
-                    EventsAttended = _context.EventRegistrations.Count(er =>
-                        er.UserId == u.Id && er.Status == EventRegistrationStatus.Confirmed),
-                    CommunitiesJoined = _context.CommunityMembers.Count(cm => cm.UserId == u.Id),
-                    TotalSpent = _context.Transactions
-                        .Where(t => t.Wallet.UserId == u.Id
-                            && t.Direction == TransactionDirection.Out
-                            && t.Status == TransactionStatus.Succeeded)
-                        .Sum(t => (long?)t.AmountCents) ?? 0
+                    MembershipExpiresAt = u.Membership != null ? u.Membership.EndDate : (DateTime?)null
                 })
                 .ToListAsync(ct);
 
-            var userStats = new List<AdminUserStatsDto>();
+            var userIds = users.Select(u => u.User.Id).ToList();
 
-            foreach (var item in users)
+            // Batch load all stats in parallel to avoid scalar subqueries
+            var eventsCreatedTask = _context.Events
+                .AsNoTracking()
+                .Where(e => userIds.Contains(e.OrganizerId))
+                .GroupBy(e => e.OrganizerId)
+                .Select(g => new { UserId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.UserId, x => x.Count, ct);
+
+            var eventsAttendedTask = _context.EventRegistrations
+                .AsNoTracking()
+                .Where(er => userIds.Contains(er.UserId) && er.Status == EventRegistrationStatus.Confirmed)
+                .GroupBy(er => er.UserId)
+                .Select(g => new { UserId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.UserId, x => x.Count, ct);
+
+            var communitiesJoinedTask = _context.CommunityMembers
+                .AsNoTracking()
+                .Where(cm => userIds.Contains(cm.UserId))
+                .GroupBy(cm => cm.UserId)
+                .Select(g => new { UserId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.UserId, x => x.Count, ct);
+
+            var totalSpentTask = _context.Transactions
+                .AsNoTracking()
+                .Where(t => userIds.Contains(t.Wallet.UserId)
+                    && t.Direction == TransactionDirection.Out
+                    && t.Status == TransactionStatus.Succeeded)
+                .GroupBy(t => t.Wallet.UserId)
+                .Select(g => new { UserId = g.Key, Total = g.Sum(t => t.AmountCents) })
+                .ToDictionaryAsync(x => x.UserId, x => x.Total, ct);
+
+            var userRolesTask = _context.UserRoles
+                .AsNoTracking()
+                .Where(ur => userIds.Contains(ur.UserId))
+                .Join(_context.Roles,
+                    ur => ur.RoleId,
+                    r => r.Id,
+                    (ur, r) => new { ur.UserId, RoleName = r.Name! })
+                .GroupBy(x => x.UserId)
+                .ToDictionaryAsync(g => g.Key, g => g.Select(x => x.RoleName).ToList(), ct);
+
+            // Wait for all parallel tasks to complete
+            await Task.WhenAll(eventsCreatedTask, eventsAttendedTask, communitiesJoinedTask, totalSpentTask, userRolesTask);
+
+            var eventsCreatedDict = await eventsCreatedTask;
+            var eventsAttendedDict = await eventsAttendedTask;
+            var communitiesJoinedDict = await communitiesJoinedTask;
+            var totalSpentDict = await totalSpentTask;
+            var userRolesDict = await userRolesTask;
+
+            // Map to DTOs
+            var userStats = users.Select(item => new AdminUserStatsDto
             {
-                var roles = await _userManager.GetRolesAsync(item.User);
-
-                userStats.Add(new AdminUserStatsDto
-                {
-                    UserId = item.User.Id,
-                    UserName = item.User.UserName!,
-                    Email = item.User.Email,
-                    FullName = item.User.FullName,
-                    AvatarUrl = item.User.AvatarUrl,
-                    Level = item.User.Level,
-                    Points = item.User.Points,
-                    WalletBalanceCents = item.WalletBalance,
-                    CurrentMembership = item.MembershipPlan,
-                    MembershipExpiresAt = item.MembershipExpiresAt,
-                    EventsCreated = item.EventsCreated,
-                    EventsAttended = item.EventsAttended,
-                    CommunitiesJoined = item.CommunitiesJoined,
-                    TotalSpentCents = item.TotalSpent,
-                    Roles = roles.ToList(),
-                    CreatedAtUtc = item.User.CreatedAtUtc,
-                    UpdatedAtUtc = item.User.UpdatedAtUtc,
-                    IsDeleted = item.User.IsDeleted
-                });
-            }
+                UserId = item.User.Id,
+                UserName = item.User.UserName!,
+                Email = item.User.Email,
+                FullName = item.User.FullName,
+                AvatarUrl = item.User.AvatarUrl,
+                Level = item.User.Level,
+                Points = item.User.Points,
+                WalletBalanceCents = item.WalletBalance,
+                CurrentMembership = item.MembershipPlan,
+                MembershipExpiresAt = item.MembershipExpiresAt,
+                EventsCreated = eventsCreatedDict.GetValueOrDefault(item.User.Id, 0),
+                EventsAttended = eventsAttendedDict.GetValueOrDefault(item.User.Id, 0),
+                CommunitiesJoined = communitiesJoinedDict.GetValueOrDefault(item.User.Id, 0),
+                TotalSpentCents = totalSpentDict.GetValueOrDefault(item.User.Id, 0),
+                Roles = userRolesDict.GetValueOrDefault(item.User.Id, new List<string>()),
+                CreatedAtUtc = item.User.CreatedAtUtc,
+                UpdatedAtUtc = item.User.UpdatedAtUtc,
+                IsDeleted = item.User.IsDeleted
+            }).ToList();
 
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
             var hasPrevious = pageRequest.Page > 1;
@@ -229,23 +282,17 @@ public sealed class AdminDashboardService : IAdminDashboardService
         try
         {
             var now = DateTime.UtcNow;
+
+            // Get basic user info first (no scalar subqueries)
             var userQuery = await _context.Users
+                .AsNoTracking()
                 .Where(u => u.Id == userId)
                 .Select(u => new
                 {
                     User = u,
                     WalletBalance = u.Wallet != null ? u.Wallet.BalanceCents : 0,
                     MembershipPlan = u.Membership != null ? u.Membership.MembershipPlan!.Name : null,
-                    MembershipExpiresAt = u.Membership != null ? u.Membership.EndDate : (DateTime?)null,
-                    EventsCreated = _context.Events.Count(e => e.OrganizerId == u.Id),
-                    EventsAttended = _context.EventRegistrations.Count(er =>
-                        er.UserId == u.Id && er.Status == EventRegistrationStatus.Confirmed),
-                    CommunitiesJoined = _context.CommunityMembers.Count(cm => cm.UserId == u.Id),
-                    TotalSpent = _context.Transactions
-                        .Where(t => t.Wallet.UserId == u.Id
-                            && t.Direction == TransactionDirection.Out
-                            && t.Status == TransactionStatus.Succeeded)
-                        .Sum(t => (long?)t.AmountCents) ?? 0
+                    MembershipExpiresAt = u.Membership != null ? u.Membership.EndDate : (DateTime?)null
                 })
                 .FirstOrDefaultAsync(ct);
 
@@ -255,7 +302,37 @@ public sealed class AdminDashboardService : IAdminDashboardService
                     new Error(Error.Codes.NotFound, "User not found"));
             }
 
-            var roles = await _userManager.GetRolesAsync(userQuery.User);
+            // Load stats in parallel (more efficient than scalar subqueries)
+            var eventsCreatedTask = _context.Events
+                .AsNoTracking()
+                .CountAsync(e => e.OrganizerId == userId, ct);
+
+            var eventsAttendedTask = _context.EventRegistrations
+                .AsNoTracking()
+                .CountAsync(er => er.UserId == userId && er.Status == EventRegistrationStatus.Confirmed, ct);
+
+            var communitiesJoinedTask = _context.CommunityMembers
+                .AsNoTracking()
+                .CountAsync(cm => cm.UserId == userId, ct);
+
+            var totalSpentTask = _context.Transactions
+                .AsNoTracking()
+                .Where(t => t.Wallet.UserId == userId
+                    && t.Direction == TransactionDirection.Out
+                    && t.Status == TransactionStatus.Succeeded)
+                .SumAsync(t => (long?)t.AmountCents, ct);
+
+            var rolesTask = _context.UserRoles
+                .AsNoTracking()
+                .Where(ur => ur.UserId == userId)
+                .Join(_context.Roles,
+                    ur => ur.RoleId,
+                    r => r.Id,
+                    (ur, r) => r.Name!)
+                .ToListAsync(ct);
+
+            // Wait for all parallel tasks
+            await Task.WhenAll(eventsCreatedTask, eventsAttendedTask, communitiesJoinedTask, totalSpentTask, rolesTask);
 
             var userStats = new AdminUserStatsDto
             {
@@ -269,11 +346,11 @@ public sealed class AdminDashboardService : IAdminDashboardService
                 WalletBalanceCents = userQuery.WalletBalance,
                 CurrentMembership = userQuery.MembershipPlan,
                 MembershipExpiresAt = userQuery.MembershipExpiresAt,
-                EventsCreated = userQuery.EventsCreated,
-                EventsAttended = userQuery.EventsAttended,
-                CommunitiesJoined = userQuery.CommunitiesJoined,
-                TotalSpentCents = userQuery.TotalSpent,
-                Roles = roles.ToList(),
+                EventsCreated = await eventsCreatedTask,
+                EventsAttended = await eventsAttendedTask,
+                CommunitiesJoined = await communitiesJoinedTask,
+                TotalSpentCents = await totalSpentTask ?? 0,
+                Roles = await rolesTask,
                 CreatedAtUtc = userQuery.User.CreatedAtUtc,
                 UpdatedAtUtc = userQuery.User.UpdatedAtUtc,
                 IsDeleted = userQuery.User.IsDeleted
@@ -335,37 +412,38 @@ public sealed class AdminDashboardService : IAdminDashboardService
                         new Error(Error.Codes.Validation, "Invalid period. Use 'week', 'month', 'year', or 'custom'"));
             }
 
-            // Get transactions in period
-            var transactions = await _context.Transactions
-                .Where(t => t.CreatedAtUtc >= periodStart && t.CreatedAtUtc < periodEnd)
-                .ToListAsync(ct);
+            // Get all stats in SQL queries instead of loading into memory
+            var transactionQuery = _context.Transactions
+                .AsNoTracking()
+                .Where(t => t.CreatedAtUtc >= periodStart && t.CreatedAtUtc < periodEnd);
 
-            var successfulTransactions = transactions.Where(t => t.Status == TransactionStatus.Succeeded).ToList();
+            var successfulTransactionQuery = transactionQuery
+                .Where(t => t.Status == TransactionStatus.Succeeded);
 
-            // Calculate revenue by purpose
-            var paymentIntents = await _context.PaymentIntents
+            // Calculate revenue by purpose (all in SQL)
+            var paymentIntentQuery = _context.PaymentIntents
+                .AsNoTracking()
                 .Where(pi => pi.CreatedAtUtc >= periodStart && pi.CreatedAtUtc < periodEnd
-                    && pi.Status == PaymentIntentStatus.Succeeded)
-                .ToListAsync(ct);
+                    && pi.Status == PaymentIntentStatus.Succeeded);
 
-            var membershipRevenue = paymentIntents
+            var membershipRevenue = await paymentIntentQuery
                 .Where(pi => pi.Purpose == PaymentPurpose.Membership)
-                .Sum(pi => pi.AmountCents);
+                .SumAsync(pi => (long?)pi.AmountCents, ct) ?? 0;
 
-            var eventRevenue = paymentIntents
+            var eventRevenue = await paymentIntentQuery
                 .Where(pi => pi.Purpose == PaymentPurpose.EventTicket)
-                .Sum(pi => pi.AmountCents);
+                .SumAsync(pi => (long?)pi.AmountCents, ct) ?? 0;
 
-            var topUpRevenue = paymentIntents
+            var topUpRevenue = await paymentIntentQuery
                 .Where(pi => pi.Purpose == PaymentPurpose.WalletTopUp || pi.Purpose == PaymentPurpose.TopUp)
-                .Sum(pi => pi.AmountCents);
+                .SumAsync(pi => (long?)pi.AmountCents, ct) ?? 0;
 
-            var totalRevenue = successfulTransactions
+            var totalRevenue = await successfulTransactionQuery
                 .Where(t => t.Direction == TransactionDirection.In)
-                .Sum(t => t.AmountCents);
+                .SumAsync(t => (long?)t.AmountCents, ct) ?? 0;
 
-            // Daily breakdown
-            var dailyBreakdown = successfulTransactions
+            // Daily breakdown - all in SQL
+            var dailyBreakdown = await successfulTransactionQuery
                 .Where(t => t.Direction == TransactionDirection.In)
                 .GroupBy(t => t.CreatedAtUtc.Date)
                 .Select(g => new DailyRevenueDto
@@ -375,7 +453,11 @@ public sealed class AdminDashboardService : IAdminDashboardService
                     TransactionCount = g.Count()
                 })
                 .OrderBy(d => d.Date)
-                .ToList();
+                .ToListAsync(ct);
+
+            var totalTransactionCount = await transactionQuery.CountAsync(ct);
+            var successfulCount = await successfulTransactionQuery.CountAsync(ct);
+            var failedCount = await transactionQuery.CountAsync(t => t.Status == TransactionStatus.Failed, ct);
 
             var stats = new AdminRevenueStatsDto
             {
@@ -386,9 +468,9 @@ public sealed class AdminDashboardService : IAdminDashboardService
                 MembershipRevenueCents = membershipRevenue,
                 EventRevenueCents = eventRevenue,
                 TopUpRevenueCents = topUpRevenue,
-                TransactionCount = transactions.Count,
-                SuccessfulCount = successfulTransactions.Count,
-                FailedCount = transactions.Count(t => t.Status == TransactionStatus.Failed),
+                TransactionCount = totalTransactionCount,
+                SuccessfulCount = successfulCount,
+                FailedCount = failedCount,
                 DailyBreakdown = dailyBreakdown
             };
 
@@ -410,10 +492,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
         try
         {
             var query = _context.Transactions
-                .Include(t => t.Wallet)
-                    .ThenInclude(w => w.User)
-                .Include(t => t.Event)
-                .AsQueryable();
+                .AsNoTracking();
 
             // Apply filters
             if (filter.UserId.HasValue)
@@ -492,34 +571,32 @@ public sealed class AdminDashboardService : IAdminDashboardService
             // Total count
             var totalCount = await query.CountAsync(ct);
 
-            // Get paged data - First get entities without JSON serialization
-            var transactionEntities = await query
+            // Project directly in query to only load needed fields
+            var transactions = await query
                 .OrderByDescending(t => t.CreatedAtUtc)
                 .Skip((pageRequest.Page - 1) * pageRequest.Size)
                 .Take(pageRequest.Size)
+                .Select(t => new AdminTransactionDto
+                {
+                    Id = t.Id,
+                    WalletId = t.WalletId ?? Guid.Empty,
+                    UserId = t.Wallet != null ? t.Wallet.UserId : (Guid?)null,
+                    UserName = t.Wallet != null ? t.Wallet.User!.UserName : null,
+                    UserEmail = t.Wallet != null ? t.Wallet.User!.Email : null,
+                    AmountCents = t.AmountCents,
+                    Currency = t.Currency,
+                    Direction = t.Direction,
+                    Method = t.Method,
+                    Status = t.Status,
+                    EventId = t.EventId,
+                    EventTitle = t.Event != null ? t.Event.Title : null,
+                    Provider = t.Provider,
+                    ProviderRef = t.ProviderRef,
+                    Metadata = t.Metadata != null ? t.Metadata.RootElement.ToString() : null,
+                    CreatedAtUtc = t.CreatedAtUtc,
+                    CompletedAtUtc = t.UpdatedAtUtc
+                })
                 .ToListAsync(ct);
-
-            // Then project to DTOs with Metadata handling
-            var transactions = transactionEntities.Select(t => new AdminTransactionDto
-            {
-                Id = t.Id,
-                WalletId = t.WalletId ?? Guid.Empty,
-                UserId = t.Wallet != null ? t.Wallet.UserId : (Guid?)null,
-                UserName = t.Wallet != null ? t.Wallet.User!.UserName : null,
-                UserEmail = t.Wallet != null ? t.Wallet.User!.Email : null,
-                AmountCents = t.AmountCents,
-                Currency = t.Currency,
-                Direction = t.Direction,
-                Method = t.Method,
-                Status = t.Status,
-                EventId = t.EventId,
-                EventTitle = t.Event != null ? t.Event.Title : null,
-                Provider = t.Provider,
-                ProviderRef = t.ProviderRef,
-                Metadata = t.Metadata?.RootElement.ToString(),
-                CreatedAtUtc = t.CreatedAtUtc,
-                CompletedAtUtc = t.UpdatedAtUtc
-            }).ToList();
 
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
             var hasPrevious = pageRequest.Page > 1;
@@ -555,10 +632,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
         try
         {
             var query = _context.PaymentIntents
-                .Include(pi => pi.User)
-                .Include(pi => pi.Event)
-                .Include(pi => pi.MembershipPlan)
-                .AsQueryable();
+                .AsNoTracking();
 
             // Apply filters
             if (filter.UserId.HasValue)
@@ -637,35 +711,33 @@ public sealed class AdminDashboardService : IAdminDashboardService
             // Total count
             var totalCount = await query.CountAsync(ct);
 
-            // Get paged data
-            var paymentIntents = await query
+            // Project directly in query to only load needed fields
+            var paymentIntentDtos = await query
                 .OrderByDescending(pi => pi.CreatedAtUtc)
                 .Skip((pageRequest.Page - 1) * pageRequest.Size)
                 .Take(pageRequest.Size)
+                .Select(pi => new AdminPaymentIntentDto
+                {
+                    Id = pi.Id,
+                    UserId = pi.UserId,
+                    UserName = pi.User != null ? pi.User.UserName : null,
+                    UserEmail = pi.User != null ? pi.User.Email : null,
+                    AmountCents = pi.AmountCents,
+                    Purpose = pi.Purpose,
+                    PurposeDisplay = pi.Purpose.ToString(),
+                    EventId = pi.EventId,
+                    EventTitle = pi.Event != null ? pi.Event.Title : null,
+                    EventRegistrationId = pi.EventRegistrationId,
+                    MembershipPlanId = pi.MembershipPlanId,
+                    MembershipPlanName = pi.MembershipPlan != null ? pi.MembershipPlan.Name : null,
+                    Status = pi.Status,
+                    StatusDisplay = pi.Status.ToString(),
+                    OrderCode = pi.OrderCode,
+                    ExpiresAt = pi.ExpiresAt,
+                    CreatedAtUtc = pi.CreatedAtUtc,
+                    UpdatedAtUtc = pi.UpdatedAtUtc
+                })
                 .ToListAsync(ct);
-
-            // Project to DTOs
-            var paymentIntentDtos = paymentIntents.Select(pi => new AdminPaymentIntentDto
-            {
-                Id = pi.Id,
-                UserId = pi.UserId,
-                UserName = pi.User?.UserName,
-                UserEmail = pi.User?.Email,
-                AmountCents = pi.AmountCents,
-                Purpose = pi.Purpose,
-                PurposeDisplay = pi.Purpose.ToString(),
-                EventId = pi.EventId,
-                EventTitle = pi.Event?.Title,
-                EventRegistrationId = pi.EventRegistrationId,
-                MembershipPlanId = pi.MembershipPlanId,
-                MembershipPlanName = pi.MembershipPlan?.Name,
-                Status = pi.Status,
-                StatusDisplay = pi.Status.ToString(),
-                OrderCode = pi.OrderCode,
-                ExpiresAt = pi.ExpiresAt,
-                CreatedAtUtc = pi.CreatedAtUtc,
-                UpdatedAtUtc = pi.UpdatedAtUtc
-            }).ToList();
 
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
             var hasPrevious = pageRequest.Page > 1;
@@ -701,6 +773,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
             var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
             var plans = await _context.MembershipPlans
+                .AsNoTracking()
                 .Select(p => new
                 {
                     Plan = p,
@@ -746,7 +819,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
     {
         try
         {
-            var query = _context.Communities.AsQueryable();
+            var query = _context.Communities.AsNoTracking();
 
             if (!includeDeleted)
             {
@@ -812,8 +885,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
         try
         {
             var query = _context.Clubs
-                .Include(c => c.Community)
-                .AsQueryable();
+                .AsNoTracking();
 
             if (!includeDeleted)
             {
@@ -875,7 +947,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
     {
         try
         {
-            var query = _context.Games.AsQueryable();
+            var query = _context.Games.AsNoTracking();
 
             if (!includeDeleted)
             {
@@ -929,25 +1001,22 @@ public sealed class AdminDashboardService : IAdminDashboardService
     {
         try
         {
-            var roles = await _context.Roles
-                .OrderBy(r => r.Name)
+            // Use GroupJoin to batch load user counts for all roles in one query
+            var stats = await _context.Roles
+                .AsNoTracking()
+                .GroupJoin(
+                    _context.UserRoles,
+                    role => role.Id,
+                    userRole => userRole.RoleId,
+                    (role, userRoles) => new AdminRoleStatsDto
+                    {
+                        RoleId = role.Id,
+                        RoleName = role.Name!,
+                        UsersCount = userRoles.Count(),
+                        CreatedAtUtc = DateTime.UtcNow // Roles don't have CreatedAt in identity
+                    })
+                .OrderBy(r => r.RoleName)
                 .ToListAsync(ct);
-
-            var stats = new List<AdminRoleStatsDto>();
-
-            foreach (var role in roles)
-            {
-                var usersCount = await _context.UserRoles
-                    .CountAsync(ur => ur.RoleId == role.Id, ct);
-
-                stats.Add(new AdminRoleStatsDto
-                {
-                    RoleId = role.Id,
-                    RoleName = role.Name!,
-                    UsersCount = usersCount,
-                    CreatedAtUtc = DateTime.UtcNow // Roles don't have CreatedAt in identity
-                });
-            }
 
             return Result<List<AdminRoleStatsDto>>.Success(stats);
         }

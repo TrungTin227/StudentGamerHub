@@ -1,19 +1,28 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Services.Common.Caching;
 
 namespace Services.Implementations;
 
 /// <summary>
-/// Read-side service for community discovery flows.
+/// Read-side service for community discovery flows with Redis caching.
 /// </summary>
 public sealed class CommunityReadService : ICommunityReadService
 {
+    private static readonly TimeSpan CommunityCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan MembersCacheTtl = TimeSpan.FromMinutes(5);
+
     private readonly ICommunityQueryRepository _communityQuery;
+    private readonly ICacheService _cache;
     private readonly ILogger<CommunityReadService> _logger;
 
-    public CommunityReadService(ICommunityQueryRepository communityQuery, ILogger<CommunityReadService>? logger = null)
+    public CommunityReadService(
+        ICommunityQueryRepository communityQuery,
+        ICacheService cache,
+        ILogger<CommunityReadService>? logger = null)
     {
         _communityQuery = communityQuery ?? throw new ArgumentNullException(nameof(communityQuery));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? NullLogger<CommunityReadService>.Instance;
     }
 
@@ -38,6 +47,16 @@ public sealed class CommunityReadService : ICommunityReadService
         var sanitizedPaging = new OffsetPaging(paging.OffsetSafe, sanitizedLimit, paging.Sort, paging.Desc);
         var request = sanitizedPaging.ToPageRequest();
 
+        // ? Cache key includes currentUserId for personalized results (IsMember, IsOwner)
+        var cacheKey = $"community:discover:user:{currentUserId}:q:{query}:order:{normalizedOrder}:offset:{paging.OffsetSafe}:limit:{sanitizedLimit}";
+
+        var cached = await _cache.GetAsync<PagedResult<CommunityDetailDto>>(cacheKey, ct).ConfigureAwait(false);
+        if (cached is not null)
+        {
+            _logger.LogDebug("Community discover cache HIT for query: {Query}", query);
+            return Result<PagedResult<CommunityDetailDto>>.Success(cached);
+        }
+
         var page = await _communityQuery
             .SearchDiscoverAsync(currentUserId, query, normalizedOrder == "trending", request, ct)
             .ConfigureAwait(false);
@@ -57,6 +76,10 @@ public sealed class CommunityReadService : ICommunityReadService
             page.Sort,
             page.Desc);
 
+        // Cache for 10 minutes
+        await _cache.SetAsync(cacheKey, dtoPage, CommunityCacheTtl, ct).ConfigureAwait(false);
+        _logger.LogDebug("Community discover cached for query: {Query}", query);
+
         return Result<PagedResult<CommunityDetailDto>>.Success(dtoPage);
     }
 
@@ -74,6 +97,16 @@ public sealed class CommunityReadService : ICommunityReadService
         }
 
         ArgumentNullException.ThrowIfNull(filter);
+
+        // ? Cache key for member list
+        var cacheKey = $"community:members:{communityId}:role:{filter.Role}:q:{filter.Query}:sort:{filter.Sort}:offset:{paging.OffsetSafe}:limit:{paging.LimitSafe}:user:{currentUserId}";
+
+        var cached = await _cache.GetAsync<OffsetPage<CommunityMemberDto>>(cacheKey, ct).ConfigureAwait(false);
+        if (cached is not null)
+        {
+            _logger.LogDebug("Community members cache HIT for community: {CommunityId}", communityId);
+            return Result<OffsetPage<CommunityMemberDto>>.Success(cached);
+        }
 
         var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
         if (community is null)
@@ -114,6 +147,10 @@ public sealed class CommunityReadService : ICommunityReadService
 
         var dtoPage = page.Map(model => model.ToCommunityMemberDto(currentUserId));
 
+        // Cache for 5 minutes
+        await _cache.SetAsync(cacheKey, dtoPage, MembersCacheTtl, ct).ConfigureAwait(false);
+        _logger.LogDebug("Community members cached for community: {CommunityId}", communityId);
+
         return Result<OffsetPage<CommunityMemberDto>>.Success(dtoPage);
     }
 
@@ -127,6 +164,17 @@ public sealed class CommunityReadService : ICommunityReadService
         {
             return Result<IReadOnlyList<CommunityMemberDto>>.Failure(
                 new Error(Error.Codes.Validation, "CommunityId is required."));
+        }
+
+        // ? Cache key for recent members
+        var sanitizedLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
+        var cacheKey = $"community:recentmembers:{communityId}:limit:{sanitizedLimit}:user:{currentUserId}";
+
+        var cached = await _cache.GetAsync<IReadOnlyList<CommunityMemberDto>>(cacheKey, ct).ConfigureAwait(false);
+        if (cached is not null)
+        {
+            _logger.LogDebug("Recent members cache HIT for community: {CommunityId}", communityId);
+            return Result<IReadOnlyList<CommunityMemberDto>>.Success(cached);
         }
 
         var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
@@ -159,8 +207,6 @@ public sealed class CommunityReadService : ICommunityReadService
                 communityId);
         }
 
-        var sanitizedLimit = Math.Clamp(limit <= 0 ? 20 : limit, 1, 50);
-
         var members = await _communityQuery
             .ListRecentMembersAsync(communityId, sanitizedLimit, ct)
             .ConfigureAwait(false);
@@ -168,6 +214,10 @@ public sealed class CommunityReadService : ICommunityReadService
         var dtos = members
             .Select(model => model.ToCommunityMemberDto(currentUserId))
             .ToList();
+
+        // Cache for 5 minutes
+        await _cache.SetAsync<IReadOnlyList<CommunityMemberDto>>(cacheKey, dtos, MembersCacheTtl, ct).ConfigureAwait(false);
+        _logger.LogDebug("Recent members cached for community: {CommunityId}", communityId);
 
         return Result<IReadOnlyList<CommunityMemberDto>>.Success(dtos);
     }

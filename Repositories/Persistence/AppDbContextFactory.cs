@@ -21,25 +21,33 @@ namespace Repositories.Persistence
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
                 .AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: false);
 
-            // Nếu đang gọi từ lớp Infrastructure/Repositories, thử load appsettings của WebApi (startup project)
+            // Load appsettings từ WebAPI project
             TryAddAppSettingsFromSibling(cfgBuilder, currentDir, "WebAPI", env);
-            //TryAddAppSettingsFromSibling(cfgBuilder, currentDir, "Presentation", env); // tuỳ naming
 
-            // UserSecrets (nếu project WebApi có khai báo)
-            TryAddUserSecrets(cfgBuilder, "WebAPI");      // tên assembly startup của bạn
-            cfgBuilder.AddUserSecrets<AppDbContextFactory>(optional: true);
+            // UserSecrets: Tìm WebAPI project để lấy UserSecretsId
+            var webApiProjectPath = FindWebApiProjectPath(currentDir);
+            if (webApiProjectPath != null)
+            {
+                var userSecretsId = ExtractUserSecretsId(webApiProjectPath);
+                if (!string.IsNullOrEmpty(userSecretsId))
+                {
+                    // Use extension method with userSecretsId directly
+                    cfgBuilder.AddUserSecrets(userSecretsId);
+                }
+            }
 
             // Env vars
             cfgBuilder.AddEnvironmentVariables();
 
             var config = cfgBuilder.Build();
 
-            // Lấy connection string (đổi tên key theo appsettings của bạn)
+            // Lấy connection string
             var connectionString =
                   config.GetConnectionString("Default")
                ?? config.GetConnectionString("AppDb")
                ?? throw new InvalidOperationException(
-                   "Không tìm thấy connection string ('Default' / 'AppDb').");
+                   "Không tìm thấy connection string ('Default' / 'AppDb'). " +
+                   "Vui lòng kiểm tra User Secrets hoặc appsettings.json");
 
             var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
 
@@ -47,11 +55,9 @@ namespace Repositories.Persistence
                .UseNpgsql(connectionString, npgsql =>
                {
                    npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
-                   // retry transient lỗi mạng/PG server
                    npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
                });
 
-            // Khi chạy design-time trong Dev, bật log chi tiết nếu muốn
             if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
             {
                 optionsBuilder.EnableDetailedErrors();
@@ -68,24 +74,57 @@ namespace Repositories.Persistence
             string env)
         {
             var siblingPath = Path.Combine(currentDir, "..", siblingProjectFolderName);
-            var appsettings = Path.Combine(siblingPath, "appsettings.Development.json");
-            if (!File.Exists(appsettings)) return;
+            if (!Directory.Exists(siblingPath)) return;
 
-            var provider = new PhysicalFileProvider(siblingPath);
-            builder.AddJsonFile(provider, "appsettings.json", optional: true, reloadOnChange: false);
-            builder.AddJsonFile(provider, $"appsettings.{env}.json", optional: true, reloadOnChange: false);
+            var appsettingsPath = Path.Combine(siblingPath, "appsettings.json");
+            var appsettingsDevPath = Path.Combine(siblingPath, $"appsettings.{env}.json");
+
+            if (File.Exists(appsettingsPath))
+            {
+                var provider = new PhysicalFileProvider(siblingPath);
+                builder.AddJsonFile(provider, "appsettings.json", optional: true, reloadOnChange: false);
+                
+                if (File.Exists(appsettingsDevPath))
+                {
+                    builder.AddJsonFile(provider, $"appsettings.{env}.json", optional: true, reloadOnChange: false);
+                }
+            }
         }
 
-        private static void TryAddUserSecrets(IConfigurationBuilder builder, string startupAssemblyName)
+        private static string? FindWebApiProjectPath(string currentDir)
+        {
+            // Tìm file WebAPI.csproj trong thư mục WebAPI
+            var webApiPath = Path.Combine(currentDir, "..", "WebAPI");
+            var csprojPath = Path.Combine(webApiPath, "WebAPI.csproj");
+            
+            if (File.Exists(csprojPath))
+            {
+                return csprojPath;
+            }
+
+            return null;
+        }
+
+        private static string? ExtractUserSecretsId(string csprojPath)
         {
             try
             {
-                var asm = Assembly.Load(new AssemblyName(startupAssemblyName));
-                builder.AddUserSecrets(asm, optional: true);
+                var content = File.ReadAllText(csprojPath);
+                var startTag = "<UserSecretsId>";
+                var endTag = "</UserSecretsId>";
+                
+                var startIndex = content.IndexOf(startTag);
+                if (startIndex < 0) return null;
+                
+                startIndex += startTag.Length;
+                var endIndex = content.IndexOf(endTag, startIndex);
+                if (endIndex < 0) return null;
+                
+                return content.Substring(startIndex, endIndex - startIndex).Trim();
             }
             catch
             {
-                // Ignored: nếu không load được WebApi, vẫn tiếp tục với nguồn khác
+                return null;
             }
         }
     }

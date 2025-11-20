@@ -114,32 +114,90 @@ public sealed class ClubQueryRepository : IClubQueryRepository
 
     public async Task<ClubDetailModel?> GetDetailsAsync(Guid clubId, Guid? currentUserId, CancellationToken ct = default)
     {
-        var query = _context.Clubs
+        // ? FIX N+1: Load club data without subqueries first
+        var club = await _context.Clubs
             .AsNoTracking()
             .Where(c => c.Id == clubId)
-            .Select(c => new ClubDetailModel(
+            .Select(c => new
+            {
                 c.Id,
                 c.CommunityId,
                 c.Name,
                 c.Description,
                 c.IsPublic,
                 c.MembersCount,
-                c.Rooms.Count(),
-                _context.ClubMembers
-                    .Where(cm => cm.ClubId == c.Id && cm.Role == MemberRole.Owner)
-                    .Select(cm => cm.UserId)
-                    .FirstOrDefault(),
-                currentUserId.HasValue && _context.ClubMembers
-                    .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value),
-                currentUserId.HasValue && _context.CommunityMembers
-                    .Any(cm => cm.CommunityId == c.CommunityId && cm.UserId == currentUserId.Value),
-                currentUserId.HasValue && _context.ClubMembers
-                    .Any(cm => cm.ClubId == c.Id && cm.UserId == currentUserId.Value && cm.Role == MemberRole.Owner),
                 c.CreatedAtUtc,
                 c.UpdatedAtUtc
-            ));
+            })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
-        return await query.FirstOrDefaultAsync(ct);
+        if (club is null)
+        {
+            return null;
+        }
+
+        // ? FIX N+1: Batch load related data
+        var tasksToAwait = new List<Task>();
+
+        // Load owner
+        var ownerTask = _context.ClubMembers
+            .AsNoTracking()
+            .Where(cm => cm.ClubId == clubId && cm.Role == MemberRole.Owner)
+            .Select(cm => cm.UserId)
+            .FirstOrDefaultAsync(ct);
+        tasksToAwait.Add(ownerTask);
+
+        // Load rooms count
+        var roomsCountTask = _context.Rooms
+            .AsNoTracking()
+            .Where(r => r.ClubId == clubId)
+            .CountAsync(ct);
+        tasksToAwait.Add(roomsCountTask);
+
+        // Load memberships for current user if authenticated
+        Task<ClubMember?> clubMemberTask = Task.FromResult<ClubMember?>(null);
+        Task<CommunityMember?> communityMemberTask = Task.FromResult<CommunityMember?>(null);
+
+        if (currentUserId.HasValue)
+        {
+            clubMemberTask = _context.ClubMembers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cm => cm.ClubId == clubId && cm.UserId == currentUserId.Value, ct);
+            tasksToAwait.Add(clubMemberTask);
+
+            communityMemberTask = _context.CommunityMembers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cm => cm.CommunityId == club.CommunityId && cm.UserId == currentUserId.Value, ct);
+            tasksToAwait.Add(communityMemberTask);
+        }
+
+        // Wait for all tasks
+        await Task.WhenAll(tasksToAwait).ConfigureAwait(false);
+
+        var ownerId = await ownerTask.ConfigureAwait(false);
+        var roomsCount = await roomsCountTask.ConfigureAwait(false);
+        var clubMember = currentUserId.HasValue ? await clubMemberTask.ConfigureAwait(false) : null;
+        var communityMember = currentUserId.HasValue ? await communityMemberTask.ConfigureAwait(false) : null;
+
+        var isClubMember = clubMember is not null;
+        var isCommunityMember = communityMember is not null;
+        var isOwner = clubMember?.Role == MemberRole.Owner;
+
+        return new ClubDetailModel(
+            club.Id,
+            club.CommunityId,
+            club.Name,
+            club.Description,
+            club.IsPublic,
+            club.MembersCount,
+            roomsCount,
+            ownerId,
+            isClubMember,
+            isCommunityMember,
+            isOwner,
+            club.CreatedAtUtc,
+            club.UpdatedAtUtc);
     }
 
     public async Task<OffsetPage<ClubMemberModel>> ListMembersAsync(

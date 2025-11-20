@@ -16,6 +16,16 @@ public sealed class RegistrationQueryRepository : IRegistrationQueryRepository
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.EventId == eventId && r.UserId == userId, ct);
 
+    public async Task<Dictionary<Guid, EventRegistration>> GetByEventIdsAndUserAsync(IEnumerable<Guid> eventIds, Guid userId, CancellationToken ct = default)
+    {
+        var registrations = await _context.EventRegistrations
+            .AsNoTracking()
+            .Where(r => eventIds.Contains(r.EventId) && r.UserId == userId)
+            .ToListAsync(ct);
+
+        return registrations.ToDictionary(r => r.EventId);
+    }
+
     public Task<EventRegistration?> GetByIdAsync(Guid id, CancellationToken ct = default)
         => _context.EventRegistrations
             .AsNoTracking()

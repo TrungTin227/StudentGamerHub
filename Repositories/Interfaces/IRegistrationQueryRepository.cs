@@ -3,6 +3,7 @@ namespace Repositories.Interfaces;
 public interface IRegistrationQueryRepository
 {
     Task<EventRegistration?> GetByEventAndUserAsync(Guid eventId, Guid userId, CancellationToken ct = default);
+    Task<Dictionary<Guid, EventRegistration>> GetByEventIdsAndUserAsync(IEnumerable<Guid> eventIds, Guid userId, CancellationToken ct = default);
     Task<EventRegistration?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task<(IReadOnlyList<EventRegistration> Items, int Total)> ListByEventAsync(
         Guid eventId,

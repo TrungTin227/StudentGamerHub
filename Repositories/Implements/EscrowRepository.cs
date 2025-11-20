@@ -16,6 +16,16 @@ public sealed class EscrowRepository : IEscrowRepository
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.EventId == eventId, ct);
 
+    public async Task<Dictionary<Guid, Escrow>> GetByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
+    {
+        var escrows = await _context.Escrows
+            .AsNoTracking()
+            .Where(e => eventIds.Contains(e.EventId))
+            .ToListAsync(ct);
+
+        return escrows.ToDictionary(e => e.EventId);
+    }
+
     public async Task UpsertAsync(Escrow escrow, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(escrow);

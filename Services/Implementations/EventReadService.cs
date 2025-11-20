@@ -1,26 +1,48 @@
+using Services.Common.Caching;
+using Microsoft.Extensions.Logging;
+
 namespace Services.Implementations;
 
 /// <summary>
-/// Read-only queries for events.
+/// Read-only queries for events with Redis caching.
 /// </summary>
 public sealed class EventReadService : IEventReadService
 {
+    private static readonly TimeSpan EventCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan EventListCacheTtl = TimeSpan.FromMinutes(3);
+
     private readonly IEventQueryRepository _eventQueryRepository;
     private readonly IEscrowRepository _escrowRepository;
     private readonly IRegistrationQueryRepository _registrationQueryRepository;
+    private readonly ICacheService _cache;
+    private readonly ILogger<EventReadService> _logger;
 
     public EventReadService(
         IEventQueryRepository eventQueryRepository,
         IEscrowRepository escrowRepository,
-        IRegistrationQueryRepository registrationQueryRepository)
+        IRegistrationQueryRepository registrationQueryRepository,
+        ICacheService cache,
+        ILogger<EventReadService> logger)
     {
         _eventQueryRepository = eventQueryRepository ?? throw new ArgumentNullException(nameof(eventQueryRepository));
         _escrowRepository = escrowRepository ?? throw new ArgumentNullException(nameof(escrowRepository));
         _registrationQueryRepository = registrationQueryRepository ?? throw new ArgumentNullException(nameof(registrationQueryRepository));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task<Result<EventDetailDto>> GetByIdAsync(Guid currentUserId, Guid eventId, CancellationToken ct = default)
     {
+        // ? Cache key includes currentUserId for personalized data
+        var cacheKey = $"event:detail:{eventId}:user:{currentUserId}";
+
+        var cached = await _cache.GetAsync<EventDetailDto>(cacheKey, ct).ConfigureAwait(false);
+        if (cached is not null)
+        {
+            _logger.LogDebug("Event detail cache HIT for eventId: {EventId}", eventId);
+            return Result<EventDetailDto>.Success(cached);
+        }
+
         var ev = await _eventQueryRepository.GetByIdAsync(eventId, ct).ConfigureAwait(false);
         if (ev is null)
         {
@@ -35,6 +57,11 @@ public sealed class EventReadService : IEventReadService
         }
 
         var dto = ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg);
+
+        // Cache for 5 minutes
+        await _cache.SetAsync(cacheKey, dto, EventCacheTtl, ct).ConfigureAwait(false);
+        _logger.LogDebug("Event detail cached for eventId: {EventId}", eventId);
+
         return Result<EventDetailDto>.Success(dto);
     }
 
@@ -51,21 +78,38 @@ public sealed class EventReadService : IEventReadService
         int pageSize,
         CancellationToken ct = default)
     {
-        var (items, total) = await _eventQueryRepository.SearchAsync(
-            statuses,
-            communityId,
-            organizerId,
-            from,
-            to,
-            search,
-            page,
-            pageSize,
-            sortAscByStartsAt,
-            ct).ConfigureAwait(false);
+        // ? Cache key for search results (without currentUserId - personalization happens in mapping)
+        var statusesStr = statuses is not null ? string.Join(",", statuses.Select(s => s.ToString()).OrderBy(s => s)) : "all";
+        var cacheKey = $"event:search:{statusesStr}:comm:{communityId}:org:{organizerId}:from:{from:yyyyMMdd}:to:{to:yyyyMMdd}:q:{search}:asc:{sortAscByStartsAt}:p:{page}:s:{pageSize}";
 
-        var dtos = await MapEventsAsync(items, currentUserId, ct).ConfigureAwait(false);
-        var response = BuildPagedResponse(dtos, total, page, pageSize, sortAscByStartsAt);
-        return Result<PagedResponse<EventDetailDto>>.Success(response);
+        try
+        {
+            var (items, total) = await _eventQueryRepository.SearchAsync(
+                statuses,
+                communityId,
+                organizerId,
+                from,
+                to,
+                search,
+                page,
+                pageSize,
+                sortAscByStartsAt,
+                ct).ConfigureAwait(false);
+
+            var dtos = await MapEventsAsync(items, currentUserId, ct).ConfigureAwait(false);
+            var response = BuildPagedResponse(dtos, total, page, pageSize, sortAscByStartsAt);
+
+            // Cache for 3 minutes (shorter than detail cache due to dynamic nature)
+            await _cache.SetAsync(cacheKey, response, EventListCacheTtl, ct).ConfigureAwait(false);
+
+            return Result<PagedResponse<EventDetailDto>>.Success(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to search events");
+            return Result<PagedResponse<EventDetailDto>>.Failure(
+                new Error(Error.Codes.Unexpected, "Failed to search events"));
+        }
     }
 
     public async Task<Result<PagedResponse<EventDetailDto>>> SearchMyOrganizedAsync(
@@ -80,6 +124,7 @@ public sealed class EventReadService : IEventReadService
         int pageSize,
         CancellationToken ct = default)
     {
+        // Note: Not caching this since it's personalized and changes frequently
         var (items, total) = await _eventQueryRepository.SearchAsync(
             statuses,
             communityId,
@@ -99,16 +144,36 @@ public sealed class EventReadService : IEventReadService
 
     private async Task<IReadOnlyList<EventDetailDto>> MapEventsAsync(IReadOnlyList<Event> events, Guid currentUserId, CancellationToken ct)
     {
+        if (events.Count == 0)
+        {
+            return Array.Empty<EventDetailDto>();
+        }
+
+        var eventIds = events.Select(e => e.Id).ToList();
+
+        // Batch load escrows for all events
+        var escrowsTask = _escrowRepository.GetByEventIdsAsync(eventIds, ct);
+
+        // Batch load registrations for current user
+        Dictionary<Guid, EventRegistration> registrations;
+        if (currentUserId != Guid.Empty)
+        {
+            var registrationsTask = _registrationQueryRepository.GetByEventIdsAndUserAsync(eventIds, currentUserId, ct);
+            await Task.WhenAll(escrowsTask, registrationsTask).ConfigureAwait(false);
+            registrations = await registrationsTask.ConfigureAwait(false);
+        }
+        else
+        {
+            registrations = new Dictionary<Guid, EventRegistration>();
+        }
+
+        var escrows = await escrowsTask.ConfigureAwait(false);
+
         var results = new List<EventDetailDto>(events.Count);
         foreach (var ev in events)
         {
-            var escrow = await _escrowRepository.GetByEventIdAsync(ev.Id, ct).ConfigureAwait(false);
-            EventRegistration? myReg = null;
-            if (currentUserId != Guid.Empty)
-            {
-                myReg = await _registrationQueryRepository.GetByEventAndUserAsync(ev.Id, currentUserId, ct).ConfigureAwait(false);
-            }
-
+            escrows.TryGetValue(ev.Id, out var escrow);
+            registrations.TryGetValue(ev.Id, out var myReg);
             results.Add(ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg));
         }
 

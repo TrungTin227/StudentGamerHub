@@ -267,43 +267,114 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
 
         var total = await baseQuery.CountAsync(ct).ConfigureAwait(false);
 
-        var projection = baseQuery.Select(c => new CommunityDetailModel(
-            c.Id,
-            c.Name,
-            c.Description,
-            c.School,
-            c.IsPublic,
-            c.MembersCount,
-            c.Clubs.Count(),
-            _context.CommunityMembers
-                .Where(cm => cm.CommunityId == c.Id && cm.Role == MemberRole.Owner)
-                .Select(cm => cm.UserId)
-                .FirstOrDefault(),
-            currentUserId.HasValue && _context.CommunityMembers
-                .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value),
-            currentUserId.HasValue && _context.CommunityMembers
-                .Any(cm => cm.CommunityId == c.Id && cm.UserId == currentUserId.Value && cm.Role == MemberRole.Owner),
-            c.CreatedAtUtc,
-            c.UpdatedAtUtc
-        ));
-
-        IOrderedQueryable<CommunityDetailModel> ordered = orderByTrending
-            ? projection
+        // ? FIX N+1: Load communities without subqueries first
+        var ordered = orderByTrending
+            ? baseQuery
                 .OrderByDescending(c => c.MembersCount)
-                .ThenByDescending(c => c.ClubsCount)
+                .ThenByDescending(c => c.Clubs.Count())
                 .ThenByDescending(c => c.CreatedAtUtc)
                 .ThenBy(c => c.Id)
-            : projection
+            : baseQuery
                 .OrderByDescending(c => c.CreatedAtUtc)
                 .ThenByDescending(c => c.MembersCount)
                 .ThenBy(c => c.Id);
 
         var skip = (page - 1) * size;
-        var items = await ordered
+        var communities = await ordered
             .Skip(skip)
             .Take(size)
+            .Select(c => new
+            {
+                c.Id,
+                c.Name,
+                c.Description,
+                c.School,
+                c.IsPublic,
+                c.MembersCount,
+                c.CreatedAtUtc,
+                c.UpdatedAtUtc
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        if (communities.Count == 0)
+        {
+            var emptyResult = new PagedResult<CommunityDetailModel>(
+                Array.Empty<CommunityDetailModel>(),
+                page,
+                size,
+                total,
+                0,
+                false,
+                false,
+                orderByTrending ? nameof(Community.MembersCount) : nameof(Community.CreatedAtUtc),
+                true);
+            return emptyResult;
+        }
+
+        var communityIds = communities.Select(c => c.Id).ToList();
+
+        // ? FIX N+1: Batch load owners
+        var owners = await _context.CommunityMembers
+            .AsNoTracking()
+            .Where(cm => communityIds.Contains(cm.CommunityId) && cm.Role == MemberRole.Owner)
+            .GroupBy(cm => cm.CommunityId)
+            .Select(g => new { CommunityId = g.Key, OwnerId = g.Select(cm => cm.UserId).FirstOrDefault() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var ownerDict = owners.ToDictionary(o => o.CommunityId, o => o.OwnerId);
+
+        // ? FIX N+1: Batch load clubs count
+        var clubsCounts = await _context.Clubs
+            .AsNoTracking()
+            .Where(club => communityIds.Contains(club.CommunityId))
+            .GroupBy(club => club.CommunityId)
+            .Select(g => new { CommunityId = g.Key, Count = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var clubsCountDict = clubsCounts.ToDictionary(cc => cc.CommunityId, cc => cc.Count);
+
+        // ? FIX N+1: Batch load memberships for current user (if authenticated)
+        Dictionary<Guid, (bool IsMember, bool IsOwner)> membershipDict = new();
+        if (currentUserId.HasValue)
+        {
+            var memberships = await _context.CommunityMembers
+                .AsNoTracking()
+                .Where(cm => communityIds.Contains(cm.CommunityId) && cm.UserId == currentUserId.Value)
+                .Select(cm => new { cm.CommunityId, cm.Role })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            membershipDict = memberships.ToDictionary(
+                m => m.CommunityId,
+                m => (IsMember: true, IsOwner: m.Role == MemberRole.Owner));
+        }
+
+        // ? Map to DTOs without additional queries
+        var items = communities
+            .Select(c =>
+            {
+                ownerDict.TryGetValue(c.Id, out var ownerId);
+                clubsCountDict.TryGetValue(c.Id, out var clubsCount);
+                membershipDict.TryGetValue(c.Id, out var membership);
+
+                return new CommunityDetailModel(
+                    c.Id,
+                    c.Name,
+                    c.Description,
+                    c.School,
+                    c.IsPublic,
+                    c.MembersCount,
+                    clubsCount,
+                    ownerId,
+                    membership.IsMember,
+                    membership.IsOwner,
+                    c.CreatedAtUtc,
+                    c.UpdatedAtUtc);
+            })
+            .ToList();
 
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
         var hasPrev = page > 1 && total > 0;

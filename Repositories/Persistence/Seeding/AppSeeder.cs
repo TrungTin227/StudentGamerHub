@@ -137,6 +137,22 @@ public sealed class AppSeeder : IAppSeeder
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
+        // ✅ CHECK: Skip comprehensive seeding if database already has real user data
+        var hasRealUserData = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(u => !u.IsDeleted && 
+                          u.Email != null &&
+                          !u.Email.EndsWith("@studentgamerhub.local") && // platform user
+                          u.Email != _seedOptions.Admin.Email, // admin user
+                      ct)
+            .ConfigureAwait(false);
+
+        if (hasRealUserData)
+        {
+            _logger.LogInformation("✅ Database already contains real user data. Skipping comprehensive seeding to prevent data pollution.");
+            return;
+        }
+
         var result = await _uow.ExecuteTransactionAsync(async innerCt =>
         {
             _logger.LogInformation("Starting comprehensive database seeding...");
@@ -699,7 +715,7 @@ public sealed class AppSeeder : IAppSeeder
     private async Task SeedEventsAsync(CancellationToken ct)
     {
         var communities = await _db.Communities
-            .AsNoTracking()
+            // .AsNoTracking()
             .Take(5)
             .Select(c => new { c.Id, c.Name, c.School })
             .ToListAsync(ct);

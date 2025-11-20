@@ -1,6 +1,7 @@
 ﻿using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Services.Common.Caching;
 using Services.Configuration;
 using Services.Presence;
 using System.Reflection;
@@ -18,6 +19,9 @@ namespace Services.Common.DependencyInjection
             // 1) Core
             services.AddMemoryCache();
             services.AddHttpClient();
+
+            // ✅ Add caching services (Redis-based distributed cache)
+            services.AddCachingServices();
 
             // 2) Options
             if (configuration is not null)

@@ -438,6 +438,9 @@ namespace Repositories.Persistence
                 e.HasIndex(x => new { x.EventId, x.UserId }).IsUnique();
                 e.HasIndex(x => new { x.EventId, x.Status });
 
+                // Performance index for user stats queries
+                e.HasIndex(x => new { x.UserId, x.Status });
+
                 var registrationStatusConstraint = isNpgsql
                     ? "\"Status\" IN ('Pending','Confirmed','Canceled','Refunded')"
                     : "[Status] IN ('Pending','Confirmed','Canceled','Refunded')";
@@ -508,6 +511,11 @@ namespace Repositories.Persistence
                 e.HasIndex(x => x.WalletId);
                 e.HasIndex(x => new { x.WalletId, x.CreatedAtUtc });
 
+                // Performance indexes for admin dashboard queries
+                e.HasIndex(x => x.Status);
+                e.HasIndex(x => x.Direction);
+                e.HasIndex(x => new { x.Status, x.Direction, x.CreatedAtUtc });
+
                 e.HasCheckConstraint(
                     "chk_transaction_amount_positive",
                     isNpgsql
@@ -555,11 +563,15 @@ namespace Repositories.Persistence
                 e.HasIndex(x => x.EventRegistrationId).IsUnique();
                 e.HasIndex(x => x.EventId);
                 e.HasIndex(x => x.MembershipPlanId);
-     
+
                 // Index for OrderCode with filter for non-null values
                 e.HasIndex(x => x.OrderCode)
                  .IsUnique()
                  .HasFilter("\"OrderCode\" IS NOT NULL");
+
+                // Performance indexes for revenue and admin dashboard queries
+                e.HasIndex(x => new { x.Status, x.CreatedAtUtc });
+                e.HasIndex(x => new { x.Status, x.Purpose });
 
                 e.HasCheckConstraint(
                     "chk_payment_intent_amount_positive",
