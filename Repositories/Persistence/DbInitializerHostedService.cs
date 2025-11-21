@@ -31,36 +31,38 @@ public sealed class DbInitializerHostedService : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Guard theo môi trường & config
-        if (!_opt.Run)
-        {
-            _logger.LogInformation("Seeding is disabled by configuration (Seed:Run = false). Skipped.");
-            return;
-        }
-
-        if (_env.IsProduction() && !_opt.AllowInProduction)
-        {
-            _logger.LogWarning("Seeding is disabled in Production (Seed:AllowInProduction = false). Skipped.");
-            return;
-        }
-
         _logger.LogInformation("Database initialization started. (Env: {Env})", _env.EnvironmentName);
 
         using var scope = _sp.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
-        var walletRepository = scope.ServiceProvider.GetRequiredService<IWalletRepository>();
-        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-        var seeder = scope.ServiceProvider.GetService<IAppSeeder>();
 
         try
         {
+            // Migrations luôn chạy nếu ApplyMigrations = true (độc lập với Seed:Run)
             if (_opt.ApplyMigrations)
             {
                 await db.Database.MigrateAsync(cancellationToken);
                 _logger.LogInformation("Migrations applied successfully.");
             }
+
+            // Guard seeding theo môi trường & config
+            if (!_opt.Run)
+            {
+                _logger.LogInformation("Seeding is disabled by configuration (Seed:Run = false). Skipped.");
+                return;
+            }
+
+            if (_env.IsProduction() && !_opt.AllowInProduction)
+            {
+                _logger.LogWarning("Seeding is disabled in Production (Seed:AllowInProduction = false). Skipped.");
+                return;
+            }
+
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+            var walletRepository = scope.ServiceProvider.GetRequiredService<IWalletRepository>();
+            var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            var seeder = scope.ServiceProvider.GetService<IAppSeeder>();
 
             await EnsureRolesAsync(roleManager, _opt.Roles, cancellationToken);
             await EnsureAdminAsync(userManager, roleManager, _opt.Admin, cancellationToken);
