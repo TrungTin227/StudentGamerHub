@@ -77,4 +77,40 @@ public sealed class ClubReadService : IClubReadService
 
         return Result<IReadOnlyList<ClubMemberDto>>.Success(dtos);
     }
+
+    public async Task<Result<PagedResult<ClubBriefDto>>> GetAllClubsAsync(
+        string? name,
+        bool? isPublic,
+        int? membersFrom,
+        int? membersTo,
+        PageRequest paging,
+        CancellationToken ct = default)
+    {
+        var sanitizedPaging = new PageRequest(
+            Page: paging.PageSafe,
+            Size: Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort: string.IsNullOrWhiteSpace(paging.Sort) ? "CreatedAtUtc" : paging.Sort!,
+            Desc: paging.Desc);
+
+        var pagedClubs = await _clubQuery
+            .GetAllClubsAsync(name, isPublic, membersFrom, membersTo, sanitizedPaging, ct)
+            .ConfigureAwait(false);
+
+        var items = pagedClubs.Items
+            .Select(club => club.ToClubBriefDto())
+            .ToList();
+
+        var result = new PagedResult<ClubBriefDto>(
+            items,
+            pagedClubs.Page,
+            pagedClubs.Size,
+            pagedClubs.TotalCount,
+            pagedClubs.TotalPages,
+            pagedClubs.HasPrevious,
+            pagedClubs.HasNext,
+            pagedClubs.Sort,
+            pagedClubs.Desc);
+
+        return Result<PagedResult<ClubBriefDto>>.Success(result);
+    }
 }

@@ -128,4 +128,40 @@ public sealed class RoomReadService : IRoomReadService
 
         return Result<IReadOnlyList<RoomMemberDto>>.Success(dtos);
     }
+
+    public async Task<Result<PagedResult<RoomDetailDto>>> GetAllRoomsAsync(
+        string? name,
+        RoomJoinPolicy? joinPolicy,
+        int? capacity,
+        PageRequest paging,
+        Guid? currentUserId,
+        CancellationToken ct = default)
+    {
+        var sanitizedPaging = new PageRequest(
+            Page: paging.PageSafe,
+            Size: Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort: string.IsNullOrWhiteSpace(paging.Sort) ? "CreatedAtUtc" : paging.Sort!,
+            Desc: paging.Desc);
+
+        var pagedRooms = await _roomQuery
+            .GetAllRoomsAsync(name, joinPolicy, capacity, sanitizedPaging, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        var items = pagedRooms.Items
+            .Select(model => model.ToRoomDetailDto())
+            .ToList();
+
+        var result = new PagedResult<RoomDetailDto>(
+            items,
+            pagedRooms.Page,
+            pagedRooms.Size,
+            pagedRooms.TotalCount,
+            pagedRooms.TotalPages,
+            pagedRooms.HasPrevious,
+            pagedRooms.HasNext,
+            pagedRooms.Sort,
+            pagedRooms.Desc);
+
+        return Result<PagedResult<RoomDetailDto>>.Success(result);
+    }
 }

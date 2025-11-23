@@ -316,4 +316,83 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         return await query.ToListAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<PagedResult<Club>> GetAllClubsAsync(
+        string? name,
+        bool? isPublic,
+        int? membersFrom,
+        int? membersTo,
+        PageRequest paging,
+        CancellationToken ct = default)
+    {
+        // Base query: all clubs (no community filter)
+        IQueryable<Club> query = _context.Clubs
+            .AsNoTracking();
+
+        // Apply filters
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var normalizedName = name.Trim().ToUpperInvariant();
+            query = query.Where(c => c.Name.ToUpper().Contains(normalizedName));
+        }
+
+        if (isPublic.HasValue)
+        {
+            query = query.Where(c => c.IsPublic == isPublic.Value);
+        }
+
+        if (membersFrom.HasValue)
+        {
+            query = query.Where(c => c.MembersCount >= membersFrom.Value);
+        }
+
+        if (membersTo.HasValue)
+        {
+            query = query.Where(c => c.MembersCount <= membersTo.Value);
+        }
+
+        // Sanitize paging
+        var sanitized = new PageRequest(
+            Page: paging.PageSafe,
+            Size: Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort: string.IsNullOrWhiteSpace(paging.Sort) ? nameof(Club.CreatedAtUtc) : paging.Sort!,
+            Desc: paging.Desc);
+
+        return await query.ToPagedResultAsync(sanitized, ct).ConfigureAwait(false);
+    }
+
+    public async Task<int> CountClubsAsync(
+        Guid communityId,
+        string? name,
+        bool? isPublic,
+        int? membersFrom,
+        int? membersTo,
+        CancellationToken ct = default)
+    {
+        IQueryable<Club> query = _context.Clubs
+            .AsNoTracking()
+            .Where(c => c.CommunityId == communityId);
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var normalizedName = name.Trim().ToUpperInvariant();
+            query = query.Where(c => c.Name.ToUpper().Contains(normalizedName));
+        }
+
+        if (isPublic.HasValue)
+        {
+            query = query.Where(c => c.IsPublic == isPublic.Value);
+        }
+
+        if (membersFrom.HasValue)
+        {
+            query = query.Where(c => c.MembersCount >= membersFrom.Value);
+        }
+
+        if (membersTo.HasValue)
+        {
+            query = query.Where(c => c.MembersCount <= membersTo.Value);
+        }
+
+        return await query.CountAsync(ct).ConfigureAwait(false);
+    }
 }

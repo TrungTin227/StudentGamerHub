@@ -106,6 +106,48 @@ public sealed class RoomsController : ControllerBase
     }
 
     /// <summary>
+    /// Get all rooms across all clubs with filtering and pagination.
+    /// Public endpoint - accessible to any authenticated user.
+    /// </summary>
+    /// <param name="name">Filter by room name (partial match, case-insensitive)</param>
+    /// <param name="joinPolicy">Filter by join policy (null = all)</param>
+    /// <param name="capacity">Filter by exact capacity (null = all)</param>
+    /// <param name="page">Page number (default: 1)</param>
+    /// <param name="size">Page size (default: 20, max: 50)</param>
+    /// <param name="sort">Sort field (default: CreatedAtUtc)</param>
+    /// <param name="desc">Sort descending (default: true)</param>
+    /// <param name="ct">Cancellation token</param>
+    [HttpGet]
+    [AllowAnonymous]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(PagedResult<RoomDetailDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> GetAllRooms(
+        [FromQuery] string? name = null,
+        [FromQuery] RoomJoinPolicy? joinPolicy = null,
+        [FromQuery] int? capacity = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = true,
+        CancellationToken ct = default)
+    {
+        var currentUserId = User.GetUserId();
+        
+        var paging = new PageRequest(
+            Page: page,
+            Size: size,
+            Sort: sort ?? "CreatedAtUtc",
+            Desc: desc);
+
+        var result = await _roomReadService
+            .GetAllRoomsAsync(name, joinPolicy, capacity, paging, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
+
+    /// <summary>
     /// Create a room inside a club and join the caller as the owner member.
     /// </summary>
     [HttpPost]

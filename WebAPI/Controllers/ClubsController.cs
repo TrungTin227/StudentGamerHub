@@ -267,4 +267,46 @@ public sealed class ClubsController : ControllerBase
 
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
     }
+
+    /// <summary>
+    /// Get all clubs across all communities with filtering and pagination.
+    /// Public endpoint - accessible to any authenticated user.
+    /// </summary>
+    /// <param name="name">Filter by club name (partial match, case-insensitive)</param>
+    /// <param name="isPublic">Filter by public/private status (null = all)</param>
+    /// <param name="membersFrom">Minimum members count (inclusive)</param>
+    /// <param name="membersTo">Maximum members count (inclusive)</param>
+    /// <param name="page">Page number (default: 1)</param>
+    /// <param name="size">Page size (default: 20, max: 50)</param>
+    /// <param name="sort">Sort field (default: CreatedAtUtc)</param>
+    /// <param name="desc">Sort descending (default: true)</param>
+    /// <param name="ct">Cancellation token</param>
+    [HttpGet]
+    [AllowAnonymous]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(PagedResult<ClubBriefDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> GetAllClubs(
+        [FromQuery] string? name = null,
+        [FromQuery] bool? isPublic = null,
+        [FromQuery] int? membersFrom = null,
+        [FromQuery] int? membersTo = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = true,
+        CancellationToken ct = default)
+    {
+        var paging = new PageRequest(
+            Page: page,
+            Size: size,
+            Sort: sort ?? "CreatedAtUtc",
+            Desc: desc);
+
+        var result = await _clubReadService
+            .GetAllClubsAsync(name, isPublic, membersFrom, membersTo, paging, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);
+    }
 }

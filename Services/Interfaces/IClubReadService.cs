@@ -17,4 +17,16 @@ public interface IClubReadService
         int limit,
         Guid? currentUserId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Get all clubs across all communities with filtering and pagination.
+    /// Public endpoint accessible to any role.
+    /// </summary>
+    Task<Result<PagedResult<ClubBriefDto>>> GetAllClubsAsync(
+        string? name,
+        bool? isPublic,
+        int? membersFrom,
+        int? membersTo,
+        PageRequest paging,
+        CancellationToken ct = default);
 }

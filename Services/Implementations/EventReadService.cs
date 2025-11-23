@@ -151,23 +151,19 @@ public sealed class EventReadService : IEventReadService
 
         var eventIds = events.Select(e => e.Id).ToList();
 
-        // Batch load escrows for all events
-        var escrowsTask = _escrowRepository.GetByEventIdsAsync(eventIds, ct);
+        // ?? FIXED: Execute queries sequentially to avoid DbContext concurrency issues
+        // DbContext is not thread-safe, so we can't run parallel queries on the same instance
+        var escrows = await _escrowRepository.GetByEventIdsAsync(eventIds, ct).ConfigureAwait(false);
 
-        // Batch load registrations for current user
         Dictionary<Guid, EventRegistration> registrations;
         if (currentUserId != Guid.Empty)
         {
-            var registrationsTask = _registrationQueryRepository.GetByEventIdsAndUserAsync(eventIds, currentUserId, ct);
-            await Task.WhenAll(escrowsTask, registrationsTask).ConfigureAwait(false);
-            registrations = await registrationsTask.ConfigureAwait(false);
+            registrations = await _registrationQueryRepository.GetByEventIdsAndUserAsync(eventIds, currentUserId, ct).ConfigureAwait(false);
         }
         else
         {
             registrations = new Dictionary<Guid, EventRegistration>();
         }
-
-        var escrows = await escrowsTask.ConfigureAwait(false);
 
         var results = new List<EventDetailDto>(events.Count);
         foreach (var ev in events)

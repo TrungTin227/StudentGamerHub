@@ -32,4 +32,16 @@ public interface IRoomReadService
         int limit,
         Guid? currentUserId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Get all rooms across all clubs with filtering and pagination.
+    /// Public endpoint accessible to any role.
+    /// </summary>
+    Task<Result<PagedResult<RoomDetailDto>>> GetAllRoomsAsync(
+        string? name,
+        RoomJoinPolicy? joinPolicy,
+        int? capacity,
+        PageRequest paging,
+        Guid? currentUserId,
+        CancellationToken ct = default);
 }

@@ -226,12 +226,81 @@ public sealed class RoomService : IRoomService
             return Result<RoomDetailDto>.Failure(new Error(Error.Codes.NotFound, "Room not found."));
         }
 
+        // ✅ NEW: Tự động join Club nếu chưa join
         var clubMembership = await _clubQuery.GetMemberAsync(room.ClubId, currentUserId, ct).ConfigureAwait(false);
+        var autoJoinedClub = false;
+
         if (clubMembership is null)
         {
-            return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Conflict, "ClubMembershipRequired"));
+            // Kiểm tra xem có cần join Community không (nếu community là private)
+            var community = room.Club?.Community;
+            if (community is null)
+            {
+                // Load community nếu chưa có
+                community = await _communityQuery.GetByIdAsync(room.Club!.CommunityId, ct).ConfigureAwait(false);
+                if (community is null)
+                {
+                    return Result<RoomDetailDto>.Failure(new Error(Error.Codes.NotFound, "Community not found."));
+                }
+            }
+
+            // Nếu community là private, kiểm tra xem user đã join community chưa
+            if (!community.IsPublic)
+            {
+                var communityMembership = await _communityQuery
+                    .GetMemberAsync(community.Id, currentUserId, ct)
+                    .ConfigureAwait(false);
+
+                if (communityMembership is null)
+                {
+                    return Result<RoomDetailDto>.Failure(
+                        new Error(Error.Codes.Forbidden, "You must join the community before joining this club. Community membership is required for private communities."));
+                }
+            }
+
+            // ✅ Tự động join vào Club
+            _logger.LogInformation(
+                "User {UserId} is auto-joining club {ClubId} to access room {RoomId}.",
+                currentUserId,
+                room.ClubId,
+                roomId);
+
+            var now = DateTime.UtcNow;
+            var newClubMember = new ClubMember
+            {
+                ClubId = room.ClubId,
+                UserId = currentUserId,
+                Role = MemberRole.Member,
+                JoinedAt = now
+            };
+
+            try
+            {
+                await _clubCommand.AddMemberAsync(newClubMember, ct).ConfigureAwait(false);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await _roomCommand.IncrementClubMembersAsync(room.ClubId, 1, ct).ConfigureAwait(false);
+                autoJoinedClub = true;
+
+                _logger.LogInformation(
+                    "User {UserId} successfully auto-joined club {ClubId}.",
+                    currentUserId,
+                    room.ClubId);
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+            {
+                // Concurrent insert - user đã join, reload membership
+                _clubCommand.Detach(newClubMember);
+                clubMembership = await _clubQuery.GetMemberAsync(room.ClubId, currentUserId, ct).ConfigureAwait(false);
+                
+                if (clubMembership is null)
+                {
+                    return Result<RoomDetailDto>.Failure(
+                        new Error(Error.Codes.Unexpected, "Failed to verify club membership after concurrent join."));
+                }
+            }
         }
 
+        // Tiếp tục logic join room như cũ
         var existingMember = await _roomQuery.GetMemberAsync(roomId, currentUserId, ct).ConfigureAwait(false);
         if (existingMember is not null && existingMember.Status == RoomMemberStatus.Approved)
         {
@@ -239,6 +308,15 @@ public sealed class RoomService : IRoomService
             if (existingDetail is null)
             {
                 return Result<RoomDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load room details."));
+            }
+
+            if (autoJoinedClub)
+            {
+                _logger.LogInformation(
+                    "User {UserId} was already a member of room {RoomId} (auto-joined club {ClubId}).",
+                    currentUserId,
+                    roomId,
+                    room.ClubId);
             }
 
             return Result<RoomDetailDto>.Success(existingDetail.ToRoomDetailDto());
@@ -339,6 +417,15 @@ public sealed class RoomService : IRoomService
                     if (desiredStatus == RoomMemberStatus.Approved)
                     {
                         await _roomCommand.IncrementRoomMembersAsync(roomId, 1, innerCt).ConfigureAwait(false);
+                    }
+
+                    if (autoJoinedClub)
+                    {
+                        _logger.LogInformation(
+                            "User {UserId} successfully joined room {RoomId} (auto-joined club {ClubId} first).",
+                            currentUserId,
+                            roomId,
+                            room.ClubId);
                     }
 
                     return Result<RoomMemberStatus>.Success(desiredStatus);
