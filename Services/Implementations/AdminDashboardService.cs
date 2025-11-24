@@ -552,32 +552,54 @@ public sealed class AdminDashboardService : IAdminDashboardService
             // Total count
             var totalCount = await query.CountAsync(ct);
 
-            // Project directly in query to only load needed fields
-            var transactions = await query
+            // Load transactions with navigation properties, excluding Metadata from projection
+            var transactionsData = await query
                 .OrderByDescending(t => t.CreatedAtUtc)
                 .Skip((pageRequest.Page - 1) * pageRequest.Size)
                 .Take(pageRequest.Size)
-                .Select(t => new AdminTransactionDto
+                .Select(t => new
                 {
-                    Id = t.Id,
-                    WalletId = t.WalletId ?? Guid.Empty,
+                    t.Id,
+                    t.WalletId,
                     UserId = t.Wallet != null ? t.Wallet.UserId : (Guid?)null,
                     UserName = t.Wallet != null ? t.Wallet.User!.UserName : null,
                     UserEmail = t.Wallet != null ? t.Wallet.User!.Email : null,
-                    AmountCents = t.AmountCents,
-                    Currency = t.Currency,
-                    Direction = t.Direction,
-                    Method = t.Method,
-                    Status = t.Status,
-                    EventId = t.EventId,
+                    t.AmountCents,
+                    t.Currency,
+                    t.Direction,
+                    t.Method,
+                    t.Status,
+                    t.EventId,
                     EventTitle = t.Event != null ? t.Event.Title : null,
-                    Provider = t.Provider,
-                    ProviderRef = t.ProviderRef,
-                    Metadata = t.Metadata != null ? t.Metadata.RootElement.ToString() : null,
-                    CreatedAtUtc = t.CreatedAtUtc,
-                    CompletedAtUtc = t.UpdatedAtUtc
+                    t.Provider,
+                    t.ProviderRef,
+                    t.Metadata,
+                    t.CreatedAtUtc,
+                    t.UpdatedAtUtc
                 })
                 .ToListAsync(ct);
+
+            // Convert Metadata to string in memory
+            var transactions = transactionsData.Select(t => new AdminTransactionDto
+            {
+                Id = t.Id,
+                WalletId = t.WalletId ?? Guid.Empty,
+                UserId = t.UserId,
+                UserName = t.UserName,
+                UserEmail = t.UserEmail,
+                AmountCents = t.AmountCents,
+                Currency = t.Currency,
+                Direction = t.Direction,
+                Method = t.Method,
+                Status = t.Status,
+                EventId = t.EventId,
+                EventTitle = t.EventTitle,
+                Provider = t.Provider,
+                ProviderRef = t.ProviderRef,
+                Metadata = t.Metadata != null ? t.Metadata.RootElement.GetRawText() : null,
+                CreatedAtUtc = t.CreatedAtUtc,
+                CompletedAtUtc = t.UpdatedAtUtc
+            }).ToList();
 
             var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
             var hasPrevious = pageRequest.Page > 1;
