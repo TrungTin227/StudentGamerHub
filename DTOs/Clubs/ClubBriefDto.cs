@@ -9,5 +9,6 @@ public sealed record ClubBriefDto(
     string Name,
     bool IsPublic,
     int MembersCount,
-    string? Description
+    string? Description,
+    bool IsJoined
 );

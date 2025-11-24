@@ -64,7 +64,7 @@ public sealed class CommunityService : ICommunityService
             Description = NormalizeOrNull(req.Description),
             School = NormalizeOrNull(req.School),
             IsPublic = req.IsPublic,
-            MembersCount = 1,
+            MembersCount = 0,
             CreatedAtUtc = now,
             CreatedBy = currentUserId
         };
@@ -81,6 +81,8 @@ public sealed class CommunityService : ICommunityService
         {
             await _communityCommand.CreateAsync(community, innerCt).ConfigureAwait(false);
             await _communityCommand.AddMemberAsync(ownerMember, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await _roomCommand.IncrementCommunityMembersAsync(community.Id, 1, innerCt).ConfigureAwait(false);
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result.Success();
         }, ct: ct).ConfigureAwait(false);
@@ -202,6 +204,7 @@ public sealed class CommunityService : ICommunityService
             }
 
             await _roomCommand.IncrementCommunityMembersAsync(communityId, 1, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result<bool>.Success(true);
         }, ct: ct).ConfigureAwait(false);
 

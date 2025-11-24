@@ -17,9 +17,10 @@ public interface IClubService
     /// <param name="membersFrom">Minimum members count (inclusive, must be >= 0)</param>
     /// <param name="membersTo">Maximum members count (inclusive, must be >= 0)</param>
     /// <param name="cursor">Cursor pagination request</param>
+    /// <param name="currentUserId">Current user ID for membership info</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Result with paginated list of club briefs</returns>
-    Task<Result<CursorPageResult<ClubBriefDto>>> SearchAsync(
+    /// <returns>Result with paginated list of club briefs and joined club IDs</returns>
+    Task<Result<ClubSearchResultDto>> SearchAsync(
         Guid communityId,
         string? name,
         bool? isPublic,

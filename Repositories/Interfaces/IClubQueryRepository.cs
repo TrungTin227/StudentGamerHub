@@ -29,15 +29,17 @@ public interface IClubQueryRepository
     /// <param name="membersFrom">Minimum members count (inclusive)</param>
     /// <param name="membersTo">Maximum members count (inclusive)</param>
     /// <param name="cursor">Cursor pagination request</param>
+    /// <param name="currentUserId">Current user ID for joining status</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of clubs and next cursor</returns>
-    Task<(IReadOnlyList<Club> Items, string? NextCursor)> SearchClubsAsync(
+    Task<(IReadOnlyList<ClubBriefModel> Items, string? NextCursor)> SearchClubsAsync(
         Guid communityId,
         string? name,
         bool? isPublic,
         int? membersFrom,
         int? membersTo,
         CursorRequest cursor,
+        Guid? currentUserId,
         CancellationToken ct = default);
 
     /// <summary>

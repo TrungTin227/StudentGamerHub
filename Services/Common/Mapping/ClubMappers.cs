@@ -8,7 +8,7 @@ namespace Services.Common.Mapping;
 public static class ClubMappers
 {
     /// <summary>
-    /// Maps Club entity to ClubBriefDto.
+    /// Maps Club entity to ClubBriefDto (without IsJoined).
     /// </summary>
     public static ClubBriefDto ToClubBriefDto(this Club club)
     {
@@ -20,7 +20,26 @@ public static class ClubMappers
             Name: club.Name,
             IsPublic: club.IsPublic,
             MembersCount: club.MembersCount,
-            Description: club.Description
+            Description: club.Description,
+            IsJoined: false
+        );
+    }
+
+    /// <summary>
+    /// Maps ClubBriefModel to ClubBriefDto.
+    /// </summary>
+    public static ClubBriefDto ToClubBriefDto(this ClubBriefModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        return new ClubBriefDto(
+            Id: model.Id,
+            CommunityId: model.CommunityId,
+            Name: model.Name,
+            IsPublic: model.IsPublic,
+            MembersCount: model.MembersCount,
+            Description: model.Description,
+            IsJoined: model.IsJoined
         );
     }
 

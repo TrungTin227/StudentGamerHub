@@ -41,13 +41,14 @@ public sealed class ClubQueryRepository : IClubQueryRepository
     /// Search clubs within a community with filtering and cursor-based pagination.
     /// Stable sort order: MembersCount DESC, Id DESC
     /// </summary>
-    public async Task<(IReadOnlyList<Club> Items, string? NextCursor)> SearchClubsAsync(
+    public async Task<(IReadOnlyList<ClubBriefModel> Items, string? NextCursor)> SearchClubsAsync(
         Guid communityId,
         string? name,
         bool? isPublic,
         int? membersFrom,
         int? membersTo,
         CursorRequest cursor,
+        Guid? currentUserId,
         CancellationToken ct = default)
     {
         // Base query: filter by community ID
@@ -78,19 +79,43 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         }
 
         // Apply cursor-based pagination with stable sorting
-        // Sort by MembersCount DESC, then Id DESC for stability
-        // Use Id as the cursor key for simplicity (stable and unique)
         var orderedQuery = query
             .OrderByDescending(c => c.MembersCount)
             .ThenByDescending(c => c.Id);
 
         var result = await orderedQuery.ToCursorPageAsync(
             cursor,
-            c => c.Id, // Use Id as cursor key (stable, unique)
+            c => c.Id,
             ct
         );
 
-        return (result.Items, result.NextCursor);
+        // Get club IDs for membership lookup
+        var clubIds = result.Items.Select(c => c.Id).ToList();
+        
+        // Load memberships if user is authenticated
+        HashSet<Guid> joinedClubIds = new();
+        if (currentUserId.HasValue && clubIds.Count > 0)
+        {
+            joinedClubIds = await _context.ClubMembers
+                .AsNoTracking()
+                .Where(cm => cm.UserId == currentUserId.Value && clubIds.Contains(cm.ClubId))
+                .Select(cm => cm.ClubId)
+                .ToHashSetAsync(ct)
+                .ConfigureAwait(false);
+        }
+
+        // Map to ClubBriefModel with IsJoined
+        var models = result.Items.Select(c => new ClubBriefModel(
+            c.Id,
+            c.CommunityId,
+            c.Name,
+            c.Description,
+            c.IsPublic,
+            c.MembersCount,
+            joinedClubIds.Contains(c.Id)
+        )).ToList();
+
+        return (models, result.NextCursor);
     }
 
     public async Task<bool> AnyByCommunityAsync(Guid communityId, CancellationToken ct = default)

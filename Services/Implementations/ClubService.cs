@@ -38,7 +38,7 @@ public sealed class ClubService : IClubService
         _logger = logger ?? NullLogger<ClubService>.Instance;
     }
 
-    public async Task<Result<CursorPageResult<ClubBriefDto>>> SearchAsync(
+    public async Task<Result<ClubSearchResultDto>> SearchAsync(
         Guid communityId,
         string? name,
         bool? isPublic,
@@ -50,14 +50,14 @@ public sealed class ClubService : IClubService
     {
         if (communityId == Guid.Empty)
         {
-            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+            return Result<ClubSearchResultDto>.Failure(
                 new Error(Error.Codes.Validation, "CommunityId is required."));
         }
 
         var community = await _communityQuery.GetByIdAsync(communityId, ct).ConfigureAwait(false);
         if (community is null)
         {
-            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+            return Result<ClubSearchResultDto>.Failure(
                 new Error(Error.Codes.NotFound, "Community not found."));
         }
 
@@ -72,7 +72,7 @@ public sealed class ClubService : IClubService
 
         if (!community.IsPublic && !isCommunityMember)
         {
-            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+            return Result<ClubSearchResultDto>.Failure(
                 new Error(Error.Codes.Forbidden, "CommunityViewRestricted"));
         }
 
@@ -86,19 +86,19 @@ public sealed class ClubService : IClubService
 
         if (membersFrom.HasValue && membersFrom.Value < 0)
         {
-            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+            return Result<ClubSearchResultDto>.Failure(
                 new Error(Error.Codes.Validation, "membersFrom must be non-negative."));
         }
 
         if (membersTo.HasValue && membersTo.Value < 0)
         {
-            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+            return Result<ClubSearchResultDto>.Failure(
                 new Error(Error.Codes.Validation, "membersTo must be non-negative."));
         }
 
         if (membersFrom.HasValue && membersTo.HasValue && membersFrom.Value > membersTo.Value)
         {
-            return Result<CursorPageResult<ClubBriefDto>>.Failure(
+            return Result<ClubSearchResultDto>.Failure(
                 new Error(Error.Codes.Validation, "membersFrom cannot be greater than membersTo."));
         }
 
@@ -109,19 +109,24 @@ public sealed class ClubService : IClubService
             membersFrom,
             membersTo,
             cursor,
+            currentUserId,
             ct).ConfigureAwait(false);
 
         var dtos = items.Select(c => c.ToClubBriefDto()).ToList();
+        
+        // Get list of joined club IDs
+        var joinedClubIds = dtos.Where(c => c.IsJoined).Select(c => c.Id).ToList();
 
-        var page = new CursorPageResult<ClubBriefDto>(
+        var result = new ClubSearchResultDto(
             Items: dtos,
+            JoinedClubIds: joinedClubIds,
             NextCursor: nextCursor,
             PrevCursor: null,
             Size: cursor.SizeSafe,
             Sort: cursor.SortSafe,
             Desc: cursor.Desc);
 
-        return Result<CursorPageResult<ClubBriefDto>>.Success(page);
+        return Result<ClubSearchResultDto>.Success(result);
     }
 
     public async Task<Result<ClubDetailDto>> CreateClubAsync(ClubCreateRequestDto req, Guid currentUserId, CancellationToken ct = default)
@@ -180,7 +185,7 @@ public sealed class ClubService : IClubService
             Name = name,
             Description = NormalizeOrNull(req.Description),
             IsPublic = req.IsPublic,
-            MembersCount = 1,
+            MembersCount = 0,
             CreatedAtUtc = now,
             CreatedBy = currentUserId
         };
@@ -197,6 +202,8 @@ public sealed class ClubService : IClubService
         {
             await _clubCommand.CreateAsync(club, innerCt).ConfigureAwait(false);
             await _clubCommand.AddMemberAsync(ownerMember, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await _roomCommand.IncrementClubMembersAsync(club.Id, 1, innerCt).ConfigureAwait(false);
             await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result.Success();
         }, ct: ct).ConfigureAwait(false);
@@ -288,7 +295,6 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.NotFound, "Club not found."));
         }
 
-        // ✅ Load community để kiểm tra IsPublic
         var community = await _communityQuery.GetByIdAsync(club.CommunityId, ct).ConfigureAwait(false);
         if (community is null)
         {
@@ -299,7 +305,6 @@ public sealed class ClubService : IClubService
             .GetMemberAsync(club.CommunityId, currentUserId, ct)
             .ConfigureAwait(false) is not null;
 
-        // ❗Chỉ cấm nếu community private và user chưa join
         if (!community.IsPublic && !hadCommunityMembership)
         {
             return Result<ClubDetailDto>.Failure(
@@ -341,6 +346,7 @@ public sealed class ClubService : IClubService
             }
 
             await _roomCommand.IncrementClubMembersAsync(clubId, 1, innerCt).ConfigureAwait(false);
+            await _uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             return Result<bool>.Success(true);
         }, ct: ct).ConfigureAwait(false);
 

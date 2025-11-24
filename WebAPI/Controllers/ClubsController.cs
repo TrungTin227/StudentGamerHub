@@ -37,14 +37,14 @@ public sealed class ClubsController : ControllerBase
     /// <param name="cursor">Cursor token for pagination (null = first page)</param>
     /// <param name="size">Page size (default: 20, clamped between 1-200)</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Paginated list of club briefs</returns>
+    /// <returns>Paginated list of club briefs with joined club IDs</returns>
     /// <response code="200">Clubs retrieved successfully</response>
     /// <response code="400">Invalid request (validation error)</response>
     /// <response code="401">Not authenticated</response>
     /// <response code="429">Rate limit exceeded (120 per minute)</response>
     [HttpGet("~/api/communities/{communityId:guid}/clubs")]
     [EnableRateLimiting("ClubsRead")]
-    [ProducesResponseType(typeof(CursorPageResult<ClubBriefDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ClubSearchResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
