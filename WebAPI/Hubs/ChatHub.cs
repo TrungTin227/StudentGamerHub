@@ -196,6 +196,76 @@ public sealed class ChatHub : Hub
         }
     }
 
+    /// <summary>
+    /// Join a specific room.
+    /// </summary>
+    public async Task JoinRoom(Guid roomId)
+    {
+        if (roomId == Guid.Empty)
+        {
+            throw new HubException("Room id is required.");
+        }
+
+        var currentUserId = _currentUser.GetUserIdOrThrow();
+        var cancellation = Context.ConnectionAborted;
+
+        await _channelValidator
+            .EnsureRoomAccessAsync(roomId, currentUserId, cancellation)
+            .ConfigureAwait(false);
+
+        var channel = $"room:{roomId}";
+        await Groups.AddToGroupAsync(Context.ConnectionId, channel).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "User {UserId} joined room {RoomId} on connection {ConnectionId}.",
+            currentUserId,
+            roomId,
+            Context.ConnectionId);
+    }
+
+    /// <summary>
+    /// Leave a specific room.
+    /// </summary>
+    public async Task LeaveRoom(Guid roomId)
+    {
+        if (roomId == Guid.Empty)
+        {
+            throw new HubException("Room id is required.");
+        }
+
+        var currentUserId = _currentUser.GetUserIdOrThrow();
+        var channel = $"room:{roomId}";
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, channel).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "User {UserId} left room {RoomId} on connection {ConnectionId}.",
+            currentUserId,
+            roomId,
+            Context.ConnectionId);
+    }
+
+    /// <summary>
+    /// Leave a specific channel (room or DM).
+    /// </summary>
+    public async Task LeaveChannel(string channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel))
+        {
+            throw new HubException("Channel is required.");
+        }
+
+        var currentUserId = _currentUser.GetUserIdOrThrow();
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, channel).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "User {UserId} left channel {Channel} on connection {ConnectionId}.",
+            currentUserId,
+            channel,
+            Context.ConnectionId);
+    }
+
     // Helpers
 
     private async Task EnsureWithinRateLimitAsync(Guid userId, CancellationToken cancellationToken)
