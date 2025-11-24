@@ -256,11 +256,13 @@ namespace WebAPI.Controllers
                     pageNumber = parsedPage;
                 }
 
-                var pageRequest = new PageRequest(
-                    Page: pageNumber,
-                    Size: Math.Clamp(request.SizeSafe, 1, 20),
-                    Sort: request.Sort,
-                    Desc: request.Desc);
+                var pageRequest = new PageRequest
+                {
+                    Page = pageNumber,
+                    Size = Math.Clamp(request.SizeSafe, 1, 20),
+                    Sort = request.Sort,
+                    Desc = request.Desc
+                };
 
                     var result = await _svc
                         .GetSuggestedFriendsAsync(currentUserId.Value, pageRequest, ct)

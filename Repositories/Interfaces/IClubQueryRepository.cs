@@ -10,6 +10,16 @@ namespace Repositories.Interfaces;
 public interface IClubQueryRepository
 {
     /// <summary>
+    /// Check if a club with the given name already exists in the community.
+    /// </summary>
+    /// <param name="communityId">Community ID</param>
+    /// <param name="name">Club name to check (case-insensitive)</param>
+    /// <param name="excludeId">Optional club ID to exclude from check (for updates)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if a club with this name exists in the community</returns>
+    Task<bool> ExistsByNameInCommunityAsync(Guid communityId, string name, Guid? excludeId = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Search clubs within a community with filtering by name, visibility, and member count range.
     /// Uses cursor-based pagination with stable sorting by (MembersCount DESC, Id DESC).
     /// </summary>

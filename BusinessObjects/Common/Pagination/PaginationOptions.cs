@@ -7,12 +7,13 @@
         public const string DefaultSort = "Id"; // sẽ fallback nếu không truyền sort
     }
 
-    public sealed record PageRequest(
-        int Page = 1,
-        int Size = PaginationOptions.DefaultPageSize,
-        string? Sort = null,
-        bool Desc = false)
+    public sealed record PageRequest
     {
+        public int Page { get; init; } = 1;
+        public int Size { get; init; } = PaginationOptions.DefaultPageSize;
+        public string? Sort { get; init; } = null;
+        public bool Desc { get; init; } = false;
+
         public int PageSafe => Page < 1 ? 1 : Page;
         public int SizeSafe => Math.Clamp(Size, 1, PaginationOptions.MaxPageSize);
         public string SortSafe => string.IsNullOrWhiteSpace(Sort) ? PaginationOptions.DefaultSort : Sort!;
@@ -42,7 +43,7 @@
         }
 
         public PageRequest ToPageRequest()
-            => new(PageSafe, LimitSafe, SortSafe, Desc);
+            => new() { Page = PageSafe, Size = LimitSafe, Sort = SortSafe, Desc = Desc };
     }
 
     public sealed record PagedResult<T>(

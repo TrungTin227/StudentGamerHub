@@ -133,10 +133,9 @@ public sealed class CommunitiesController : ControllerBase
     }
 
     /// <summary>
-    /// Search communities with filtering and cursor-based pagination.
+    /// Search communities with filtering and offset pagination.
     /// Filters: school (case-insensitive partial match), game, visibility, member count range.
     /// Sorted by: MembersCount DESC, Id DESC (stable).
-    /// The cursor uses Id as the key for pagination, but the primary sort is by MembersCount.
     /// Rate limit: 120 requests per minute per user.
     /// </summary>
     /// <param name="school">Filter by school name (partial match, case-insensitive)</param>
@@ -144,7 +143,7 @@ public sealed class CommunitiesController : ControllerBase
     /// <param name="isPublic">Filter by public/private status (null = all)</param>
     /// <param name="membersFrom">Minimum members count (inclusive)</param>
     /// <param name="membersTo">Maximum members count (inclusive)</param>
-    /// <param name="cursor">Cursor token for pagination (null = first page)</param>
+    /// <param name="page">Page number (1-based, default: 1)</param>
     /// <param name="size">Page size (default: 20, clamped between 1-200)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Paginated list of community briefs</returns>
@@ -154,7 +153,7 @@ public sealed class CommunitiesController : ControllerBase
     /// <response code="429">Rate limit exceeded (120 per minute)</response>
     [HttpGet]
     [EnableRateLimiting("CommunitiesRead")]
-    [ProducesResponseType(typeof(CursorPageResult<CommunityBriefDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<CommunityBriefDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
@@ -164,20 +163,19 @@ public sealed class CommunitiesController : ControllerBase
         [FromQuery] bool? isPublic = null,
         [FromQuery] int? membersFrom = null,
         [FromQuery] int? membersTo = null,
-        [FromQuery] string? cursor = null,
+        [FromQuery] int page = 1,
         [FromQuery] int size = 20,
         CancellationToken ct = default)
     {
-        // Clamp size to valid range
         size = Math.Clamp(size, 1, 200);
 
-        var cursorRequest = new CursorRequest(
-            Cursor: cursor,
-            Direction: CursorDirection.Next,
-            Size: size,
-            Sort: "Id", // Stable sort key (for cursor pagination)
-            Desc: true  // DESC order
-        );
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = size,
+            Sort = "MembersCount",
+            Desc = true
+        };
 
         var result = await _communitySearch.SearchAsync(
             school,
@@ -185,7 +183,7 @@ public sealed class CommunitiesController : ControllerBase
             isPublic,
             membersFrom,
             membersTo,
-            cursorRequest,
+            pageRequest,
             ct);
 
         return this.ToActionResult(result, successStatus: StatusCodes.Status200OK);

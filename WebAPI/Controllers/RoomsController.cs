@@ -134,11 +134,13 @@ public sealed class RoomsController : ControllerBase
     {
         var currentUserId = User.GetUserId();
         
-        var paging = new PageRequest(
-            Page: page,
-            Size: size,
-            Sort: sort ?? "CreatedAtUtc",
-            Desc: desc);
+        var paging = new PageRequest
+        {
+            Page = page,
+            Size = size,
+            Sort = sort ?? "CreatedAtUtc",
+            Desc = desc
+        };
 
         var result = await _roomReadService
             .GetAllRoomsAsync(name, joinPolicy, capacity, paging, currentUserId, ct)

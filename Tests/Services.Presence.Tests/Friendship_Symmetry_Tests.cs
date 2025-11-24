@@ -19,7 +19,7 @@ namespace Services.Presence.Tests;
 
 /// <summary>
 /// Comprehensive integration tests to verify and validate the friendship symmetry bug:
-/// "M?t bên là b?n, bên kia ch?a" - one side shows as friends, the other doesn't.
+/// "M?t bï¿½n lï¿½ b?n, bï¿½n kia ch?a" - one side shows as friends, the other doesn't.
 /// 
 /// Test Flow:
 /// 1. User A sends friend request to User B
@@ -121,12 +121,12 @@ public sealed class Friendship_Symmetry_Tests
         var aSearchB = await ctx.Service.SearchUsersAsync(
             userA.Id, 
             userB.UserName, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
         
         var bSearchA = await ctx.Service.SearchUsersAsync(
             userB.Id, 
             userA.UserName, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
 
         aSearchB.IsSuccess.Should().BeTrue();
         bSearchA.IsSuccess.Should().BeTrue();
@@ -163,7 +163,7 @@ public sealed class Friendship_Symmetry_Tests
         var reverseResult = await ctx.Service.InviteAsync(userB.Id, userA.Id);
         
         reverseResult.IsSuccess.Should().BeFalse();
-        reverseResult.Error.Message.Should().Contain("??i ph??ng ?ã m?i b?n tr??c");
+        reverseResult.Error.Message.Should().Contain("??i ph??ng ?ï¿½ m?i b?n tr??c");
         LogStep("? User B correctly notified that A already sent request");
     }
 
@@ -197,7 +197,7 @@ public sealed class Friendship_Symmetry_Tests
         var user2Search = await ctx.Service.SearchUsersAsync(
             users[1].Id, 
             null, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
 
         user2Search.IsSuccess.Should().BeTrue();
         
@@ -220,7 +220,7 @@ public sealed class Friendship_Symmetry_Tests
         var aSearchB = await ctx.Service.SearchUsersAsync(
             userA.Id, 
             userB.UserName, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
         
         aSearchB.IsSuccess.Should().BeTrue();
         var aResult = aSearchB.Value.Items.FirstOrDefault(u => u.UserId == userB.Id);
@@ -235,7 +235,7 @@ public sealed class Friendship_Symmetry_Tests
         var bSearchA = await ctx.Service.SearchUsersAsync(
             userB.Id, 
             userA.UserName, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
         
         bSearchA.IsSuccess.Should().BeTrue();
         var bResult = bSearchA.Value.Items.FirstOrDefault(u => u.UserId == userA.Id);
@@ -255,7 +255,7 @@ public sealed class Friendship_Symmetry_Tests
         var aSearchB = await ctx.Service.SearchUsersAsync(
             userA.Id, 
             userB.UserName, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
         
         aSearchB.IsSuccess.Should().BeTrue();
         var aResult = aSearchB.Value.Items.FirstOrDefault(u => u.UserId == userB.Id);
@@ -270,7 +270,7 @@ public sealed class Friendship_Symmetry_Tests
         var bSearchA = await ctx.Service.SearchUsersAsync(
             userB.Id, 
             userA.UserName, 
-            new PageRequest(1, 10, null, false));
+            new PageRequest { Page = 1, Size = 10, Sort = null, Desc = false });
         
         bSearchA.IsSuccess.Should().BeTrue();
         var bResult = bSearchA.Value.Items.FirstOrDefault(u => u.UserId == userA.Id);

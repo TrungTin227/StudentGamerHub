@@ -746,15 +746,24 @@ public sealed class AdminDashboardService : IAdminDashboardService
         }
     }
 
-    public async Task<Result<List<AdminMembershipStatsDto>>> GetMembershipStatsAsync(CancellationToken ct = default)
+    public async Task<Result<PagedResult<AdminMembershipStatsDto>>> GetMembershipStatsAsync(PageRequest pageRequest, CancellationToken ct = default)
     {
         try
         {
             var now = DateTime.UtcNow;
             var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
+            // ? FIX: Count total tr??c khi phân trang
+            var totalCount = await _context.MembershipPlans
+                .AsNoTracking()
+                .CountAsync(ct);
+
+            // ? FIX: Phân trang ? database level tr??c khi load vào memory
             var plans = await _context.MembershipPlans
                 .AsNoTracking()
+                .OrderBy(p => p.Name)
+                .Skip((pageRequest.Page - 1) * pageRequest.Size)
+                .Take(pageRequest.Size)
                 .Select(p => new
                 {
                     Plan = p,
@@ -770,26 +779,94 @@ public sealed class AdminDashboardService : IAdminDashboardService
                 })
                 .ToListAsync(ct);
 
-            var stats = plans.Select(p => new AdminMembershipStatsDto
-            {
-                PlanId = p.Plan.Id,
-                PlanName = p.Plan.Name,
-                PriceCents = (long)(p.Plan.Price * 100),  // Convert decimal Price to cents
-                DurationMonths = p.Plan.DurationMonths,
-                MonthlyEventLimit = p.Plan.MonthlyEventLimit,
-                IsActive = p.Plan.IsActive,
-                ActiveSubscribers = p.ActiveSubscribers,
-                TotalRevenueCents = p.TotalRevenue,
-                PurchasesThisMonth = p.PurchasesThisMonth
-            }).ToList();
+            var membershipStats = plans
+                .Select(p => new AdminMembershipStatsDto
+                {
+                    PlanId = p.Plan.Id,
+                    PlanName = p.Plan.Name,
+                    PriceCents = (long)(p.Plan.Price * 100),
+                    DurationMonths = p.Plan.DurationMonths,
+                    MonthlyEventLimit = p.Plan.MonthlyEventLimit,
+                    IsActive = p.Plan.IsActive,
+                    ActiveSubscribers = p.ActiveSubscribers,
+                    TotalRevenueCents = p.TotalRevenue,
+                    PurchasesThisMonth = p.PurchasesThisMonth
+                })
+                .ToList();
 
-            return Result<List<AdminMembershipStatsDto>>.Success(stats);
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
+            var hasPrevious = pageRequest.Page > 1;
+            var hasNext = pageRequest.Page < totalPages;
+
+            var result = new PagedResult<AdminMembershipStatsDto>(
+                membershipStats,
+                pageRequest.Page,
+                pageRequest.Size,
+                totalCount,
+                totalPages,
+                hasPrevious,
+                hasNext,
+                pageRequest.Sort ?? "PlanName",
+                pageRequest.Desc
+            );
+
+            return Result<PagedResult<AdminMembershipStatsDto>>.Success(result);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting membership stats");
-            return Result<List<AdminMembershipStatsDto>>.Failure(
+            return Result<PagedResult<AdminMembershipStatsDto>>.Failure(
                 new Error(Error.Codes.Unexpected, "Failed to get membership stats"));
+        }
+    }
+
+    public async Task<Result<PagedResult<AdminRoleStatsDto>>> GetRoleStatsAsync(PageRequest pageRequest, CancellationToken ct = default)
+    {
+        try
+        {
+            // ? FIX: Count total tr??c khi phân trang
+            var totalCount = await _context.Roles
+                .AsNoTracking()
+                .CountAsync(ct);
+
+            // ? FIX: Phân trang ? database level tr??c khi load vào memory
+            var stats = await _context.Roles
+                .AsNoTracking()
+                .OrderBy(r => r.Name)
+                .Skip((pageRequest.Page - 1) * pageRequest.Size)
+                .Take(pageRequest.Size)
+                .Select(r => new AdminRoleStatsDto
+                {
+                    RoleId = r.Id,
+                    RoleName = r.Name!,
+                    UsersCount = _context.UserRoles.Count(ur => ur.RoleId == r.Id),
+                    CreatedAtUtc = DateTime.UtcNow
+                })
+                .ToListAsync(ct);
+
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
+            var hasPrevious = pageRequest.Page > 1;
+            var hasNext = pageRequest.Page < totalPages;
+
+            var result = new PagedResult<AdminRoleStatsDto>(
+                stats,
+                pageRequest.Page,
+                pageRequest.Size,
+                totalCount,
+                totalPages,
+                hasPrevious,
+                hasNext,
+                pageRequest.Sort ?? "RoleName",
+                pageRequest.Desc
+            );
+
+            return Result<PagedResult<AdminRoleStatsDto>>.Success(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting role stats");
+            return Result<PagedResult<AdminRoleStatsDto>>.Failure(
+                new Error(Error.Codes.Unexpected, "Failed to get role stats"));
         }
     }
 
@@ -865,8 +942,7 @@ public sealed class AdminDashboardService : IAdminDashboardService
     {
         try
         {
-            var query = _context.Clubs
-                .AsNoTracking();
+            var query = _context.Clubs.AsNoTracking();
 
             if (!includeDeleted)
             {
@@ -975,37 +1051,6 @@ public sealed class AdminDashboardService : IAdminDashboardService
             _logger.LogError(ex, "Error getting game stats");
             return Result<PagedResult<AdminGameStatsDto>>.Failure(
                 new Error(Error.Codes.Unexpected, "Failed to get game stats"));
-        }
-    }
-
-    public async Task<Result<List<AdminRoleStatsDto>>> GetRoleStatsAsync(CancellationToken ct = default)
-    {
-        try
-        {
-            // Use GroupJoin to batch load user counts for all roles in one query
-            var stats = await _context.Roles
-                .AsNoTracking()
-                .GroupJoin(
-                    _context.UserRoles,
-                    role => role.Id,
-                    userRole => userRole.RoleId,
-                    (role, userRoles) => new AdminRoleStatsDto
-                    {
-                        RoleId = role.Id,
-                        RoleName = role.Name!,
-                        UsersCount = userRoles.Count(),
-                        CreatedAtUtc = DateTime.UtcNow // Roles don't have CreatedAt in identity
-                    })
-                .OrderBy(r => r.RoleName)
-                .ToListAsync(ct);
-
-            return Result<List<AdminRoleStatsDto>>.Success(stats);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting role stats");
-            return Result<List<AdminRoleStatsDto>>.Failure(
-                new Error(Error.Codes.Unexpected, "Failed to get role stats"));
         }
     }
 }

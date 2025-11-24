@@ -157,6 +157,12 @@ public sealed class ClubService : IClubService
                 new Error(Error.Codes.Forbidden, "CommunityMembershipRequired"));
         }
 
+        var exists = await _clubQuery.ExistsByNameInCommunityAsync(req.CommunityId, name, null, ct).ConfigureAwait(false);
+        if (exists)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Conflict, "A club with this name already exists in this community."));
+        }
+
         if (community.IsPublic && !isCommunityMember)
         {
             _logger.LogInformation(
@@ -241,6 +247,12 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Forbidden, "Only club owners can update the club."));
         }
 
+        var exists = await _clubQuery.ExistsByNameInCommunityAsync(club.CommunityId, name, id, ct).ConfigureAwait(false);
+        if (exists)
+        {
+            return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Conflict, "A club with this name already exists in this community."));
+        }
+
         club.Name = name;
         club.Description = NormalizeOrNull(req.Description);
         club.IsPublic = req.IsPublic;
@@ -265,7 +277,7 @@ public sealed class ClubService : IClubService
             return Result<ClubDetailDto>.Failure(new Error(Error.Codes.Unexpected, "Unable to load club details."));
         }
 
-        return Result<ClubDetailDto>.Success(detail.ToClubDetailDto());
+        return Result<ClubDetailDto>. Success(detail.ToClubDetailDto());
     }
 
     public async Task<Result<ClubDetailDto>> JoinClubAsync(Guid clubId, Guid currentUserId, CancellationToken ct = default)

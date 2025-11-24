@@ -19,6 +19,24 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
+    public async Task<bool> ExistsByNameInCommunityAsync(Guid communityId, string name, Guid? excludeId = null, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var normalizedName = name.Trim();
+        
+        IQueryable<Club> query = _context.Clubs
+            .AsNoTracking()
+            .Where(c => c.CommunityId == communityId && c.Name == normalizedName);
+
+        if (excludeId.HasValue)
+        {
+            query = query.Where(c => c.Id != excludeId.Value);
+        }
+
+        return await query.AnyAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Search clubs within a community with filtering and cursor-based pagination.
     /// Stable sort order: MembersCount DESC, Id DESC
@@ -114,7 +132,6 @@ public sealed class ClubQueryRepository : IClubQueryRepository
 
     public async Task<ClubDetailModel?> GetDetailsAsync(Guid clubId, Guid? currentUserId, CancellationToken ct = default)
     {
-        // ? FIX N+1: Load club data without subqueries first
         var club = await _context.Clubs
             .AsNoTracking()
             .Where(c => c.Id == clubId)
@@ -137,48 +154,34 @@ public sealed class ClubQueryRepository : IClubQueryRepository
             return null;
         }
 
-        // ? FIX N+1: Batch load related data
-        var tasksToAwait = new List<Task>();
-
-        // Load owner
-        var ownerTask = _context.ClubMembers
+        var ownerId = await _context.ClubMembers
             .AsNoTracking()
             .Where(cm => cm.ClubId == clubId && cm.Role == MemberRole.Owner)
             .Select(cm => cm.UserId)
-            .FirstOrDefaultAsync(ct);
-        tasksToAwait.Add(ownerTask);
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
-        // Load rooms count
-        var roomsCountTask = _context.Rooms
+        var roomsCount = await _context.Rooms
             .AsNoTracking()
             .Where(r => r.ClubId == clubId)
-            .CountAsync(ct);
-        tasksToAwait.Add(roomsCountTask);
+            .CountAsync(ct)
+            .ConfigureAwait(false);
 
-        // Load memberships for current user if authenticated
-        Task<ClubMember?> clubMemberTask = Task.FromResult<ClubMember?>(null);
-        Task<CommunityMember?> communityMemberTask = Task.FromResult<CommunityMember?>(null);
+        ClubMember? clubMember = null;
+        CommunityMember? communityMember = null;
 
         if (currentUserId.HasValue)
         {
-            clubMemberTask = _context.ClubMembers
+            clubMember = await _context.ClubMembers
                 .AsNoTracking()
-                .FirstOrDefaultAsync(cm => cm.ClubId == clubId && cm.UserId == currentUserId.Value, ct);
-            tasksToAwait.Add(clubMemberTask);
+                .FirstOrDefaultAsync(cm => cm.ClubId == clubId && cm.UserId == currentUserId.Value, ct)
+                .ConfigureAwait(false);
 
-            communityMemberTask = _context.CommunityMembers
+            communityMember = await _context.CommunityMembers
                 .AsNoTracking()
-                .FirstOrDefaultAsync(cm => cm.CommunityId == club.CommunityId && cm.UserId == currentUserId.Value, ct);
-            tasksToAwait.Add(communityMemberTask);
+                .FirstOrDefaultAsync(cm => cm.CommunityId == club.CommunityId && cm.UserId == currentUserId.Value, ct)
+                .ConfigureAwait(false);
         }
-
-        // Wait for all tasks
-        await Task.WhenAll(tasksToAwait).ConfigureAwait(false);
-
-        var ownerId = await ownerTask.ConfigureAwait(false);
-        var roomsCount = await roomsCountTask.ConfigureAwait(false);
-        var clubMember = currentUserId.HasValue ? await clubMemberTask.ConfigureAwait(false) : null;
-        var communityMember = currentUserId.HasValue ? await communityMemberTask.ConfigureAwait(false) : null;
 
         var isClubMember = clubMember is not null;
         var isCommunityMember = communityMember is not null;
@@ -351,11 +354,13 @@ public sealed class ClubQueryRepository : IClubQueryRepository
         }
 
         // Sanitize paging
-        var sanitized = new PageRequest(
-            Page: paging.PageSafe,
-            Size: Math.Clamp(paging.SizeSafe, 1, 50),
-            Sort: string.IsNullOrWhiteSpace(paging.Sort) ? nameof(Club.CreatedAtUtc) : paging.Sort!,
-            Desc: paging.Desc);
+        var sanitized = new PageRequest
+        {
+            Page = paging.PageSafe,
+            Size = Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort = string.IsNullOrWhiteSpace(paging.Sort) ? nameof(Club.CreatedAtUtc) : paging.Sort!,
+            Desc = paging.Desc
+        };
 
         return await query.ToPagedResultAsync(sanitized, ct).ConfigureAwait(false);
     }

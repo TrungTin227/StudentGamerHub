@@ -31,6 +31,18 @@ public sealed class MembershipPlanRepository : IMembershipPlanRepository
             .ConfigureAwait(false);
     }
 
+    public IQueryable<MembershipPlan> Query(bool includeInactive)
+    {
+        IQueryable<MembershipPlan> query = _context.MembershipPlans.AsNoTracking();
+
+        if (!includeInactive)
+        {
+            query = query.Where(p => p.IsActive);
+        }
+
+        return query;
+    }
+
     public Task<MembershipPlan?> GetByIdAsync(Guid id, CancellationToken ct = default)
         => _context.MembershipPlans
             .AsNoTracking()

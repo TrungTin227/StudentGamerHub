@@ -153,10 +153,13 @@ public sealed class MembershipsController : ControllerBase
     [HttpGet]
     [Authorize(Roles = "Admin")]
     [EnableRateLimiting("ReadsLight")]
-    [ProducesResponseType(typeof(IReadOnlyList<MembershipPlanSummaryDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult> GetPlans([FromQuery] bool includeInactive = true, CancellationToken ct = default)
+    [ProducesResponseType(typeof(PagedResult<MembershipPlanSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult> GetPlans(
+        [FromQuery] PageRequest pageRequest, 
+        [FromQuery] bool includeInactive = true, 
+        CancellationToken ct = default)
     {
-        var result = await _membershipPlanService.GetAllAsync(includeInactive, ct).ConfigureAwait(false);
+        var result = await _membershipPlanService.GetAllAsync(pageRequest, includeInactive, ct).ConfigureAwait(false);
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
     }
 

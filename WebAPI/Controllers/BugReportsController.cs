@@ -77,7 +77,7 @@ public sealed class BugReportsController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var paging = new PageRequest(page ?? 1, size ?? 20);
+        var paging = new PageRequest { Page = page ?? 1, Size = size ?? 20 };
         var result = await _bugReportService.GetByUserIdAsync(userId.Value, paging, ct);
         return this.ToActionResult(result);
     }
@@ -98,7 +98,7 @@ public sealed class BugReportsController : ControllerBase
         [FromQuery] int? size,
         CancellationToken ct)
     {
-        var paging = new PageRequest(page ?? 1, size ?? 20);
+        var paging = new PageRequest { Page = page ?? 1, Size = size ?? 20 };
         var result = await _bugReportService.ListAsync(paging, ct);
         return this.ToActionResult(result);
     }
@@ -122,7 +122,7 @@ public sealed class BugReportsController : ControllerBase
         [FromQuery] int? size,
         CancellationToken ct)
     {
-        var paging = new PageRequest(page ?? 1, size ?? 20);
+        var paging = new PageRequest { Page = page ?? 1, Size = size ?? 20 };
         var result = await _bugReportService.GetByStatusAsync(status, paging, ct);
         return this.ToActionResult(result);
     }

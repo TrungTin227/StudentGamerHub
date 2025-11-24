@@ -108,11 +108,13 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
             roomSort = nameof(Room.CreatedAtUtc);
         }
 
-        var sanitized = new PageRequest(
-            Page: paging.PageSafe,
-            Size: Math.Clamp(paging.SizeSafe, 1, 50),
-            Sort: roomSort,
-            Desc: paging.Desc);
+        var sanitized = new PageRequest
+        {
+            Page = paging.PageSafe,
+            Size = Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort = roomSort,
+            Desc = paging.Desc
+        };
 
         var roomsQuery = _context.Rooms
             .AsNoTracking()
@@ -383,11 +385,13 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
         }
 
         // Sanitize paging
-        var sanitized = new PageRequest(
-            Page: paging.PageSafe,
-            Size: Math.Clamp(paging.SizeSafe, 1, 50),
-            Sort: string.IsNullOrWhiteSpace(paging.Sort) ? nameof(Room.CreatedAtUtc) : paging.Sort!,
-            Desc: paging.Desc);
+        var sanitized = new PageRequest
+        {
+            Page = paging.PageSafe,
+            Size = Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort = string.IsNullOrWhiteSpace(paging.Sort) ? nameof(Room.CreatedAtUtc) : paging.Sort!,
+            Desc = paging.Desc
+        };
 
         var pagedRooms = await query
             .ToPagedResultAsync(sanitized, ct)

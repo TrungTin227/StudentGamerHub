@@ -86,11 +86,13 @@ public sealed class ClubReadService : IClubReadService
         PageRequest paging,
         CancellationToken ct = default)
     {
-        var sanitizedPaging = new PageRequest(
-            Page: paging.PageSafe,
-            Size: Math.Clamp(paging.SizeSafe, 1, 50),
-            Sort: string.IsNullOrWhiteSpace(paging.Sort) ? "CreatedAtUtc" : paging.Sort!,
-            Desc: paging.Desc);
+        var sanitizedPaging = new PageRequest
+        {
+            Page = paging.PageSafe,
+            Size = Math.Clamp(paging.SizeSafe, 1, 50),
+            Sort = string.IsNullOrWhiteSpace(paging.Sort) ? "CreatedAtUtc" : paging.Sort!,
+            Desc = paging.Desc
+        };
 
         var pagedClubs = await _clubQuery
             .GetAllClubsAsync(name, isPublic, membersFrom, membersTo, sanitizedPaging, ct)

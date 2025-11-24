@@ -8,22 +8,22 @@ public interface ITeammateFinderService
 {
     /// <summary>
     /// Searches for potential teammates for the current user.
-    /// Returns cursor-paginated results sorted by: online DESC ? points DESC ? sharedGames DESC ? userId DESC.
+    /// Returns paginated results sorted by: online DESC ? points DESC ? sharedGames DESC ? userId DESC.
     /// </summary>
     /// <param name="currentUserId">Current user ID (excluded from results)</param>
     /// <param name="gameId">Optional: filter by specific game</param>
     /// <param name="university">Optional: filter by university</param>
     /// <param name="skill">Optional: filter by skill level</param>
     /// <param name="onlineOnly">If true, only return online users</param>
-    /// <param name="cursor">Cursor pagination request</param>
+    /// <param name="paging">Page request for offset pagination</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Result containing cursor-paginated TeammateDto list</returns>
-    Task<Result<CursorPageResult<TeammateDto>>> SearchAsync(
+    /// <returns>Result containing paginated TeammateDto list</returns>
+    Task<Result<PagedResult<TeammateDto>>> SearchAsync(
         Guid currentUserId,
         Guid? gameId,
         string? university,
         GameSkillLevel? skill,
         bool onlineOnly,
-        CursorRequest cursor,
+        PageRequest paging,
         CancellationToken ct = default);
 }

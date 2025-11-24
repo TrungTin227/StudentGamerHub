@@ -47,24 +47,24 @@ public interface ICommunityQueryRepository
         CancellationToken ct = default);
 
     /// <summary>
-    /// Search communities with filtering by school, game, visibility, and member count range.
-    /// Uses cursor-based pagination with stable sorting by (MembersCount DESC, Id DESC).
+    /// Search communities with filtering and offset-based pagination.
+    /// Uses stable sorting by (MembersCount DESC, Id DESC).
     /// </summary>
     /// <param name="school">Filter by school name (case-insensitive, partial match)</param>
     /// <param name="gameId">Filter communities that include this game</param>
     /// <param name="isPublic">Filter by public/private status (null = all)</param>
     /// <param name="membersFrom">Minimum members count (inclusive)</param>
     /// <param name="membersTo">Maximum members count (inclusive)</param>
-    /// <param name="cursor">Cursor pagination request</param>
+    /// <param name="paging">Page request</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>List of communities and next cursor</returns>
-    Task<(IReadOnlyList<Community> Items, string? NextCursor)> SearchCommunitiesAsync(
+    /// <returns>Paged result with total count</returns>
+    Task<PagedResult<Community>> SearchCommunitiesAsync(
         string? school,
         Guid? gameId,
         bool? isPublic,
         int? membersFrom,
         int? membersTo,
-        CursorRequest cursor,
+        PageRequest paging,
         CancellationToken ct = default);
 
     /// <summary>

@@ -76,25 +76,26 @@ public sealed class GamesController : ControllerBase
     }
 
     /// <summary>
-    /// Searches the game catalog with cursor-based pagination.
+    /// Searches the game catalog with offset-based pagination.
     /// </summary>
     [HttpGet]
     [AllowAnonymous]
     [EnableRateLimiting("GamesRead")]
-    [ProducesResponseType(typeof(CursorPageResult<GameDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<GameDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult> Search(
         [FromQuery] string? q,
-        [FromQuery] string? cursor,
-        [FromQuery] CursorDirection direction = CursorDirection.Next,
+        [FromQuery] int page = 1,
         [FromQuery] int size = PaginationOptions.DefaultPageSize,
         [FromQuery] string? sort = null,
         [FromQuery] bool desc = false,
         CancellationToken ct = default)
     {
-        var request = new CursorRequest(cursor, direction, size, sort, desc);
-        var result = await _service.SearchAsync(q, request, ct).ConfigureAwait(false);
+        size = Math.Clamp(size, 1, 200);
+
+        var pageRequest = new PageRequest { Page = page, Size = size, Sort = sort, Desc = desc };
+        var result = await _service.SearchAsync(q, pageRequest, ct).ConfigureAwait(false);
         return this.ToActionResult(result);
     }
 }

@@ -297,11 +297,13 @@ public sealed class ClubsController : ControllerBase
         [FromQuery] bool desc = true,
         CancellationToken ct = default)
     {
-        var paging = new PageRequest(
-            Page: page,
-            Size: size,
-            Sort: sort ?? "CreatedAtUtc",
-            Desc: desc);
+        var paging = new PageRequest
+        {
+            Page = page,
+            Size = size,
+            Sort = sort ?? "CreatedAtUtc",
+            Desc = desc
+        };
 
         var result = await _clubReadService
             .GetAllClubsAsync(name, isPublic, membersFrom, membersTo, paging, ct)

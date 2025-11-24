@@ -2,12 +2,11 @@ namespace Services.Interfaces;
 
 /// <summary>
 /// Service for community search operations.
-/// Provides cursor-based pagination for community discovery.
 /// </summary>
 public interface ICommunitySearchService
 {
     /// <summary>
-    /// Search communities with filtering and cursor-based pagination.
+    /// Search communities with filtering and offset-based pagination.
     /// Filters: school, game, visibility, member count range.
     /// Sorted by: MembersCount DESC, Id DESC (stable).
     /// </summary>
@@ -16,15 +15,15 @@ public interface ICommunitySearchService
     /// <param name="isPublic">Filter by public/private status (null = all)</param>
     /// <param name="membersFrom">Minimum members count (inclusive)</param>
     /// <param name="membersTo">Maximum members count (inclusive)</param>
-    /// <param name="cursor">Cursor pagination request</param>
+    /// <param name="paging">Page request</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Paginated list of community briefs</returns>
-    Task<Result<CursorPageResult<CommunityBriefDto>>> SearchAsync(
+    /// <returns>Paginated list of community briefs with page info</returns>
+    Task<Result<PagedResult<CommunityBriefDto>>> SearchAsync(
         string? school, 
         Guid? gameId, 
         bool? isPublic, 
         int? membersFrom, 
         int? membersTo,
-        CursorRequest cursor, 
+        PageRequest paging, 
         CancellationToken ct = default);
 }

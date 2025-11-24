@@ -11,10 +11,10 @@ namespace Services.Implementations;
 /// 3. Filter by onlineOnly if needed
 /// 4. Map to DTOs with presence info
 /// 5. Sort: online DESC ? points DESC ? sharedGames DESC ? userId DESC
-/// 6. Wrap in CursorPageResult
+/// 6. Wrap in PagedResult
 /// 
-/// NOTE: Cursor may exhibit "jitter" when online status changes between pages.
-/// This is acceptable per requirements as online status is real-time.
+/// NOTE: Online status is real-time and may change between page requests.
+/// This is acceptable per requirements.
 /// </summary>
 public sealed class TeammateFinderService : ITeammateFinderService
 {
@@ -29,54 +29,56 @@ public sealed class TeammateFinderService : ITeammateFinderService
         _presence = presence ?? throw new ArgumentNullException(nameof(presence));
     }
 
-    public async Task<Result<CursorPageResult<TeammateDto>>> SearchAsync(
+    public async Task<Result<PagedResult<TeammateDto>>> SearchAsync(
         Guid currentUserId,
         Guid? gameId,
         string? university,
         GameSkillLevel? skill,
         bool onlineOnly,
-        CursorRequest cursor,
+        PageRequest paging,
         CancellationToken ct = default)
     {
         // Step 1: Call repository with filters
         var filter = new TeammateSearchFilter(gameId, university, skill);
-        var (candidates, nextCursor) = await _teammateQueries
-            .SearchCandidatesAsync(currentUserId, filter, cursor, ct);
+        var pagedCandidates = await _teammateQueries
+            .SearchCandidatesAsync(currentUserId, filter, paging, ct);
 
-        if (candidates.Count == 0)
+        if (pagedCandidates.Items.Count == 0)
         {
-            // Early return for empty results
-            return Result<CursorPageResult<TeammateDto>>.Success(
-                new CursorPageResult<TeammateDto>(
-                    Items: Array.Empty<TeammateDto>(),
-                    NextCursor: null,
-                    PrevCursor: null,
-                    Size: cursor.SizeSafe,
-                    Sort: cursor.SortSafe,
-                    Desc: cursor.Desc
+            return Result<PagedResult<TeammateDto>>.Success(
+                new PagedResult<TeammateDto>(
+                    Array.Empty<TeammateDto>(),
+                    pagedCandidates.Page,
+                    pagedCandidates.Size,
+                    pagedCandidates.TotalCount,
+                    pagedCandidates.TotalPages,
+                    pagedCandidates.HasPrevious,
+                    pagedCandidates.HasNext,
+                    pagedCandidates.Sort,
+                    pagedCandidates.Desc
                 ));
         }
 
         // Step 2: Batch check online status (1 Redis pipeline)
-        var userIds = candidates.Select(c => c.UserId).ToArray();
+        var userIds = pagedCandidates.Items.Select(c => c.UserId).ToArray();
         var presenceResult = await _presence.BatchIsOnlineAsync(userIds, ct);
 
         if (!presenceResult.IsSuccess)
         {
-            return Result<CursorPageResult<TeammateDto>>.Failure(presenceResult.Error);
+            return Result<PagedResult<TeammateDto>>.Failure(presenceResult.Error);
         }
 
         var onlineMap = presenceResult.Value;
 
         // Step 3: Map candidates to DTOs with online status
-        var items = candidates.Select(c => new
+        var items = pagedCandidates.Items.Select(c => new
         {
             Dto = new TeammateDto
             {
                 User = new UserBriefDto
                 {
                     Id = c.UserId,
-                    UserName = c.FullName ?? c.UserId.ToString(), // Fallback to ID if no name
+                    UserName = c.FullName ?? c.UserId.ToString(),
                     FullName = c.FullName,
                     AvatarUrl = c.AvatarUrl,
                     Level = 0
@@ -97,26 +99,26 @@ public sealed class TeammateFinderService : ITeammateFinderService
         // Step 5: Sort with online status priority
         // Sort order: online DESC ? points DESC ? sharedGames DESC ? userId DESC
         var sorted = items
-            .OrderByDescending(x => x.Dto.IsOnline)  // Online first
-            .ThenByDescending(x => x.Points)          // Then by points
-            .ThenByDescending(x => x.Dto.SharedGames) // Then by shared games
-            .ThenByDescending(x => x.UserId)          // Finally by user ID for stability
+            .OrderByDescending(x => x.Dto.IsOnline)
+            .ThenByDescending(x => x.Points)
+            .ThenByDescending(x => x.Dto.SharedGames)
+            .ThenByDescending(x => x.UserId)
             .Select(x => x.Dto)
             .ToList();
 
-        // Step 6: Wrap in CursorPageResult
-        // NOTE: nextCursor from repo is based on (points, sharedGames, userId) only.
-        // When online status changes, pagination may show slight inconsistency.
-        // This is acceptable as online status is ephemeral real-time data.
-        var result = new CursorPageResult<TeammateDto>(
-            Items: sorted,
-            NextCursor: nextCursor,
-            PrevCursor: null, // Repository doesn't provide prev cursor
-            Size: cursor.SizeSafe,
-            Sort: cursor.SortSafe,
-            Desc: cursor.Desc
+        // Step 6: Wrap in PagedResult
+        var result = new PagedResult<TeammateDto>(
+            sorted,
+            pagedCandidates.Page,
+            pagedCandidates.Size,
+            pagedCandidates.TotalCount,
+            pagedCandidates.TotalPages,
+            pagedCandidates.HasPrevious,
+            pagedCandidates.HasNext,
+            pagedCandidates.Sort,
+            pagedCandidates.Desc
         );
 
-        return Result<CursorPageResult<TeammateDto>>.Success(result);
+        return Result<PagedResult<TeammateDto>>.Success(result);
     }
 }

@@ -56,7 +56,7 @@ public interface IAdminDashboardService : IScopedService
     /// <summary>
     /// Thống kê memberships
     /// </summary>
-    Task<Result<List<AdminMembershipStatsDto>>> GetMembershipStatsAsync(CancellationToken ct = default);
+    Task<Result<PagedResult<AdminMembershipStatsDto>>> GetMembershipStatsAsync(PageRequest pageRequest, CancellationToken ct = default);
 
     /// <summary>
     /// Thống kê communities
@@ -85,5 +85,5 @@ public interface IAdminDashboardService : IScopedService
     /// <summary>
     /// Thống kê roles
     /// </summary>
-    Task<Result<List<AdminRoleStatsDto>>> GetRoleStatsAsync(CancellationToken ct = default);
+    Task<Result<PagedResult<AdminRoleStatsDto>>> GetRoleStatsAsync(PageRequest pageRequest, CancellationToken ct = default);
 }

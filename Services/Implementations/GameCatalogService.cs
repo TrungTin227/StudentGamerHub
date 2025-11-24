@@ -148,16 +148,15 @@ public sealed class GameCatalogService : IGameCatalogService
         return result;
     }
 
-    public async Task<Result<CursorPageResult<GameDto>>> SearchAsync(string? query, CursorRequest cursor, CancellationToken ct = default)
+    public async Task<Result<PagedResult<GameDto>>> SearchAsync(string? query, PageRequest paging, CancellationToken ct = default)
     {
-        var sanitizedSort = NormalizeSort(cursor.SortSafe);
+        var sanitizedSort = NormalizeSort(paging.SortSafe);
         if (!AllowedSorts.Contains(sanitizedSort, StringComparer.OrdinalIgnoreCase))
         {
-            return Result<CursorPageResult<GameDto>>.Failure(
-                new Error(Error.Codes.Validation, $"Unsupported sort '{cursor.SortSafe}'."));
+            return Result<PagedResult<GameDto>>.Failure(
+                new Error(Error.Codes.Validation, $"Unsupported sort '{paging.SortSafe}'."));
         }
 
-        var sanitizedCursor = cursor with { Sort = sanitizedSort };
         var search = _games.Query();
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -170,30 +169,43 @@ public sealed class GameCatalogService : IGameCatalogService
             await EnsureGameCacheWarmAsync(ct).ConfigureAwait(false);
         }
 
-        CursorPageResult<Game> page;
-        switch (sanitizedSort)
+        var total = await search.CountAsync(ct).ConfigureAwait(false);
+
+        IOrderedQueryable<Game> ordered = sanitizedSort switch
         {
-            case "Name":
-                page = await search.ToCursorPageAsync(sanitizedCursor, g => g.Name, ct).ConfigureAwait(false);
-                break;
-            case "CreatedAtUtc":
-                page = await search.ToCursorPageAsync(sanitizedCursor, g => g.CreatedAtUtc, ct).ConfigureAwait(false);
-                break;
-            default:
-                page = await search.ToCursorPageAsync(sanitizedCursor, g => g.Id, ct).ConfigureAwait(false);
-                break;
-        }
+            "Name" => paging.Desc ? search.OrderByDescending(g => g.Name) : search.OrderBy(g => g.Name),
+            "CreatedAtUtc" => paging.Desc ? search.OrderByDescending(g => g.CreatedAtUtc) : search.OrderBy(g => g.CreatedAtUtc),
+            _ => paging.Desc ? search.OrderByDescending(g => g.Id) : search.OrderBy(g => g.Id)
+        };
 
-        var dtos = page.Items.Select(g => g.ToGameDto()).ToList();
-        var resultPage = new CursorPageResult<GameDto>(
-            Items: dtos,
-            NextCursor: page.NextCursor,
-            PrevCursor: page.PrevCursor,
-            Size: page.Size,
-            Sort: page.Sort,
-            Desc: page.Desc);
+        var page = paging.PageSafe;
+        var size = Math.Clamp(paging.SizeSafe, 1, 200);
+        var skip = (page - 1) * size;
 
-        return Result<CursorPageResult<GameDto>>.Success(resultPage);
+        var items = await ordered
+            .Skip(skip)
+            .Take(size)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var dtos = items.Select(g => g.ToGameDto()).ToList();
+
+        var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
+        var hasPrev = page > 1 && total > 0;
+        var hasNext = totalPages > 0 && page < totalPages;
+
+        var result = new PagedResult<GameDto>(
+            dtos,
+            page,
+            size,
+            total,
+            totalPages,
+            hasPrev,
+            hasNext,
+            sanitizedSort,
+            paging.Desc);
+
+        return Result<PagedResult<GameDto>>.Success(result);
     }
 
     private static bool TryNormalizeName(string? name, out string normalized, out Error error)

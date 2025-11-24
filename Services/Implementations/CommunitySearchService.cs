@@ -2,7 +2,7 @@ namespace Services.Implementations;
 
 /// <summary>
 /// Community search service implementation.
-/// Provides cursor-based pagination for community discovery.
+/// Provides offset-based pagination for community discovery.
 /// </summary>
 public sealed class CommunitySearchService : ICommunitySearchService
 {
@@ -14,51 +14,61 @@ public sealed class CommunitySearchService : ICommunitySearchService
     }
 
     /// <inheritdoc/>
-    public async Task<Result<CursorPageResult<CommunityBriefDto>>> SearchAsync(
+    public async Task<Result<PagedResult<CommunityBriefDto>>> SearchAsync(
         string? school,
         Guid? gameId,
         bool? isPublic,
         int? membersFrom,
         int? membersTo,
-        CursorRequest cursor,
+        PageRequest paging,
         CancellationToken ct = default)
     {
-        // Validate members range
-        if (membersFrom.HasValue && membersFrom.Value < 0)
-            return Result<CursorPageResult<CommunityBriefDto>>.Failure(
-                new Error(Error.Codes.Validation, "membersFrom must be non-negative."));
+        var validationResult = ValidateSearchParameters(membersFrom, membersTo);
+        if (!validationResult.IsSuccess)
+        {
+            return Result<PagedResult<CommunityBriefDto>>.Failure(validationResult.Error);
+        }
 
-        if (membersTo.HasValue && membersTo.Value < 0)
-            return Result<CursorPageResult<CommunityBriefDto>>.Failure(
-                new Error(Error.Codes.Validation, "membersTo must be non-negative."));
-
-        if (membersFrom.HasValue && membersTo.HasValue && membersFrom.Value > membersTo.Value)
-            return Result<CursorPageResult<CommunityBriefDto>>.Failure(
-                new Error(Error.Codes.Validation, "membersFrom cannot be greater than membersTo."));
-
-        // Call repository
-        var (items, nextCursor) = await _communityQuery.SearchCommunitiesAsync(
+        var pagedResult = await _communityQuery.SearchCommunitiesAsync(
             school,
             gameId,
             isPublic,
             membersFrom,
             membersTo,
-            cursor,
+            paging,
             ct);
 
-        // Map to DTOs
-        var dtos = items.Select(c => c.ToBriefDto()).ToList();
+        var dtos = pagedResult.Items.Select(c => c.ToBriefDto()).ToList();
 
-        // Create cursor page result
-        var result = new CursorPageResult<CommunityBriefDto>(
-            Items: dtos,
-            NextCursor: nextCursor,
-            PrevCursor: null, // Not implemented in this version
-            Size: cursor.SizeSafe,
-            Sort: cursor.SortSafe,
-            Desc: cursor.Desc
+        var result = new PagedResult<CommunityBriefDto>(
+            dtos,
+            pagedResult.Page,
+            pagedResult.Size,
+            pagedResult.TotalCount,
+            pagedResult.TotalPages,
+            pagedResult.HasPrevious,
+            pagedResult.HasNext,
+            pagedResult.Sort,
+            pagedResult.Desc
         );
 
-        return Result<CursorPageResult<CommunityBriefDto>>.Success(result);
+        return Result<PagedResult<CommunityBriefDto>>.Success(result);
+    }
+
+    private static Result ValidateSearchParameters(int? membersFrom, int? membersTo)
+    {
+        if (membersFrom.HasValue && membersFrom.Value < 0)
+            return Result.Failure(
+                new Error(Error.Codes.Validation, "membersFrom must be non-negative."));
+
+        if (membersTo.HasValue && membersTo.Value < 0)
+            return Result.Failure(
+                new Error(Error.Codes.Validation, "membersTo must be non-negative."));
+
+        if (membersFrom.HasValue && membersTo.HasValue && membersFrom.Value > membersTo.Value)
+            return Result.Failure(
+                new Error(Error.Codes.Validation, "membersFrom cannot be greater than membersTo."));
+
+        return Result.Success();
     }
 }

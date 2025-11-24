@@ -10,19 +10,18 @@ public interface ITeammateQueryRepository
     /// Searches for potential teammates excluding the current user, 
     /// filtered by game, university, and skill level.
     /// Returns candidates with SharedGames count computed against current user's game list.
-    /// Uses cursor-based pagination with stable sorting by (Points DESC, SharedGames DESC, UserId DESC).
+    /// Uses offset-based pagination with stable sorting by (Points DESC, SharedGames DESC, UserId DESC).
     /// </summary>
     /// <param name="currentUserId">Current user ID to exclude from results</param>
     /// <param name="filter">Search filters (game, university, skill)</param>
-    /// <param name="cursor">Cursor pagination request</param>
+    /// <param name="paging">Page request for offset pagination</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>List of candidates and next cursor</returns>
-    Task<(IReadOnlyList<TeammateCandidate> Candidates, string? NextCursor)>
-        SearchCandidatesAsync(
-            Guid currentUserId,
-            TeammateSearchFilter filter,
-            CursorRequest cursor,
-            CancellationToken ct = default);
+    /// <returns>Paged result of candidates</returns>
+    Task<PagedResult<TeammateCandidate>> SearchCandidatesAsync(
+        Guid currentUserId,
+        TeammateSearchFilter filter,
+        PageRequest paging,
+        CancellationToken ct = default);
 }
 
 /// <summary>

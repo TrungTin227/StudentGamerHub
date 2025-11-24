@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Caching.Memory;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Services.Implementations;
@@ -26,25 +27,44 @@ public sealed class MembershipPlanService : IMembershipPlanService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<Result<IReadOnlyList<MembershipPlanSummaryDto>>> GetAllAsync(bool includeInactive, CancellationToken ct = default)
+    public async Task<Result<PagedResult<MembershipPlanSummaryDto>>> GetAllAsync(PageRequest pageRequest, bool includeInactive, CancellationToken ct = default)
     {
-        // ✅ Cache key based on includeInactive flag
-        var cacheKey = includeInactive ? $"{AllPlansCacheKey}:inactive" : AllPlansCacheKey;
+        // ✅ FIX: Sử dụng Query() để phân trang ở database level
+        var query = _membershipPlans.Query(includeInactive);
 
-        if (_memoryCache.TryGetValue<IReadOnlyList<MembershipPlanSummaryDto>>(cacheKey, out var cached))
-        {
-            _logger.LogDebug("Membership plans cache HIT for includeInactive: {IncludeInactive}", includeInactive);
-            return Result<IReadOnlyList<MembershipPlanSummaryDto>>.Success(cached!);
-        }
+        // Count total
+        var totalCount = await query.CountAsync(ct).ConfigureAwait(false);
 
-        var plans = await _membershipPlans.GetAllAsync(includeInactive, ct).ConfigureAwait(false);
-        var dtos = plans.Select(p => p.ToSummaryDto()).ToList();
+        // Apply sorting and paging at database level
+        var pagedPlans = await query
+            .OrderByDescending(p => p.IsActive)
+            .ThenBy(p => p.Price)
+            .ThenBy(p => p.Name)
+            .Skip((pageRequest.Page - 1) * pageRequest.Size)
+            .Take(pageRequest.Size)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
-        // Cache for 30 minutes (membership plans rarely change)
-        _memoryCache.Set(cacheKey, dtos, PlansCacheTtl);
-        _logger.LogDebug("Membership plans cached for includeInactive: {IncludeInactive}", includeInactive);
+        // Map to DTOs
+        var dtos = pagedPlans.Select(p => p.ToSummaryDto()).ToList();
 
-        return Result<IReadOnlyList<MembershipPlanSummaryDto>>.Success(dtos);
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.Size);
+        var hasPrevious = pageRequest.Page > 1;
+        var hasNext = pageRequest.Page < totalPages;
+
+        var result = new PagedResult<MembershipPlanSummaryDto>(
+            dtos,
+            pageRequest.Page,
+            pageRequest.Size,
+            totalCount,
+            totalPages,
+            hasPrevious,
+            hasNext,
+            pageRequest.Sort ?? "Name",
+            pageRequest.Desc
+        );
+
+        return Result<PagedResult<MembershipPlanSummaryDto>>.Success(result);
     }
 
     public async Task<Result<IReadOnlyList<MembershipPlanSummaryDto>>> GetPublicAsync(CancellationToken ct = default)
@@ -167,8 +187,8 @@ public sealed class MembershipPlanService : IMembershipPlanService
         await _membershipPlans.UpdateAsync(plan).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ✅ Invalidate all related caches
-        InvalidatePlanCaches();
+        // ✅ Invalidate all related caches including individual plan cache
+        InvalidatePlanCaches(id);
 
         _logger.LogInformation("Updated membership plan {PlanId}.", id);
 
@@ -195,19 +215,25 @@ public sealed class MembershipPlanService : IMembershipPlanService
         await _membershipPlans.UpdateAsync(plan).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ✅ Invalidate all related caches
-        InvalidatePlanCaches();
+        // ✅ Invalidate all related caches including individual plan cache
+        InvalidatePlanCaches(id);
 
         _logger.LogInformation("Deactivated membership plan {PlanId}.", id);
 
         return Result.Success();
     }
 
-    private void InvalidatePlanCaches()
+    private void InvalidatePlanCaches(Guid? planId = null)
     {
         _memoryCache.Remove(AllPlansCacheKey);
         _memoryCache.Remove($"{AllPlansCacheKey}:inactive");
         _memoryCache.Remove(PublicPlansCacheKey);
+        
+        if (planId.HasValue)
+        {
+            _memoryCache.Remove($"membership:plan:{planId.Value}");
+        }
+        
         _logger.LogDebug("Invalidated all membership plan caches");
     }
 }

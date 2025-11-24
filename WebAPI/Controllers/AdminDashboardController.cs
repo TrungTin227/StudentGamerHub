@@ -60,10 +60,20 @@ public sealed class AdminDashboardController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult> GetUsers(
         [FromQuery] AdminUserFilter filter,
-        [FromQuery] PageRequest page,
-        CancellationToken ct)
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
+        CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetUsersAsync(filter, page, ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetUsersAsync(filter, pageRequest, ct);
         return this.ToActionResult(result);
     }
 
@@ -123,10 +133,20 @@ public sealed class AdminDashboardController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> GetTransactions(
         [FromQuery] AdminTransactionFilter filter,
-        [FromQuery] PageRequest page,
-        CancellationToken ct)
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
+        CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetTransactionsAsync(filter, page, ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetTransactionsAsync(filter, pageRequest, ct);
         return this.ToActionResult(result);
     }
 
@@ -144,10 +164,20 @@ public sealed class AdminDashboardController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> GetPaymentIntents(
         [FromQuery] AdminPaymentIntentFilter filter,
-        [FromQuery] PageRequest page,
-        CancellationToken ct)
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
+        CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetPaymentIntentsAsync(filter, page, ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetPaymentIntentsAsync(filter, pageRequest, ct);
         return this.ToActionResult(result);
     }
 
@@ -160,12 +190,24 @@ public sealed class AdminDashboardController : ControllerBase
     /// </summary>
     [HttpGet("memberships")]
     [EnableRateLimiting("ReadsHeavy")]
-    [ProducesResponseType(typeof(List<AdminMembershipStatsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<AdminMembershipStatsDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult> GetMembershipStats(CancellationToken ct)
+    public async Task<ActionResult> GetMembershipStats(
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
+        CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetMembershipStatsAsync(ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetMembershipStatsAsync(pageRequest, ct);
         return this.ToActionResult(result);
     }
 
@@ -182,11 +224,21 @@ public sealed class AdminDashboardController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> GetCommunityStats(
-        [FromQuery] PageRequest page,
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
         [FromQuery] bool includeDeleted = false,
         CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetCommunityStatsAsync(page, includeDeleted, ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetCommunityStatsAsync(pageRequest, includeDeleted, ct);
         return this.ToActionResult(result);
     }
 
@@ -203,11 +255,21 @@ public sealed class AdminDashboardController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> GetClubStats(
-        [FromQuery] PageRequest page,
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
         [FromQuery] bool includeDeleted = false,
         CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetClubStatsAsync(page, includeDeleted, ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetClubStatsAsync(pageRequest, includeDeleted, ct);
         return this.ToActionResult(result);
     }
 
@@ -224,11 +286,21 @@ public sealed class AdminDashboardController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult> GetGameStats(
-        [FromQuery] PageRequest page,
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
         [FromQuery] bool includeDeleted = false,
         CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetGameStatsAsync(page, includeDeleted, ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetGameStatsAsync(pageRequest, includeDeleted, ct);
         return this.ToActionResult(result);
     }
 
@@ -241,12 +313,24 @@ public sealed class AdminDashboardController : ControllerBase
     /// </summary>
     [HttpGet("roles")]
     [EnableRateLimiting("ReadsHeavy")]
-    [ProducesResponseType(typeof(List<AdminRoleStatsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<AdminRoleStatsDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult> GetRoleStats(CancellationToken ct)
+    public async Task<ActionResult> GetRoleStats(
+        [FromQuery] int page = 1,
+        [FromQuery] int size = 20,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool desc = false,
+        CancellationToken ct = default)
     {
-        var result = await _dashboardService.GetRoleStatsAsync(ct);
+        var pageRequest = new PageRequest
+        {
+            Page = page,
+            Size = Math.Clamp(size, 1, 200),
+            Sort = sort,
+            Desc = desc
+        };
+        var result = await _dashboardService.GetRoleStatsAsync(pageRequest, ct);
         return this.ToActionResult(result);
     }
 

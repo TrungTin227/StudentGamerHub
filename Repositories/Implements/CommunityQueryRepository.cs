@@ -186,21 +186,61 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
     }
 
     /// <summary>
-    /// Search communities with filtering and cursor-based pagination.
+    /// Search communities with filtering and offset-based pagination.
     /// Stable sort order: MembersCount DESC, Id DESC
     /// </summary>
-    public async Task<(IReadOnlyList<Community> Items, string? NextCursor)> SearchCommunitiesAsync(
+    public async Task<PagedResult<Community>> SearchCommunitiesAsync(
         string? school,
         Guid? gameId,
         bool? isPublic,
         int? membersFrom,
         int? membersTo,
-        CursorRequest cursor,
+        PageRequest paging,
         CancellationToken ct = default)
+    {
+        var query = BuildSearchQuery(school, gameId, isPublic, membersFrom, membersTo);
+
+        var page = paging.PageSafe;
+        var size = Math.Clamp(paging.SizeSafe, 1, 200);
+
+        var total = await query.CountAsync(ct).ConfigureAwait(false);
+
+        var orderedQuery = query
+            .OrderByDescending(c => c.MembersCount)
+            .ThenByDescending(c => c.Id);
+
+        var skip = (page - 1) * size;
+        var items = await orderedQuery
+            .Skip(skip)
+            .Take(size)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
+        var hasPrev = page > 1 && total > 0;
+        var hasNext = totalPages > 0 && page < totalPages;
+
+        return new PagedResult<Community>(
+            items,
+            page,
+            size,
+            total,
+            totalPages,
+            hasPrev,
+            hasNext,
+            "MembersCount",
+            true);
+    }
+
+    private IQueryable<Community> BuildSearchQuery(
+        string? school,
+        Guid? gameId,
+        bool? isPublic,
+        int? membersFrom,
+        int? membersTo)
     {
         IQueryable<Community> query = _context.Communities.AsNoTracking();
 
-        // Apply filters
         if (!string.IsNullOrWhiteSpace(school))
         {
             var normalizedSchool = school.Trim().ToUpperInvariant();
@@ -209,7 +249,6 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
 
         if (gameId.HasValue)
         {
-            // Filter communities that have this game
             query = query.Where(c => c.Games.Any(cg => cg.GameId == gameId.Value));
         }
 
@@ -228,20 +267,7 @@ public sealed class CommunityQueryRepository : ICommunityQueryRepository
             query = query.Where(c => c.MembersCount <= membersTo.Value);
         }
 
-        // Apply cursor-based pagination with stable sorting
-        // Sort by MembersCount DESC, then Id DESC for stability
-        // Use Id as the cursor key for simplicity (stable and unique)
-        var orderedQuery = query
-            .OrderByDescending(c => c.MembersCount)
-            .ThenByDescending(c => c.Id);
-
-        var result = await orderedQuery.ToCursorPageAsync(
-            cursor,
-            c => c.Id, // Use Id as cursor key (stable, unique)
-            ct
-        );
-
-        return (result.Items, result.NextCursor);
+        return query;
     }
 
     public async Task<PagedResult<CommunityDetailModel>> SearchDiscoverAsync(

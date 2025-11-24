@@ -45,7 +45,7 @@ public sealed class FriendService : IFriendService
         var page = request.PageSafe;
         var size = Math.Clamp(request.SizeSafe, 1, 50);
         var sort = string.IsNullOrWhiteSpace(request.Sort) ? nameof(User.FullName) : request.Sort!;
-        var sanitized = new PageRequest(page, size, sort, request.Desc);
+        var sanitized = new PageRequest { Page = page, Size = size, Sort = sort, Desc = request.Desc };
 
         try
         {
@@ -124,7 +124,7 @@ public sealed class FriendService : IFriendService
         var page = request.PageSafe;
         var size = Math.Clamp(request.SizeSafe, 1, 50);
         var sort = string.IsNullOrWhiteSpace(request.Sort) ? nameof(FriendLink.CreatedAtUtc) : request.Sort!;
-        var sanitized = new PageRequest(page, size, sort, request.Desc);
+        var sanitized = new PageRequest { Page = page, Size = size, Sort = sort, Desc = request.Desc };
 
         try
         {
@@ -190,7 +190,7 @@ public sealed class FriendService : IFriendService
         var page = request.PageSafe;
         var size = Math.Clamp(request.SizeSafe, 1, 50);
         var sort = string.IsNullOrWhiteSpace(request.Sort) ? nameof(FriendLink.CreatedAtUtc) : request.Sort!;
-        var sanitized = new PageRequest(page, size, sort, request.Desc);
+        var sanitized = new PageRequest { Page = page, Size = size, Sort = sort, Desc = request.Desc };
 
         try
         {
@@ -299,7 +299,7 @@ public sealed class FriendService : IFriendService
 
         var page = request.PageSafe;
         var size = Math.Clamp(request.SizeSafe, 1, 20);
-        var sanitized = new PageRequest(page, size, request.Sort, request.Desc);
+        var sanitized = new PageRequest { Page = page, Size = size, Sort = request.Sort, Desc = request.Desc };
 
         try
         {
