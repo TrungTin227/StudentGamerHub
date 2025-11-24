@@ -9,5 +9,6 @@ public sealed record EventBriefDto(
     DateTime StartsAt,
     DateTime? EndsAt,
     string? Location,
-    string Mode
+    string Mode,
+    string Status
 );

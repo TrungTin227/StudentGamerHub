@@ -81,11 +81,12 @@ public sealed class RegistrationService : IRegistrationService
 
             await _registrationCommandRepository.CreateAsync(registration, innerCt).ConfigureAwait(false);
 
+            var eventPrice = ev.PriceCents ?? 0;
             var paymentIntent = new PaymentIntent
             {
                 Id = Guid.NewGuid(),
                 UserId = userId,
-                AmountCents = ev.PriceCents,
+                AmountCents = eventPrice,
                 Purpose = PaymentPurpose.EventTicket,
                 EventRegistrationId = registration.Id,
                 EventId = eventId,

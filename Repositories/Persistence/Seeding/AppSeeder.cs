@@ -768,13 +768,13 @@ public sealed class AppSeeder : IAppSeeder
 
             _db.Events.Add(ev);
 
-            if (ev.PriceCents > 0)
+            if (ev.PriceCents.HasValue && ev.PriceCents.Value > 0)
             {
                 _db.Escrows.Add(new Escrow
                 {
                     Id = Guid.NewGuid(),
                     EventId = ev.Id,
-                    AmountHoldCents = ev.PriceCents * rnd.Next(5, 20),
+                    AmountHoldCents = ev.PriceCents.Value * rnd.Next(5, 20),
                     Status = (EscrowStatus)rnd.Next(0, 3),
                     CreatedAtUtc = ev.CreatedAtUtc
                 });

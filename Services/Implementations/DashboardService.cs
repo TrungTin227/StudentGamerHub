@@ -139,15 +139,39 @@ public sealed class DashboardService : IDashboardService
             .GetEventsStartingInRangeUtcAsync(startUtc, endUtc, ct)
             .ConfigureAwait(false);
 
-        // Map Event -> EventBriefDto
+        var nowUtc = _time.GetUtcNow().UtcDateTime;
+
         return events.Select(e => new EventBriefDto(
                 Id: e.Id,
                 Title: e.Title,
                 StartsAt: e.StartsAt,
                 EndsAt: e.EndsAt,
                 Location: e.Location,
-                Mode: e.Mode.ToString()))
+                Mode: e.Mode.ToString(),
+                Status: DetermineEventStatus(e, nowUtc)))
             .ToArray();
+    }
+
+    /// <summary>
+    /// Determine event status based on current time and event status
+    /// Returns: "Upcoming", "Opened", or "Closed"
+    /// </summary>
+    private static string DetermineEventStatus(Event e, DateTime nowUtc)
+    {
+        if (e.Status == EventStatus.Canceled || e.Status == EventStatus.Completed)
+            return "Closed";
+
+        if (e.Status == EventStatus.Open && nowUtc >= e.StartsAt)
+        {
+            if (e.EndsAt.HasValue && nowUtc >= e.EndsAt.Value)
+                return "Closed";
+            return "Opened";
+        }
+
+        if (nowUtc < e.StartsAt)
+            return "Upcoming";
+
+        return "Closed";
     }
 
     /// <summary>

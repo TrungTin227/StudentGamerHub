@@ -200,7 +200,7 @@ public sealed class Event : AuditableEntity
     public DateTime StartsAt { get; set; }
     public DateTime? EndsAt { get; set; }
 
-    public long PriceCents { get; set; } = 0;
+    public long? PriceCents { get; set; }
     public int? Capacity { get; set; }
 
     public long EscrowMinCents { get; set; } = 0;

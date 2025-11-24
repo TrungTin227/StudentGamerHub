@@ -106,13 +106,14 @@ public sealed class EventsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> Open(Guid eventId, CancellationToken ct)
     {
-        var organizerId = User.GetUserId();
-        if (!organizerId.HasValue)
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
         {
             return this.ToActionResult(Result.Failure(new Error(Error.Codes.Unauthorized, "User identity is required.")));
         }
 
-        var result = await _eventService.OpenAsync(organizerId.Value, eventId, ct).ConfigureAwait(false);
+        var isAdmin = User.IsInRole("Admin");
+        var result = await _eventService.OpenAsync(currentUserId.Value, eventId, isAdmin, ct).ConfigureAwait(false);
         return this.ToActionResult(result);
     }
 

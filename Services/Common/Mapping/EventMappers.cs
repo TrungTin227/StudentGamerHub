@@ -12,6 +12,7 @@ public static class EventMappers
 
         var escrowAmount = escrow?.AmountHoldCents ?? 0;
         var escrowStatus = escrow?.Status ?? EscrowStatus.Held;
+        var displayStatus = DetermineEventDisplayStatus(ev, DateTime.UtcNow);
 
         return new EventDetailDto(
             Id: ev.Id,
@@ -29,6 +30,7 @@ public static class EventMappers
             PlatformFeeRate: ev.PlatformFeeRate,
             GatewayFeePolicy: ev.GatewayFeePolicy,
             Status: ev.Status,
+            DisplayStatus: displayStatus,
             EscrowAmountHoldCents: escrowAmount,
             EscrowStatus: escrowStatus,
             IsOrganizer: isOrganizer,
@@ -36,5 +38,27 @@ public static class EventMappers
             MyRegistrationStatus: myRegistration?.Status,
             CreatedAtUtc: ev.CreatedAtUtc,
             UpdatedAtUtc: ev.UpdatedAtUtc);
+    }
+
+    /// <summary>
+    /// Determine event display status based on current time and event status.
+    /// Returns: "Upcoming", "Opened", or "Closed"
+    /// </summary>
+    private static string DetermineEventDisplayStatus(Event ev, DateTime nowUtc)
+    {
+        if (ev.Status == EventStatus.Canceled || ev.Status == EventStatus.Completed)
+            return "Closed";
+
+        if (ev.Status == EventStatus.Open && nowUtc >= ev.StartsAt)
+        {
+            if (ev.EndsAt.HasValue && nowUtc >= ev.EndsAt.Value)
+                return "Closed";
+            return "Opened";
+        }
+
+        if (nowUtc < ev.StartsAt)
+            return "Upcoming";
+
+        return "Closed";
     }
 }

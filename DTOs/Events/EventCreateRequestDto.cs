@@ -8,5 +8,5 @@ public sealed record EventCreateRequestDto(
     string? Location,
     DateTime StartsAt,
     DateTime? EndsAt,
-    long PriceCents,
+    long? PriceCents,
     int? Capacity);

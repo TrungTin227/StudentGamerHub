@@ -11,7 +11,9 @@ public sealed class EventCreateRequestDtoValidator : AbstractValidator<EventCrea
             .MaximumLength(200);
 
         RuleFor(x => x.PriceCents)
-            .GreaterThan(0);
+            .GreaterThanOrEqualTo(0)
+            .When(x => x.PriceCents.HasValue)
+            .WithMessage("PriceCents must be greater than or equal to zero when provided.");
 
         RuleFor(x => x.EndsAt)
             .Must((dto, endsAt) => endsAt is null || dto.StartsAt < endsAt)

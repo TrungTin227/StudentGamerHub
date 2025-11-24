@@ -57,10 +57,10 @@ public sealed class EventService : IEventService
             return Result<Guid>.Failure(validation.Error);
         }
 
-        var normalizedPriceCents = req.PriceCents;
-        if (normalizedPriceCents <= 0)
+        var normalizedPriceCents = req.PriceCents ?? 0;
+        if (normalizedPriceCents < 0)
         {
-            return Result<Guid>.Failure(new Error(Error.Codes.Validation, "PriceCents must be greater than zero."));
+            return Result<Guid>.Failure(new Error(Error.Codes.Validation, "PriceCents cannot be negative."));
         }
 
         var entity = new Event
@@ -174,7 +174,7 @@ public sealed class EventService : IEventService
 
     private readonly record struct MembershipEventPolicy(long EscrowMinCents, decimal PlatformFeeRate, GatewayFeePolicy GatewayFeePolicy);
 
-    public async Task<Result> OpenAsync(Guid organizerId, Guid eventId, CancellationToken ct = default)
+    public async Task<Result> OpenAsync(Guid currentUserId, Guid eventId, bool isAdmin, CancellationToken ct = default)
     {
         return await _uow.ExecuteTransactionAsync(async innerCt =>
         {
@@ -186,9 +186,10 @@ public sealed class EventService : IEventService
                 return Result.Failure(new Error(Error.Codes.NotFound, "Event not found."));
             }
 
-            if (ev.OrganizerId != organizerId)
+            // Allow if user is organizer OR admin
+            if (ev.OrganizerId != currentUserId && !isAdmin)
             {
-                return Result.Failure(new Error(Error.Codes.Forbidden, "Only the organizer can open this event."));
+                return Result.Failure(new Error(Error.Codes.Forbidden, "Only the organizer or an admin can open this event."));
             }
 
             if (ev.Status != EventStatus.Draft)
@@ -205,7 +206,7 @@ public sealed class EventService : IEventService
                     EventId = eventId,
                     AmountHoldCents = 0,
                     Status = EscrowStatus.Held,
-                    CreatedBy = organizerId,
+                    CreatedBy = currentUserId,
                 };
 
                 await _escrowRepository.UpsertAsync(escrow, innerCt).ConfigureAwait(false);
@@ -223,7 +224,7 @@ public sealed class EventService : IEventService
             }
 
             ev.Status = EventStatus.Open;
-            ev.UpdatedBy = organizerId;
+            ev.UpdatedBy = currentUserId;
             ev.UpdatedAtUtc = DateTime.UtcNow;
 
             await _eventCommandRepository.UpdateAsync(ev, innerCt).ConfigureAwait(false);
@@ -268,9 +269,10 @@ public sealed class EventService : IEventService
             {
                 var wallet = await _walletRepository.EnsureAsync(reg.UserId, innerCt).ConfigureAwait(false);
 
-                if (ev.PriceCents > 0)
+                var refundAmount = ev.PriceCents ?? 0;
+                if (refundAmount > 0)
                 {
-                    var credited = await _walletRepository.AdjustBalanceAsync(reg.UserId, ev.PriceCents, innerCt).ConfigureAwait(false);
+                    var credited = await _walletRepository.AdjustBalanceAsync(reg.UserId, refundAmount, innerCt).ConfigureAwait(false);
                     if (!credited)
                     {
                         return Result.Failure(new Error(Error.Codes.Unexpected, "Failed to refund attendee wallet."));
@@ -282,7 +284,7 @@ public sealed class EventService : IEventService
                     Id = Guid.NewGuid(),
                     WalletId = wallet.Id,
                     EventId = ev.Id,
-                    AmountCents = ev.PriceCents,
+                    AmountCents = refundAmount,
                     Direction = TransactionDirection.In,
                     Method = TransactionMethod.Wallet,
                     Status = TransactionStatus.Succeeded,
