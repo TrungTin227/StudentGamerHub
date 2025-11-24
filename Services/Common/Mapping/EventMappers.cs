@@ -49,15 +49,18 @@ public static class EventMappers
         if (ev.Status == EventStatus.Canceled || ev.Status == EventStatus.Completed)
             return "Closed";
 
-        if (ev.Status == EventStatus.Open && nowUtc >= ev.StartsAt)
+        if (ev.Status == EventStatus.Draft)
+            return "Upcoming";
+
+        if (nowUtc < ev.StartsAt)
+            return "Upcoming";
+
+        if (ev.Status == EventStatus.Open)
         {
             if (ev.EndsAt.HasValue && nowUtc >= ev.EndsAt.Value)
                 return "Closed";
             return "Opened";
         }
-
-        if (nowUtc < ev.StartsAt)
-            return "Upcoming";
 
         return "Closed";
     }
