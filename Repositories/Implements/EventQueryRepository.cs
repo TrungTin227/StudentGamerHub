@@ -154,4 +154,20 @@ public sealed class EventQueryRepository : IEventQueryRepository
 
         return (items, total);
     }
+
+    public async Task<Dictionary<Guid, string?>> GetOrganizerNamesByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
+    {
+        var organizerNames = await _context.Events
+            .AsNoTracking()
+            .Where(e => eventIds.Contains(e.Id) && !e.IsDeleted)
+            .Join(
+                _context.Users.AsNoTracking(),
+                e => e.OrganizerId,
+                u => u.Id,
+                (e, u) => new { e.Id, OrganizerName = u.FullName ?? u.UserName })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return organizerNames.ToDictionary(x => x.Id, x => x.OrganizerName);
+    }
 }

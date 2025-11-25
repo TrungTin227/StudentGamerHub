@@ -3,6 +3,7 @@ namespace DTOs.Events;
 public sealed record EventDetailDto(
     Guid Id,
     Guid OrganizerId,
+    string? OrganizerName,
     Guid? CommunityId,
     string Title,
     string? Description,

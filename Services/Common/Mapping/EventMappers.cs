@@ -8,7 +8,8 @@ public static class EventMappers
         bool isOrganizer,
         EventRegistration? myRegistration,
         int registeredCount,
-        int confirmedCount)
+        int confirmedCount,
+        string? organizerName)
     {
         ArgumentNullException.ThrowIfNull(ev);
 
@@ -19,6 +20,7 @@ public static class EventMappers
         return new EventDetailDto(
             Id: ev.Id,
             OrganizerId: ev.OrganizerId,
+            OrganizerName: organizerName,
             CommunityId: ev.CommunityId,
             Title: ev.Title,
             Description: ev.Description,

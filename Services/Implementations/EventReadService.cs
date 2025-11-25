@@ -58,8 +58,11 @@ public sealed class EventReadService : IEventReadService
 
         var registeredCount = await _eventQueryRepository.CountPendingOrConfirmedAsync(eventId, ct).ConfigureAwait(false);
         var confirmedCount = await _eventQueryRepository.CountConfirmedAsync(eventId, ct).ConfigureAwait(false);
+        
+        var organizerNames = await _eventQueryRepository.GetOrganizerNamesByEventIdsAsync(new[] { eventId }, ct).ConfigureAwait(false);
+        organizerNames.TryGetValue(eventId, out var organizerName);
 
-        var dto = ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg, registeredCount, confirmedCount);
+        var dto = ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg, registeredCount, confirmedCount, organizerName);
 
         // Cache for 5 minutes
         await _cache.SetAsync(cacheKey, dto, EventCacheTtl, ct).ConfigureAwait(false);
@@ -170,6 +173,7 @@ public sealed class EventReadService : IEventReadService
 
         var registeredCounts = await _registrationQueryRepository.GetRegisteredCountsByEventIdsAsync(eventIds, ct).ConfigureAwait(false);
         var confirmedCounts = await _registrationQueryRepository.GetConfirmedCountsByEventIdsAsync(eventIds, ct).ConfigureAwait(false);
+        var organizerNames = await _eventQueryRepository.GetOrganizerNamesByEventIdsAsync(eventIds, ct).ConfigureAwait(false);
 
         var results = new List<EventDetailDto>(events.Count);
         foreach (var ev in events)
@@ -178,8 +182,9 @@ public sealed class EventReadService : IEventReadService
             registrations.TryGetValue(ev.Id, out var myReg);
             registeredCounts.TryGetValue(ev.Id, out var registeredCount);
             confirmedCounts.TryGetValue(ev.Id, out var confirmedCount);
+            organizerNames.TryGetValue(ev.Id, out var organizerName);
             
-            results.Add(ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg, registeredCount, confirmedCount));
+            results.Add(ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg, registeredCount, confirmedCount, organizerName));
         }
 
         return results;

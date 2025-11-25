@@ -145,6 +145,7 @@ public sealed class DashboardService : IDashboardService
         }
 
         var eventIds = events.Select(e => e.Id).ToList();
+        
         var registeredCounts = await _db.EventRegistrations
             .AsNoTracking()
             .Where(r => eventIds.Contains(r.EventId))
@@ -166,16 +167,22 @@ public sealed class DashboardService : IDashboardService
             .ToDictionaryAsync(x => x.EventId, x => x.Count, ct)
             .ConfigureAwait(false);
 
+        var organizerNames = await _eventQueries
+            .GetOrganizerNamesByEventIdsAsync(eventIds, ct)
+            .ConfigureAwait(false);
+
         var nowUtc = _time.GetUtcNow().UtcDateTime;
 
         return events.Select(e =>
         {
             registeredCounts.TryGetValue(e.Id, out var registeredCount);
             confirmedCounts.TryGetValue(e.Id, out var confirmedCount);
+            organizerNames.TryGetValue(e.Id, out var organizerName);
 
             return new EventBriefDto(
                 Id: e.Id,
                 Title: e.Title,
+                OrganizerName: organizerName,
                 StartsAt: e.StartsAt,
                 EndsAt: e.EndsAt,
                 Location: e.Location,

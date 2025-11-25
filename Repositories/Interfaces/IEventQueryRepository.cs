@@ -18,4 +18,5 @@ public interface IEventQueryRepository
         int pageSize,
         bool sortAscByStartsAt,
         CancellationToken ct = default);
+    Task<Dictionary<Guid, string?>> GetOrganizerNamesByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default);
 }
