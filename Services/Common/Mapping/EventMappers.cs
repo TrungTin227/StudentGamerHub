@@ -6,7 +6,9 @@ public static class EventMappers
         this Event ev,
         Escrow? escrow,
         bool isOrganizer,
-        EventRegistration? myRegistration)
+        EventRegistration? myRegistration,
+        int registeredCount,
+        int confirmedCount)
     {
         ArgumentNullException.ThrowIfNull(ev);
 
@@ -36,6 +38,8 @@ public static class EventMappers
             IsOrganizer: isOrganizer,
             MyRegistrationId: myRegistration?.Id,
             MyRegistrationStatus: myRegistration?.Status,
+            RegisteredCount: registeredCount,
+            ConfirmedCount: confirmedCount,
             CreatedAtUtc: ev.CreatedAtUtc,
             UpdatedAtUtc: ev.UpdatedAtUtc);
     }

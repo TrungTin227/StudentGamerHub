@@ -17,4 +17,6 @@ public interface IRegistrationQueryRepository
         int page,
         int pageSize,
         CancellationToken ct = default);
+    Task<Dictionary<Guid, int>> GetRegisteredCountsByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default);
+    Task<Dictionary<Guid, int>> GetConfirmedCountsByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default);
 }

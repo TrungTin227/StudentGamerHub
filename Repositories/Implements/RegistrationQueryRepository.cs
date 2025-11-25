@@ -122,4 +122,35 @@ public sealed class RegistrationQueryRepository : IRegistrationQueryRepository
 
         return (items.Select(x => ((EventRegistration Reg, Event Ev))(x.Registration, x.Event)).ToList(), total);
     }
+
+    public async Task<Dictionary<Guid, int>> GetRegisteredCountsByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
+    {
+        var counts = await _context.EventRegistrations
+            .AsNoTracking()
+            .Where(r => eventIds.Contains(r.EventId))
+            .Where(r => r.Status == EventRegistrationStatus.Pending ||
+                        r.Status == EventRegistrationStatus.Confirmed ||
+                        r.Status == EventRegistrationStatus.CheckedIn)
+            .GroupBy(r => r.EventId)
+            .Select(g => new { EventId = g.Key, Count = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return counts.ToDictionary(c => c.EventId, c => c.Count);
+    }
+
+    public async Task<Dictionary<Guid, int>> GetConfirmedCountsByEventIdsAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
+    {
+        var counts = await _context.EventRegistrations
+            .AsNoTracking()
+            .Where(r => eventIds.Contains(r.EventId))
+            .Where(r => r.Status == EventRegistrationStatus.Confirmed ||
+                        r.Status == EventRegistrationStatus.CheckedIn)
+            .GroupBy(r => r.EventId)
+            .Select(g => new { EventId = g.Key, Count = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return counts.ToDictionary(c => c.EventId, c => c.Count);
+    }
 }

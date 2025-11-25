@@ -13,11 +13,13 @@ public sealed class EventsController : ControllerBase
 
     private readonly IEventService _eventService;
     private readonly IEventReadService _eventReadService;
+    private readonly ICommunityService _communityService;
 
-    public EventsController(IEventService eventService, IEventReadService eventReadService)
+    public EventsController(IEventService eventService, IEventReadService eventReadService, ICommunityService communityService)
     {
         _eventService = eventService ?? throw new ArgumentNullException(nameof(eventService));
         _eventReadService = eventReadService ?? throw new ArgumentNullException(nameof(eventReadService));
+        _communityService = communityService ?? throw new ArgumentNullException(nameof(communityService));
     }
 
     [HttpPost]
@@ -163,6 +165,39 @@ public sealed class EventsController : ControllerBase
         return this.ToActionResult(result, v => v, StatusCodes.Status200OK);
     }
 
+    [HttpGet("{eventId:guid}/community")]
+    [AllowAnonymous]
+    [EnableRateLimiting("ReadsLight")]
+    [ProducesResponseType(typeof(CommunityDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> GetCommunityByEventId(Guid eventId, CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+
+        var eventResult = await _eventReadService
+            .GetByIdAsync(currentUserId ?? Guid.Empty, eventId, ct)
+            .ConfigureAwait(false);
+
+        if (!eventResult.IsSuccess)
+        {
+            return this.ToActionResult(Result<CommunityDetailDto>.Failure(eventResult.Error!));
+        }
+
+        var eventDetail = eventResult.Value;
+        if (!eventDetail.CommunityId.HasValue)
+        {
+            return this.ToActionResult(Result<CommunityDetailDto>.Failure(
+                new Error(Error.Codes.NotFound, "Event is not associated with any community.")));
+        }
+
+        var communityResult = await _communityService
+            .GetByIdAsync(eventDetail.CommunityId.Value, currentUserId, ct)
+            .ConfigureAwait(false);
+
+        return this.ToActionResult(communityResult, v => v, StatusCodes.Status200OK);
+    }
 
     [HttpGet]
     [EnableRateLimiting("ReadsHeavy")]

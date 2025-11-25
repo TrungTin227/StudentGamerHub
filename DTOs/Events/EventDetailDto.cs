@@ -22,5 +22,7 @@ public sealed record EventDetailDto(
     bool IsOrganizer,
     Guid? MyRegistrationId,
     EventRegistrationStatus? MyRegistrationStatus,
+    int RegisteredCount,
+    int ConfirmedCount,
     DateTime CreatedAtUtc,
     DateTime? UpdatedAtUtc);

@@ -56,7 +56,10 @@ public sealed class EventReadService : IEventReadService
             myReg = await _registrationQueryRepository.GetByEventAndUserAsync(eventId, currentUserId, ct).ConfigureAwait(false);
         }
 
-        var dto = ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg);
+        var registeredCount = await _eventQueryRepository.CountPendingOrConfirmedAsync(eventId, ct).ConfigureAwait(false);
+        var confirmedCount = await _eventQueryRepository.CountConfirmedAsync(eventId, ct).ConfigureAwait(false);
+
+        var dto = ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg, registeredCount, confirmedCount);
 
         // Cache for 5 minutes
         await _cache.SetAsync(cacheKey, dto, EventCacheTtl, ct).ConfigureAwait(false);
@@ -165,12 +168,18 @@ public sealed class EventReadService : IEventReadService
             registrations = new Dictionary<Guid, EventRegistration>();
         }
 
+        var registeredCounts = await _registrationQueryRepository.GetRegisteredCountsByEventIdsAsync(eventIds, ct).ConfigureAwait(false);
+        var confirmedCounts = await _registrationQueryRepository.GetConfirmedCountsByEventIdsAsync(eventIds, ct).ConfigureAwait(false);
+
         var results = new List<EventDetailDto>(events.Count);
         foreach (var ev in events)
         {
             escrows.TryGetValue(ev.Id, out var escrow);
             registrations.TryGetValue(ev.Id, out var myReg);
-            results.Add(ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg));
+            registeredCounts.TryGetValue(ev.Id, out var registeredCount);
+            confirmedCounts.TryGetValue(ev.Id, out var confirmedCount);
+            
+            results.Add(ev.ToDetailDto(escrow, ev.OrganizerId == currentUserId, myReg, registeredCount, confirmedCount));
         }
 
         return results;

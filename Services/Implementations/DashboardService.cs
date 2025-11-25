@@ -139,17 +139,51 @@ public sealed class DashboardService : IDashboardService
             .GetEventsStartingInRangeUtcAsync(startUtc, endUtc, ct)
             .ConfigureAwait(false);
 
+        if (events.Count == 0)
+        {
+            return Array.Empty<EventBriefDto>();
+        }
+
+        var eventIds = events.Select(e => e.Id).ToList();
+        var registeredCounts = await _db.EventRegistrations
+            .AsNoTracking()
+            .Where(r => eventIds.Contains(r.EventId))
+            .Where(r => r.Status == EventRegistrationStatus.Pending ||
+                        r.Status == EventRegistrationStatus.Confirmed ||
+                        r.Status == EventRegistrationStatus.CheckedIn)
+            .GroupBy(r => r.EventId)
+            .Select(g => new { EventId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.EventId, x => x.Count, ct)
+            .ConfigureAwait(false);
+
+        var confirmedCounts = await _db.EventRegistrations
+            .AsNoTracking()
+            .Where(r => eventIds.Contains(r.EventId))
+            .Where(r => r.Status == EventRegistrationStatus.Confirmed ||
+                        r.Status == EventRegistrationStatus.CheckedIn)
+            .GroupBy(r => r.EventId)
+            .Select(g => new { EventId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.EventId, x => x.Count, ct)
+            .ConfigureAwait(false);
+
         var nowUtc = _time.GetUtcNow().UtcDateTime;
 
-        return events.Select(e => new EventBriefDto(
+        return events.Select(e =>
+        {
+            registeredCounts.TryGetValue(e.Id, out var registeredCount);
+            confirmedCounts.TryGetValue(e.Id, out var confirmedCount);
+
+            return new EventBriefDto(
                 Id: e.Id,
                 Title: e.Title,
                 StartsAt: e.StartsAt,
                 EndsAt: e.EndsAt,
                 Location: e.Location,
                 Mode: e.Mode.ToString(),
-                Status: DetermineEventStatus(e, nowUtc)))
-            .ToArray();
+                Status: DetermineEventStatus(e, nowUtc),
+                RegisteredCount: registeredCount,
+                ConfirmedCount: confirmedCount);
+        }).ToArray();
     }
 
     /// <summary>

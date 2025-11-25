@@ -10,5 +10,7 @@ public sealed record EventBriefDto(
     DateTime? EndsAt,
     string? Location,
     string Mode,
-    string Status
+    string Status,
+    int RegisteredCount,
+    int ConfirmedCount
 );
