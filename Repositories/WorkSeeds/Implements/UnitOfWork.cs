@@ -65,6 +65,11 @@ namespace Repositories.WorkSeeds.Implements
             }
         }
 
+        public void ClearChangeTracker()
+        {
+            _context.ChangeTracker.Clear();
+        }
+
         // ---- helpers -------------------------------------------------
 
         private void EnsureNoActiveTransaction()

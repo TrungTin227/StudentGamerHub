@@ -68,16 +68,16 @@ public sealed class RoomQueryRepository : IRoomQueryRepository
                 r.Capacity,
                 r.MembersCount,
                 _context.RoomMembers
-                    .Where(rm => rm.RoomId == r.Id && rm.Role == RoomRole.Owner)
+                    .Where(rm => rm.RoomId == r.Id && !rm.IsDeleted && rm.Role == RoomRole.Owner)
                     .Select(rm => rm.UserId)
                     .FirstOrDefault(),
                 currentUserId.HasValue && _context.RoomMembers
-                    .Any(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved),
+                    .Any(rm => rm.RoomId == r.Id && !rm.IsDeleted && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved),
                 currentUserId.HasValue && _context.RoomMembers
-                    .Any(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved && rm.Role == RoomRole.Owner),
+                    .Any(rm => rm.RoomId == r.Id && !rm.IsDeleted && rm.UserId == currentUserId.Value && rm.Status == RoomMemberStatus.Approved && rm.Role == RoomRole.Owner),
                 currentUserId.HasValue
                     ? _context.RoomMembers
-                        .Where(rm => rm.RoomId == r.Id && rm.UserId == currentUserId.Value)
+                        .Where(rm => rm.RoomId == r.Id && !rm.IsDeleted && rm.UserId == currentUserId.Value)
                         .Select(rm => (RoomMemberStatus?)rm.Status)
                         .FirstOrDefault()
                     : null,

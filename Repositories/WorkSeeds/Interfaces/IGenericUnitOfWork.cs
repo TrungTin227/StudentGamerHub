@@ -21,5 +21,11 @@ namespace Repositories.WorkSeeds.Interfaces
         Task RollbackTransactionAsync(CancellationToken cancellationToken = default);
 
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Clears the EF Core change tracker to force fresh queries from database.
+        /// Useful after transactions to ensure subsequent queries return updated data.
+        /// </summary>
+        void ClearChangeTracker();
     }
 }

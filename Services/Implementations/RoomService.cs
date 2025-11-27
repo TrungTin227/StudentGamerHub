@@ -477,6 +477,10 @@ public sealed class RoomService : IRoomService
             return Result<RoomDetailDto>.Failure(joinResult.Error!);
         }
 
+        // Clear EF Core change tracker to force fresh query from database
+        // This ensures IsMember/IsOwner/MembershipStatus reflect the newly committed membership
+        _uow.ClearChangeTracker();
+
         var updatedDetail = await _roomQuery.GetDetailsAsync(roomId, currentUserId, ct).ConfigureAwait(false);
         if (updatedDetail is null)
         {
