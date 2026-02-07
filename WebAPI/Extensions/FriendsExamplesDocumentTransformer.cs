@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.OpenApi;
-using Microsoft.OpenApi.Any;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using System.Globalization;
+using System.Net.Http;
+using System.Text.Json.Nodes;
 
 namespace WebAPI.Extensions
 {
@@ -68,7 +69,7 @@ namespace WebAPI.Extensions
                 return;
             }
 
-            if (!pathItem.Operations.TryGetValue(OperationType.Get, out var operation))
+            if (!pathItem.Operations.TryGetValue(HttpMethod.Get, out var operation))
             {
                 return;
             }
@@ -77,7 +78,7 @@ namespace WebAPI.Extensions
             {
                 foreach (var mediaType in okResponse.Content.Values)
                 {
-                    mediaType.Examples ??= new Dictionary<string, OpenApiExample>(StringComparer.Ordinal);
+                    mediaType.Examples = mediaType.Examples ?? new Dictionary<string, IOpenApiExample>(StringComparer.Ordinal);
                     mediaType.Examples[SuccessExampleKey] = BuildFriendListExample();
                     mediaType.Examples[EmptyListExampleKey] = BuildEmptyFriendListExample();
                 }
@@ -122,7 +123,7 @@ namespace WebAPI.Extensions
         {
             foreach (var mediaType in content.Values)
             {
-                mediaType.Examples ??= new Dictionary<string, OpenApiExample>(StringComparer.Ordinal);
+                mediaType.Examples = mediaType.Examples ?? new Dictionary<string, IOpenApiExample>(StringComparer.Ordinal);
                 mediaType.Examples[exampleKey] = example;
             }
         }
@@ -130,52 +131,52 @@ namespace WebAPI.Extensions
         private static OpenApiExample BuildFriendListExample() => new()
         {
             Summary = "Successful friends list with data",
-            Value = new OpenApiObject
+            Value = new JsonObject
             {
-                ["Items"] = new OpenApiArray
+                ["Items"] = new JsonArray
                 {
-                    new OpenApiObject
+                    new JsonObject
                     {
-                        ["Id"] = new OpenApiString("11111111-1111-1111-1111-111111111111"),
-                        ["User"] = new OpenApiObject
+                        ["Id"] = "11111111-1111-1111-1111-111111111111",
+                        ["User"] = new JsonObject
                         {
-                            ["Id"] = new OpenApiString("22222222-2222-2222-2222-222222222222"),
-                            ["UserName"] = new OpenApiString("phoenix"),
-                            ["AvatarUrl"] = new OpenApiString("https://cdn.studentgamerhub.dev/avatars/phoenix.png")
+                            ["Id"] = "22222222-2222-2222-2222-222222222222",
+                            ["UserName"] = "phoenix",
+                            ["AvatarUrl"] = "https://cdn.studentgamerhub.dev/avatars/phoenix.png"
                         },
-                        ["BecameFriendsAtUtc"] = new OpenApiString("2024-05-12T08:15:30Z")
+                        ["BecameFriendsAtUtc"] = "2024-05-12T08:15:30Z"
                     },
-                    new OpenApiObject
+                    new JsonObject
                     {
-                        ["Id"] = new OpenApiString("33333333-3333-3333-3333-333333333333"),
-                        ["User"] = new OpenApiObject
+                        ["Id"] = "33333333-3333-3333-3333-333333333333",
+                        ["User"] = new JsonObject
                         {
-                            ["Id"] = new OpenApiString("44444444-4444-4444-4444-444444444444"),
-                            ["UserName"] = new OpenApiString("dragon"),
-                            ["AvatarUrl"] = new OpenApiString("https://cdn.studentgamerhub.dev/avatars/dragon.png")
+                            ["Id"] = "44444444-4444-4444-4444-444444444444",
+                            ["UserName"] = "dragon",
+                            ["AvatarUrl"] = "https://cdn.studentgamerhub.dev/avatars/dragon.png"
                         },
-                        ["BecameFriendsAtUtc"] = new OpenApiString("2024-06-20T14:22:15Z")
+                        ["BecameFriendsAtUtc"] = "2024-06-20T14:22:15Z"
                     }
                 },
-                ["NextCursor"] = new OpenApiString("YWJjMTIz"),
-                ["PrevCursor"] = new OpenApiNull(),
-                ["Size"] = new OpenApiInteger(20),
-                ["Sort"] = new OpenApiString("Id"),
-                ["Desc"] = new OpenApiBoolean(false)
+                ["NextCursor"] = "YWJjMTIz",
+                ["PrevCursor"] = null,
+                ["Size"] = 20,
+                ["Sort"] = "Id",
+                ["Desc"] = false
             }
         };
 
         private static OpenApiExample BuildEmptyFriendListExample() => new()
         {
             Summary = "Empty friends list",
-            Value = new OpenApiObject
+            Value = new JsonObject
             {
-                ["Items"] = new OpenApiArray(),
-                ["NextCursor"] = new OpenApiNull(),
-                ["PrevCursor"] = new OpenApiNull(),
-                ["Size"] = new OpenApiInteger(20),
-                ["Sort"] = new OpenApiString("Id"),
-                ["Desc"] = new OpenApiBoolean(false)
+                ["Items"] = new JsonArray(),
+                ["NextCursor"] = null,
+                ["PrevCursor"] = null,
+                ["Size"] = 20,
+                ["Sort"] = "Id",
+                ["Desc"] = false
             }
         };
 
@@ -224,15 +225,15 @@ namespace WebAPI.Extensions
             return new OpenApiExample
             {
                 Summary = $"{status} error",
-                Value = new OpenApiObject
+                Value = new JsonObject
                 {
-                    ["type"] = new OpenApiString(type),
-                    ["title"] = new OpenApiString(title),
-                    ["status"] = new OpenApiInteger(status),
-                    ["detail"] = new OpenApiString(detail),
-                    ["instance"] = new OpenApiString(instancePath),
-                    ["code"] = new OpenApiString(title),
-                    ["traceId"] = new OpenApiString("00-00000000000000000000000000000000-0000000000000000-00")
+                    ["type"] = type,
+                    ["title"] = title,
+                    ["status"] = status,
+                    ["detail"] = detail,
+                    ["instance"] = instancePath,
+                    ["code"] = title,
+                    ["traceId"] = "00-00000000000000000000000000000000-0000000000000000-00"
                 }
             };
         }

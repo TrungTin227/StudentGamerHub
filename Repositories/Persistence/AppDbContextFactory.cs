@@ -55,7 +55,6 @@ namespace Repositories.Persistence
                .UseNpgsql(connectionString, npgsql =>
                {
                    npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
-                   npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
                });
 
             if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
@@ -83,7 +82,7 @@ namespace Repositories.Persistence
             {
                 var provider = new PhysicalFileProvider(siblingPath);
                 builder.AddJsonFile(provider, "appsettings.json", optional: true, reloadOnChange: false);
-                
+
                 if (File.Exists(appsettingsDevPath))
                 {
                     builder.AddJsonFile(provider, $"appsettings.{env}.json", optional: true, reloadOnChange: false);
@@ -96,7 +95,7 @@ namespace Repositories.Persistence
             // Tìm file WebAPI.csproj trong thư mục WebAPI
             var webApiPath = Path.Combine(currentDir, "..", "WebAPI");
             var csprojPath = Path.Combine(webApiPath, "WebAPI.csproj");
-            
+
             if (File.Exists(csprojPath))
             {
                 return csprojPath;
@@ -112,14 +111,14 @@ namespace Repositories.Persistence
                 var content = File.ReadAllText(csprojPath);
                 var startTag = "<UserSecretsId>";
                 var endTag = "</UserSecretsId>";
-                
+
                 var startIndex = content.IndexOf(startTag);
                 if (startIndex < 0) return null;
-                
+
                 startIndex += startTag.Length;
                 var endIndex = content.IndexOf(endTag, startIndex);
                 if (endIndex < 0) return null;
-                
+
                 return content.Substring(startIndex, endIndex - startIndex).Trim();
             }
             catch

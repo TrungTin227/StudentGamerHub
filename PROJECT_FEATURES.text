@@ -1,0 +1,80 @@
+# TÀI LIỆU TÍNH NĂNG DỰ ÁN STUDENT GAMER HUB
+
+Dưới đây là danh sách các tính năng của dự án, được phân loại theo tính năng chính và các luồng phụ trợ.
+
+## 1. TÍNH NĂNG CHÍNH (MAIN FEATURES)
+
+### A. Quản lý người dùng & Xác thực (User Management & Authentication)
+*   **Đăng ký & Đăng nhập**: Hỗ trợ đăng ký tài khoản mới và đăng nhập hệ thống.
+*   **Google Authentication**: Đăng nhập nhanh thông qua tài khoản Google.
+*   **Quản lý hồ sơ (Profile)**: Cập nhật thông tin cá nhân, avatar, và thông tin sinh viên.
+
+### B. Cộng đồng & Xã hội (Community & Social)
+*   **Câu lạc bộ & Cộng đồng (Clubs & Communities)**:
+    *   Tạo và quản lý câu lạc bộ/cộng đồng game.
+    *   Tham gia và rời khỏi các câu lạc bộ.
+*   **Hệ thống bạn bè (Friends)**:
+    *   Gửi lời mời kết bạn.
+    *   Chấp nhận/Từ chối lời mời.
+    *   Danh sách bạn bè.
+*   **Tìm kiếm đồng đội (Teammate Finder)**:
+    *   Tìm kiếm người chơi cùng dựa trên Game, Trường Đại học, Kỹ năng (Casual, Competitive).
+    *   Lọc theo trạng thái Online.
+*   **Trò chuyện thời gian thực (Real-time Chat)**:
+    *   Chat trong phòng (Rooms).
+    *   Lịch sử tin nhắn (Chat History).
+    *   Tương tác thời gian thực qua SignalR.
+
+### C. Gaming & Sự kiện (Gaming & Events)
+*   **Quản lý Game**:
+    *   Danh sách các tựa game hỗ trợ.
+    *   Quản lý game yêu thích/đã chơi của người dùng (User Games).
+*   **Sự kiện (Events)**:
+    *   Tạo và quản lý sự kiện.
+    *   Xem danh sách sự kiện sắp diễn ra.
+*   **Đăng ký tham gia (Registrations)**:
+    *   Người dùng đăng ký tham gia vào các sự kiện cụ thể.
+
+### D. Gamification & Tương tác
+*   **Hệ thống nhiệm vụ (Quests)**:
+    *   Danh sách nhiệm vụ hàng ngày (Daily Quests).
+    *   Nhận thưởng (Points) khi hoàn thành nhiệm vụ.
+*   **Bảng điều khiển cá nhân (User Dashboard)**:
+    *   Thống kê hoạt động trong ngày.
+    *   Theo dõi điểm số, trạng thái nhiệm vụ và sự kiện trong ngày.
+
+### E. Kinh tế (Economy)
+*   **Ví điện tử (Wallet)**:
+    *   Quản lý số dư ví ảo.
+    *   Lịch sử giao dịch (Transactions).
+*   **Thanh toán (Payments)**:
+    *   Tích hợp cổng thanh toán (Payment Intents).
+*   **Thành viên (Memberships)**:
+    *   Quản lý các gói thành viên hoặc trạng thái thành viên trong cộng đồng.
+
+---
+
+## 2. FLOW PHỤ & QUẢN TRỊ (SECONDARY FLOWS & ADMIN)
+
+### A. Quản trị hệ thống (Admin Dashboard)
+*   **Thống kê tổng quan**:
+    *   Thống kê doanh thu (Revenue Stats).
+    *   Thống kê người dùng (User Stats).
+    *   Thống kê câu lạc bộ & cộng đồng (Club & Community Stats).
+    *   Thống kê game & vai trò (Game & Role Stats).
+*   **Quản lý giao dịch**: Xem và quản lý các giao dịch thanh toán của hệ thống.
+
+### B. Hỗ trợ & Kiểm duyệt (Support & Moderation)
+*   **Báo cáo vi phạm (Abuse Reports)**:
+    *   Người dùng báo cáo nội dung hoặc hành vi xấu.
+    *   Quy trình xử lý báo cáo.
+*   **Báo cáo lỗi (Bug Reports)**:
+    *   Người dùng gửi báo cáo lỗi hệ thống.
+    *   Quản lý trạng thái xử lý lỗi.
+
+### C. Tiện ích hệ thống (System Utilities)
+*   **Trạng thái hiện diện (Presence)**:
+    *   Theo dõi trạng thái Online/Offline của người dùng theo thời gian thực.
+*   **Phân quyền (Roles)**:
+    *   Quản lý vai trò và quyền hạn trong hệ thống (RBAC).
+k

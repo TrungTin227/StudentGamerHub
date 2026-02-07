@@ -41,7 +41,7 @@ namespace Repositories.DependencyInjection
                     options.UseNpgsql(connStr, npgsql =>
                     {
                         npgsql.MigrationsAssembly(typeof(AppDbContext).Assembly.FullName);
-                        npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(5), null);
+                        npgsql.MaxBatchSize(1);  // Supavisor proxy disconnects on multi-statement batches
                     })
                 );
             }
@@ -107,7 +107,10 @@ namespace Repositories.DependencyInjection
             services.AddScoped<IUserGameRepository, UserGameRepository>();
             services.AddScoped<IAppSeeder, AppSeeder>();
 
-            // 6) Hosted seeding
+            // 6) Seed options binding
+            services.Configure<SeedOptions>(configuration.GetSection("Seed"));
+
+            // 7) Hosted seeding
             services.AddHostedService<DbInitializerHostedService>();
 
             return services;
